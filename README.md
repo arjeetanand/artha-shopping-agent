@@ -151,7 +151,7 @@ KOKORO_DEVICE=auto
 6. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
 7. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, and evidence, and excludes products with a known constraint failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
 8. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
-9. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
+9. **Order service** persists an explicitly confirmed sandbox order or a Razorpay-signature-verified payment record. Production delivery, cancellation, return, and refund updates remain disabled until a merchant adapter/webhook is configured.
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
 
@@ -170,7 +170,7 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `GET /api/auth/google/start` | Start Google OAuth with PKCE |
 | `GET /api/auth/google/callback` | Complete Google OAuth and create the session |
 | `POST /api/auth/logout` | End the local session |
-| `POST /api/agent/search` | Run the brief → search → evidence → analysis → decision workflow |
+| `POST /api/agent/search` | Run the seven-stage brief → location → search → evidence → research → analysis → decision workflow |
 | `POST /api/agent/search/jobs` | Start the same research workflow asynchronously and return a job id |
 | `GET /api/agent/search/jobs/:job_id` | Poll workflow stage progress and read the completed result |
 | `POST /api/agent/refine` | Apply a follow-up preference to an existing research set without repeating retailer discovery |
@@ -195,7 +195,7 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 - SQLite stores searches, OAuth state, hashed sessions, users, user-scoped purchase plans, and provider usage events in `backend/shoppinghelp.sqlite3`.
 - Usage events store counts and metadata only: provider, operation, model name, token counts when reported, character/byte counts for unmetered activity, runtime, status, and timestamp. Provider credentials are never written to the ledger.
 - No Google OAuth token, payment credential, or reference-image bytes are persisted.
-- The service cannot charge a card, submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions.
+- The service cannot submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions. Razorpay payment authorization is separate from retailer fulfillment.
 - In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
 - Razorpay is opt-in and server-only: the browser receives only the public key and hosted-checkout order metadata. The backend verifies `order_id|payment_id` with the secret before persisting a paid state; failed or replayed attempts do not create an order.
 - Orders created from a search are rehydrated from the server-side verified search result, so a modified browser payload cannot change the catalog price or quantity at checkout.

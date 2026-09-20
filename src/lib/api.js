@@ -36,11 +36,11 @@ export function runAgentSearch(payload) {
 
 export async function runAgentSearchAsync(payload, onProgress) {
   let job = await request('/agent/search/jobs', { method: 'POST', body: JSON.stringify(payload) });
-  for (let attempt = 0; attempt < 240; attempt += 1) {
+  for (let attempt = 0; attempt < 360; attempt += 1) {
     if (typeof onProgress === 'function') onProgress(job);
     if (job.status === 'complete' && job.result) return job.result;
     if (job.status === 'failed') throw new Error(job.error || 'The research job could not complete.');
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
     job = await request(`/agent/search/jobs/${encodeURIComponent(job.job_id)}`);
   }
   throw new Error('Research is taking longer than expected. Please retry from the current brief.');
