@@ -576,6 +576,18 @@ function LocationContext({ intent }) {
   );
 }
 
+function ClarificationNote({ intent }) {
+  const questions = Array.isArray(intent?.clarifications) ? intent.clarifications : [];
+  if (!questions.length) return null;
+  return (
+    <aside className="clarification-note" aria-label="Details Artha would like to confirm">
+      <span className="section-kicker">One detail to sharpen this edit</span>
+      <strong>{questions[0].question}</strong>
+      <small>Artha used a transparent working default for this pass. Reply in the same brief to refine the shortlist without repeating research.</small>
+    </aside>
+  );
+}
+
 function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
@@ -1056,6 +1068,7 @@ function DiscoverView({
         />
 
         <section ref={resultsRef} className="results-section" aria-labelledby="results-heading">
+          <ClarificationNote intent={result.intent} />
           <div className="results-toolbar">
             <div className="results-heading">
             <h2 id="results-heading">{result.products.length ? 'A considered edit for you' : 'Build your live shortlist'}</h2>
@@ -2135,7 +2148,7 @@ export default function App() {
         if (!body.products?.length) throw new Error('No retailer sources were found for that brief.');
         setResult(body);
         setSelectedIds(
-          body.selected_product_ids?.length
+          Array.isArray(body.selected_product_ids)
             ? body.selected_product_ids
             : body.products.slice(0, 3).map((product) => product.id),
         );

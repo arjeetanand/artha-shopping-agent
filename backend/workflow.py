@@ -149,6 +149,25 @@ def _brief_list(value: Any, fallback: list[str]) -> list[str]:
     return fallback
 
 
+def _clarification_questions(
+    text: str,
+    brief: dict[str, Any],
+    *,
+    budget_explicit: bool = False,
+    location_explicit: bool = False,
+    delivery_explicit: bool = False,
+) -> list[dict[str, str]]:
+    """Surface missing decision constraints without blocking a useful first pass."""
+    questions: list[dict[str, str]] = []
+    if not budget_explicit and _parse_budget(text) is None:
+        questions.append({"key": "budget", "question": "What is the maximum you would like to spend?"})
+    if not location_explicit:
+        questions.append({"key": "location", "question": "Where should this be delivered?"})
+    if not delivery_explicit and _parse_days(text) is None:
+        questions.append({"key": "delivery", "question": "When do you need it by?"})
+    return questions
+
+
 class BriefAgent:
     name = "Brief agent"
 
@@ -161,8 +180,10 @@ class BriefAgent:
         image_name = str(reference_image["name"] if reference_image else payload.get("image_name") or "").strip()
         if setting("SHOPPINGHELP_SEARCH_MODE", "live").lower() in {"fixture", "sandbox", "mock"}:
             lowered = text.lower()
-            budget = _parse_budget(text) or 18000
-            arrive_days = _parse_days(text) or 5
+            parsed_budget = _parse_budget(text)
+            parsed_days = _parse_days(text)
+            budget = parsed_budget or 18000
+            arrive_days = parsed_days or 5
             quantity = _parse_quantity(text)
             brand = _parse_brand(text)
             if "chair" in lowered:
@@ -198,6 +219,13 @@ class BriefAgent:
                 "post_url": payload.get("post_url") or None,
                 "extraction_source": "local fixture rules",
             }
+            brief["clarifications"] = _clarification_questions(
+                text,
+                brief,
+                budget_explicit=parsed_budget is not None,
+                location_explicit=bool(location_match or payload.get("location")),
+                delivery_explicit=parsed_days is not None,
+            )
             return brief, {"agent": self.name, "status": "complete", "detail": "Local fixture rules extracted price, place, delivery, and must-haves"}
         llm_brief, provider = self.model.extract_brief(text, reference_image)
         provider_status = self.model.status()
@@ -242,6 +270,13 @@ class BriefAgent:
             "post_url": payload.get("post_url") or None,
             "extraction_source": provider if llm_brief else "local rules",
         }
+        brief["clarifications"] = _clarification_questions(
+            text,
+            brief,
+            budget_explicit=source_budget > 0 or _parse_budget(text) is not None,
+            location_explicit=bool(source_location or payload.get("location")),
+            delivery_explicit=bool(source_arrive_by_days not in (None, "") or _parse_days(text) is not None),
+        )
         if llm_brief and reference_image:
             detail = f"{provider.title()} analyzed the brief and reference image"
         elif llm_brief:
@@ -781,6 +816,18 @@ def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, A
     brief["description"] = f"{brief.get('description') or ''}. Follow-up preference: {follow_up}".strip(". ")
     brief["follow_up"] = follow_up
     brief["extraction_source"] = f"{brief.get('extraction_source') or 'existing research'} + follow-up refinement"
+    existing_keys = {str(item.get("key")) for item in (brief.get("clarifications") or []) if isinstance(item, dict)}
+    if existing_keys:
+        answered = set()
+        if _parse_budget(follow_up) is not None:
+            answered.add("budget")
+        if re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to)\s+[a-z]|\bin\s+[a-z]", follow_up, flags=re.IGNORECASE):
+            answered.add("location")
+        if _parse_days(follow_up) is not None:
+            answered.add("delivery")
+        brief["clarifications"] = [
+            item for item in (brief.get("clarifications") or []) if str(item.get("key")) not in answered
+        ]
     return brief
 
 
@@ -804,7 +851,7 @@ def run_refinement(payload: dict[str, Any]) -> dict[str, Any]:
     }
     workflow = [follow_up_event, analysis_event, ranking_event]
     db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
-    selected_products = _default_selection(products)
+    selected_products = [] if brief.get("clarifications") else _default_selection(products)
     latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 5
     source = copy.deepcopy(payload.get("source")) if isinstance(payload.get("source"), dict) else {"mode": "refined"}
     source["refined"] = True
@@ -898,7 +945,7 @@ def run_search(payload: dict[str, Any], progress: Callable[[list[dict[str, Any]]
     emit()
     search_id = f"search-{uuid.uuid4().hex[:12]}"
     db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
-    selected_products = _default_selection(products)
+    selected_products = [] if brief.get("clarifications") else _default_selection(products)
     total = sum(_money(product.get("line_total")) or _money(product.get("total_price")) or _money(product.get("price")) for product in selected_products)
     latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 5
     return {

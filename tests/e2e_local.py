@@ -112,6 +112,31 @@ def main() -> None:
         assert any(product["delivery_fit"] is False for product in search["products"])
         assert search["summary"]["opportunity"]["extra"] == 189
 
+        status, sparse = request(
+            port,
+            "/api/agent/search",
+            method="POST",
+            payload={"text": "I need an office chair"},
+        )
+        assert status == 200, sparse
+        assert {item["key"] for item in sparse["intent"]["clarifications"]} == {"budget", "location", "delivery"}
+        assert sparse["selected_product_ids"] == []
+        assert sparse["summary"]["total"] == 0
+        status, sparse_refined = request(
+            port,
+            "/api/agent/refine",
+            method="POST",
+            payload={
+                "text": "under ₹12,000 delivered to Bangalore within 5 days",
+                "intent": sparse["intent"],
+                "products": sparse["products"],
+                "source": sparse["source"],
+            },
+        )
+        assert status == 200, sparse_refined
+        assert sparse_refined["intent"]["clarifications"] == []
+        assert sparse_refined["selected_product_ids"]
+
         status, queued = request(
             port,
             "/api/agent/search/jobs",
