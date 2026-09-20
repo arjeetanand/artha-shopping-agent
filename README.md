@@ -141,6 +141,9 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `GET /api/orders/:id` | Read one user-scoped order |
 | `POST /api/orders` | Create an explicitly confirmed local sandbox order during development |
 | `POST /api/orders/:id/cancel` | Cancel a cancellable sandbox order |
+| `POST /api/orders/:id/advance` | Advance a sandbox order through delivery statuses for local tracker testing |
+| `POST /api/orders/:id/return` | Record a sandbox return request after delivery |
+| `POST /api/orders/:id/refund` | Record a sandbox refund state after a return request |
 | `GET /api/usage?days=30&runtime=all` | View token totals, provider breakdowns, and recent activity; production requires Google sign-in |
 | `GET /api/voice/status` | Selected voice provider and availability |
 | `POST /api/voice/warm` | Warm the selected local Kokoro voice before playback |
@@ -154,4 +157,5 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 - The service cannot charge a card, submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions.
 - In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
 - Orders created from a search are rehydrated from the server-side verified search result, so a modified browser payload cannot change the catalog price or quantity at checkout.
+- The development tracker can advance through delivery, return, and refund states for QA; production status changes must come from merchant webhooks or a supported order API.
 - Live saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.

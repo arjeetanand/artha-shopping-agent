@@ -12,7 +12,9 @@ import {
 } from './data';
 import {
   beginGoogleSignIn,
+  advanceOrder,
   cancelOrder,
+  completeRefund,
   createOrder,
   createPlan,
   getHealth,
@@ -21,6 +23,7 @@ import {
   getSession,
   getUsage,
   getVoiceStatus,
+  requestReturn,
   runAgentSearch,
   signOut,
   speakText,
@@ -1413,7 +1416,7 @@ function OrderTracker({ order }) {
   );
 }
 
-function OrdersView({ user, orders, onDiscover, onCancel, onSignIn }) {
+function OrdersView({ user, orders, onDiscover, onCancel, onAdvance, onRequestReturn, onRefund, onSignIn }) {
   if (!user) {
     return (
       <div className="page-stack">
@@ -1452,9 +1455,20 @@ function OrdersView({ user, orders, onDiscover, onCancel, onSignIn }) {
                   <strong>{formatPrice(order.total)}</strong>
                   <small>{order.items?.length || 0} {order.items?.length === 1 ? 'item' : 'items'} · {order.notice}</small>
                 </div>
-                {order.status !== 'cancelled' && order.status !== 'delivered' ? (
-                  <button type="button" className="quiet-action" onClick={() => onCancel(order.id)}>Cancel order</button>
-                ) : null}
+                <div className="order-actions">
+                  {order.payment_provider === 'sandbox' && !['cancelled', 'delivered', 'return_requested', 'refunded'].includes(order.status) ? (
+                    <button type="button" className="quiet-action" onClick={() => onAdvance(order.id)}>Advance sandbox status</button>
+                  ) : null}
+                  {order.status !== 'cancelled' && !['delivered', 'return_requested', 'refunded'].includes(order.status) ? (
+                    <button type="button" className="quiet-action" onClick={() => onCancel(order.id)}>Cancel order</button>
+                  ) : null}
+                  {order.status === 'delivered' ? (
+                    <button type="button" className="quiet-action" onClick={() => onRequestReturn(order.id)}>Request return</button>
+                  ) : null}
+                  {order.status === 'return_requested' ? (
+                    <button type="button" className="quiet-action" onClick={() => onRefund(order.id)}>Record sandbox refund</button>
+                  ) : null}
+                </div>
               </div>
               <OrderTracker order={order} />
             </article>
@@ -1879,7 +1893,11 @@ export default function App() {
   }, [activeView, refreshPlans]);
 
   useEffect(() => {
-    if (activeView === 'orders') refreshOrders().catch((error) => setToast(error.message));
+    if (activeView !== 'orders') return undefined;
+    const loadOrders = () => refreshOrders().catch((error) => setToast(error.message));
+    loadOrders();
+    const timer = window.setInterval(loadOrders, 30_000);
+    return () => window.clearInterval(timer);
   }, [activeView, refreshOrders]);
 
   useEffect(() => {
@@ -2043,6 +2061,31 @@ export default function App() {
     }
   }, []);
 
+  const updateOrderFromAction = useCallback(async (action, orderId, successMessage) => {
+    try {
+      const response = await action(orderId);
+      setOrders((current) => current.map((order) => (order.id === orderId ? response.order : order)));
+      setToast(successMessage(response.order));
+    } catch (error) {
+      setToast(error.message || 'The order could not be updated.');
+    }
+  }, []);
+
+  const handleAdvanceOrder = useCallback(
+    (orderId) => updateOrderFromAction(advanceOrder, orderId, (order) => `Sandbox tracker moved to ${order.status.replace(/_/g, ' ')}.`),
+    [updateOrderFromAction],
+  );
+
+  const handleRequestReturn = useCallback(
+    (orderId) => updateOrderFromAction(requestReturn, orderId, () => 'Sandbox return request recorded.'),
+    [updateOrderFromAction],
+  );
+
+  const handleRefund = useCallback(
+    (orderId) => updateOrderFromAction(completeRefund, orderId, () => 'Sandbox refund recorded locally.'),
+    [updateOrderFromAction],
+  );
+
   const stopSpeaking = useCallback(() => {
     audioRef.current?.pause();
     audioRef.current = null;
@@ -2185,6 +2228,9 @@ export default function App() {
         orders={orders}
         onDiscover={startNewSearch}
         onCancel={handleCancelOrder}
+        onAdvance={handleAdvanceOrder}
+        onRequestReturn={handleRequestReturn}
+        onRefund={handleRefund}
         onSignIn={() => startSignIn('/orders')}
       />
     ) : (

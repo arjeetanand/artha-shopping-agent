@@ -63,6 +63,18 @@ export function cancelOrder(orderId) {
   return request(`/orders/${encodeURIComponent(orderId)}/cancel`, { method: 'POST', body: JSON.stringify({}) });
 }
 
+export function advanceOrder(orderId) {
+  return request(`/orders/${encodeURIComponent(orderId)}/advance`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function requestReturn(orderId) {
+  return request(`/orders/${encodeURIComponent(orderId)}/return`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function completeRefund(orderId) {
+  return request(`/orders/${encodeURIComponent(orderId)}/refund`, { method: 'POST', body: JSON.stringify({}) });
+}
+
 export function getVoiceStatus() {
   return request('/voice/status');
 }

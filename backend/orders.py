@@ -20,6 +20,9 @@ class OrderError(ValueError):
     pass
 
 
+ORDER_STATUSES = ("confirmed", "preparing", "shipped", "out_for_delivery", "delivered")
+
+
 def _money(value: Any) -> int:
     try:
         return max(0, int(round(float(value or 0))))
@@ -53,12 +56,15 @@ def _safe_item(item: dict[str, Any]) -> dict[str, Any]:
 
 def _timeline(status: str, created_at: str, delivery_days: int) -> list[dict[str, Any]]:
     expected = date.today() + timedelta(days=max(delivery_days, 1))
+    progress_status = "delivered" if status in {"return_requested", "refunded"} else status
+    return_step = {"key": "return", "label": "Return / refund", "detail": "Return eligibility and refund status are handled by the retailer adapter.", "complete": status in {"return_requested", "refunded"}, "at": None}
     return [
-        {"key": "confirmed", "label": "Order confirmed", "detail": "Your selected items were recorded and the seller handoff is ready.", "complete": status not in {"cancelled"}, "at": created_at},
-        {"key": "preparing", "label": "Preparing", "detail": "The seller is preparing the order.", "complete": status in {"preparing", "shipped", "out_for_delivery", "delivered"}, "at": None},
-        {"key": "shipped", "label": "Shipped", "detail": "Tracking will appear when the seller confirms dispatch.", "complete": status in {"shipped", "out_for_delivery", "delivered"}, "at": None},
-        {"key": "out_for_delivery", "label": "Out for delivery", "detail": "Expected by the seller's delivery estimate.", "complete": status in {"out_for_delivery", "delivered"}, "at": None},
-        {"key": "delivered", "label": "Delivered", "detail": f"Expected by {expected.strftime('%a, %d %b')}.", "complete": status == "delivered", "at": None},
+        {"key": "confirmed", "label": "Order confirmed", "detail": "Your selected items were recorded and the seller handoff is ready.", "complete": progress_status != "cancelled", "at": created_at},
+        {"key": "preparing", "label": "Preparing", "detail": "The seller is preparing the order.", "complete": progress_status in {"preparing", "shipped", "out_for_delivery", "delivered"}, "at": None},
+        {"key": "shipped", "label": "Shipped", "detail": "Tracking will appear when the seller confirms dispatch.", "complete": progress_status in {"shipped", "out_for_delivery", "delivered"}, "at": None},
+        {"key": "out_for_delivery", "label": "Out for delivery", "detail": "Expected by the seller's delivery estimate.", "complete": progress_status in {"out_for_delivery", "delivered"}, "at": None},
+        {"key": "delivered", "label": "Delivered", "detail": f"Expected by {expected.strftime('%a, %d %b')}.", "complete": progress_status == "delivered", "at": None},
+        return_step,
     ]
 
 
@@ -140,4 +146,41 @@ def cancel_order(order_id: str, user_id: str) -> dict[str, Any]:
     order["updated_at"] = now_iso()
     order["timeline"] = [{**step, "complete": False} for step in order.get("timeline") or []]
     order["notice"] = "Order cancelled in the local purchase tracker. Confirm cancellation with the retailer when using a live merchant adapter."
+    return db.update_order(order)
+
+
+def advance_order(order_id: str, user_id: str) -> dict[str, Any]:
+    order = get_order(order_id, user_id)
+    status = order.get("status")
+    if status not in ORDER_STATUSES[:-1]:
+        raise OrderError("This order has no further sandbox delivery step.")
+    next_status = ORDER_STATUSES[ORDER_STATUSES.index(status) + 1]
+    order["status"] = next_status
+    order["updated_at"] = now_iso()
+    order["timeline"] = _timeline(next_status, order["created_at"], order.get("delivery_days") or 5)
+    order["notice"] = f"Sandbox tracker advanced to {next_status.replace('_', ' ')}. Live status requires a retailer webhook."
+    return db.update_order(order)
+
+
+def request_return(order_id: str, user_id: str) -> dict[str, Any]:
+    order = get_order(order_id, user_id)
+    if order.get("status") != "delivered":
+        raise OrderError("A return can be requested after the order is delivered.")
+    order["status"] = "return_requested"
+    order["refund_status"] = "pending"
+    order["updated_at"] = now_iso()
+    order["timeline"] = _timeline("return_requested", order["created_at"], order.get("delivery_days") or 5)
+    order["notice"] = "Sandbox return request recorded. No retailer return or refund has been submitted."
+    return db.update_order(order)
+
+
+def complete_refund(order_id: str, user_id: str) -> dict[str, Any]:
+    order = get_order(order_id, user_id)
+    if order.get("status") != "return_requested":
+        raise OrderError("Request a return before recording a sandbox refund.")
+    order["status"] = "refunded"
+    order["refund_status"] = "sandbox_refunded"
+    order["updated_at"] = now_iso()
+    order["timeline"] = _timeline("refunded", order["created_at"], order.get("delivery_days") or 5)
+    order["notice"] = "Sandbox refund recorded locally. No payment provider or retailer was contacted."
     return db.update_order(order)

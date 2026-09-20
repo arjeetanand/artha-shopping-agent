@@ -18,7 +18,7 @@ if __package__ in {None, ""}:
     from backend.usage import get_usage_summary, runtime_name
     from backend.voice import VoiceError, VoiceService
     from backend.workflow import create_purchase_plan, run_search
-    from backend.orders import OrderError, cancel_order, create_order, get_order, list_orders
+    from backend.orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
     from .clients import AnakinClient, BriefModel
@@ -27,7 +27,7 @@ else:
     from .usage import get_usage_summary, runtime_name
     from .voice import VoiceError, VoiceService
     from .workflow import create_purchase_plan, run_search
-    from .orders import OrderError, cancel_order, create_order, get_order, list_orders
+    from .orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -238,6 +238,27 @@ class Handler(BaseHTTPRequestHandler):
                 if not order_id:
                     raise ApiError("Order not found", 404)
                 self._send(200, {"order": cancel_order(order_id, user["id"])})
+                return
+            if path.startswith("/api/orders/") and path.endswith("/advance"):
+                user = self._require_user()
+                order_id = path.removeprefix("/api/orders/").removesuffix("/advance").strip("/")
+                if not order_id:
+                    raise ApiError("Order not found", 404)
+                self._send(200, {"order": advance_order(order_id, user["id"])})
+                return
+            if path.startswith("/api/orders/") and path.endswith("/return"):
+                user = self._require_user()
+                order_id = path.removeprefix("/api/orders/").removesuffix("/return").strip("/")
+                if not order_id:
+                    raise ApiError("Order not found", 404)
+                self._send(200, {"order": request_return(order_id, user["id"])})
+                return
+            if path.startswith("/api/orders/") and path.endswith("/refund"):
+                user = self._require_user()
+                order_id = path.removeprefix("/api/orders/").removesuffix("/refund").strip("/")
+                if not order_id:
+                    raise ApiError("Order not found", 404)
+                self._send(200, {"order": complete_refund(order_id, user["id"])})
                 return
             if path == "/api/auth/logout":
                 logout(self.headers.get("Cookie"))
