@@ -707,6 +707,34 @@ def _default_selection(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return chosen
 
 
+def _budget_opportunity(products: list[dict[str, Any]], brief: dict[str, Any]) -> dict[str, Any] | None:
+    """Surface a small, evidence-backed stretch without silently changing the plan."""
+    budget = max(_money(brief.get("budget")), 1)
+    candidates = [
+        product
+        for product in products
+        if product.get("budget_fit") is False
+        and product.get("delivery_fit") is not False
+        and product.get("stock_fit") is not False
+        and _money(product.get("line_total")) <= round(budget * 1.1)
+    ]
+    if not candidates:
+        return None
+    candidate = max(candidates, key=lambda product: (product.get("match_score") or 0, -(product.get("line_total") or 10**9)))
+    line_total = _money(candidate.get("line_total"))
+    extra = max(0, line_total - budget)
+    price_history = candidate.get("price_history") if isinstance(candidate.get("price_history"), dict) else {}
+    evidence = price_history.get("trend_label") or "delivery and stock still fit the brief"
+    return {
+        "product_id": str(candidate.get("id") or ""),
+        "name": str(candidate.get("name") or "Nearby fit")[:180],
+        "total": line_total,
+        "extra": extra,
+        "delivery_label": str(candidate.get("delivery_label") or "Delivery remains within the requested window")[:120],
+        "reason": f"{evidence}; the option scores {candidate.get('match_score') or 0}% against the brief",
+    }
+
+
 def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, Any]:
     brief = copy.deepcopy(previous)
     follow_up = str(text or "").strip()
@@ -782,6 +810,7 @@ def run_refinement(payload: dict[str, Any]) -> dict[str, Any]:
             "total": sum(_money(product.get("line_total")) or _money(product.get("total_price")) for product in selected_products),
             "item_count": len(selected_products),
             "delivery_label": f"All known deliveries arrive by {_date_label(latest_delivery)}" if latest_delivery else "Confirm delivery at retailer",
+            "opportunity": _budget_opportunity(products, brief),
         },
         "workflow": workflow,
         "source": source,
@@ -870,7 +899,7 @@ def run_search(payload: dict[str, Any], progress: Callable[[list[dict[str, Any]]
         "intent": brief,
         "products": products,
         "selected_product_ids": [product["id"] for product in selected_products],
-        "summary": {"total": total, "item_count": len(selected_products), "delivery_label": f"All known deliveries arrive by {_date_label(latest_delivery)}" if latest_delivery else "Confirm delivery at retailer"},
+        "summary": {"total": total, "item_count": len(selected_products), "delivery_label": f"All known deliveries arrive by {_date_label(latest_delivery)}" if latest_delivery else "Confirm delivery at retailer", "opportunity": _budget_opportunity(products, brief)},
         "workflow": workflow,
         "source": source_meta,
         "conversation": [{"role": "user", "text": brief["raw_text"]}],

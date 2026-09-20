@@ -108,6 +108,7 @@ def main() -> None:
         assert search["products"][0]["eligible"] is True
         assert search["products"][0]["line_total"] == 10490
         assert any(product["delivery_fit"] is False for product in search["products"])
+        assert search["summary"]["opportunity"]["extra"] == 189
 
         status, queued = request(
             port,

@@ -526,6 +526,20 @@ function ConversationTrail({ conversation }) {
   );
 }
 
+function BudgetOpportunity({ opportunity, product, onInspect }) {
+  if (!opportunity || !product) return null;
+  return (
+    <aside className="opportunity-note" aria-label="Budget stretch opportunity">
+      <div>
+        <span className="section-kicker">Worth a small stretch</span>
+        <strong>{sanitizeTitle(opportunity.name)} · {formatPrice(opportunity.extra)} over budget</strong>
+        <p>{opportunity.reason}. {opportunity.delivery_label}</p>
+      </div>
+      <button type="button" className="quiet-action" onClick={() => onInspect(product)}>Inspect evidence</button>
+    </aside>
+  );
+}
+
 function BriefSummary({ intent }) {
   const fields = [
     intent?.occasion ? `Occasion: ${intent.occasion}` : null,
@@ -999,6 +1013,11 @@ function DiscoverView({
           hasResults={result.products.length > 0}
         />
         <ConversationTrail conversation={result.conversation} />
+        <BudgetOpportunity
+          opportunity={result.summary?.opportunity}
+          product={result.products.find((item) => item.id === result.summary?.opportunity?.product_id)}
+          onInspect={onInspect}
+        />
 
         <section className="results-section" aria-labelledby="results-heading">
           <div className="results-toolbar">
@@ -2274,7 +2293,8 @@ export default function App() {
       setToast('Select at least one product before listening to an edit.');
       return;
     }
-    const text = `Your purchase plan includes ${selectedProducts.map((p) => sanitizeTitle(p.name)).join(', ')}. The current subtotal is ${formatPrice(selectedProducts.reduce((sum, p) => sum + productTotal(p), 0))}. ${result.summary?.delivery_label || 'Confirm delivery with each retailer.'}`;
+    const opportunityText = result.summary?.opportunity ? ` One nearby option is ${sanitizeTitle(result.summary.opportunity.name)} for ${formatPrice(result.summary.opportunity.extra)} more than the stated budget.` : '';
+    const text = `Your purchase plan includes ${selectedProducts.map((p) => sanitizeTitle(p.name)).join(', ')}. The current subtotal is ${formatPrice(selectedProducts.reduce((sum, p) => sum + productTotal(p), 0))}. ${result.summary?.delivery_label || 'Confirm delivery with each retailer.'}${opportunityText}`;
     try {
       setIsSpeaking(true);
       if (voice?.provider === 'browser') {
