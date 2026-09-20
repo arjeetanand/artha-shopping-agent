@@ -1,8 +1,25 @@
+# Environment variables & secrets
 .env
+.env.local
+.env.*.local
+
+# SQLite Databases & runtime files
 backend/*.sqlite3
 backend/*.sqlite3-shm
 backend/*.sqlite3-wal
+*.sqlite3
+
+# Python
 backend/__pycache__/
-dist/
-node_modules/
+__pycache__/
+*.pyc
 .venv/
+
+# Node & Build
+node_modules/
+dist/
+
+# OS & Agent metadata
+.DS_Store
+Thumbs.db
+.agents/
