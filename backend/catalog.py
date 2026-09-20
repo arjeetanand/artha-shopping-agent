@@ -32,6 +32,12 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
         "review_summary": "Strong support feedback with occasional complaints about armrest width.",
         "review_reliability": 0.86,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 132, "rating": 4.5, "signal": "Low duplication signal"},
+            {"name": "Independent discussion", "count": 24, "rating": 4.2, "signal": "Small but consistent sample"},
+        ],
+        "review_analysis": {"label": "Mostly consistent", "detail": "Ratings and written feedback point to the same lumbar-support trade-off."},
+        "price_history": {"low_90d": 9990, "median_90d": 10990, "high_90d": 12490, "trend_label": "Near its 90-day low"},
     },
     {
         "id": "fixture-chair-02",
@@ -53,6 +59,12 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
         "review_summary": "Comfortable for focused work; reviewers are split on assembly time.",
         "review_reliability": 0.81,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 87, "rating": 4.3, "signal": "Some repeated phrasing"},
+            {"name": "Independent discussion", "count": 13, "rating": 4.0, "signal": "Limited sample"},
+        ],
+        "review_analysis": {"label": "Mixed signals", "detail": "Comfort feedback is positive; assembly complaints are more variable."},
+        "price_history": {"low_90d": 11490, "median_90d": 12290, "high_90d": 13990, "trend_label": "Typical 90-day price"},
     },
     {
         "id": "fixture-chair-03",
@@ -74,6 +86,12 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
         "review_summary": "Good value, but delivery misses a five-day requirement.",
         "review_reliability": 0.9,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 204, "rating": 4.1, "signal": "Stable rating distribution"},
+            {"name": "Independent discussion", "count": 31, "rating": 4.0, "signal": "No obvious anomaly"},
+        ],
+        "review_analysis": {"label": "Strong signal", "detail": "Large, stable review sample supports the value claim."},
+        "price_history": {"low_90d": 6790, "median_90d": 7490, "high_90d": 8290, "trend_label": "At a 90-day low"},
     },
     {
         "id": "fixture-chair-04",
@@ -95,6 +113,12 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
         "review_summary": "Premium comfort, but exceeds the stated budget.",
         "review_reliability": 0.84,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 63, "rating": 4.6, "signal": "Low duplication signal"},
+            {"name": "Independent discussion", "count": 8, "rating": 4.4, "signal": "Limited sample"},
+        ],
+        "review_analysis": {"label": "Mostly consistent", "detail": "Comfort claims are consistent, but the premium is not justified by the current budget."},
+        "price_history": {"low_90d": 14490, "median_90d": 15990, "high_90d": 17990, "trend_label": "Below its 90-day median"},
     },
     {
         "id": "fixture-shirt-01",
@@ -116,6 +140,12 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
         "review_summary": "Consistent fabric quality across verified buyer reviews.",
         "review_reliability": 0.89,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 118, "rating": 4.4, "signal": "Low duplication signal"},
+            {"name": "Independent discussion", "count": 19, "rating": 4.3, "signal": "Consistent sentiment"},
+        ],
+        "review_analysis": {"label": "Strong signal", "detail": "Fabric quality and fit feedback remain consistent across sources."},
+        "price_history": {"low_90d": 2990, "median_90d": 3490, "high_90d": 3990, "trend_label": "Below its 90-day median"},
     },
 ]
 

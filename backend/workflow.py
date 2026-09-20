@@ -298,6 +298,9 @@ class ExtractionAgent:
             "evidence": data.get("evidence") if isinstance(data, dict) and isinstance(data.get("evidence"), list) else ["Source-linked product data", "Confirm seller checkout details"],
             "review_summary": str(data.get("review_summary") or "Review evidence requires retailer confirmation") if isinstance(data, dict) else "Review evidence requires retailer confirmation",
             "review_reliability": data.get("review_reliability") if isinstance(data, dict) else None,
+            "review_sources": data.get("review_sources") if isinstance(data, dict) and isinstance(data.get("review_sources"), list) else [],
+            "review_analysis": data.get("review_analysis") if isinstance(data, dict) and isinstance(data.get("review_analysis"), dict) else {},
+            "price_history": data.get("price_history") if isinstance(data, dict) and isinstance(data.get("price_history"), dict) else {},
         }
 
     def run(self, raw_products: list[dict[str, Any]], source_meta: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -413,6 +416,18 @@ def _safe_plan_item(product: dict[str, Any]) -> dict[str, Any]:
         "source_kind": str(product.get("source_kind") or "source"),
         "review_summary": str(product.get("review_summary") or "Review evidence requires retailer confirmation")[:240],
         "review_reliability": product.get("review_reliability"),
+        "review_sources": [
+            {
+                "name": str(source.get("name") or "Review source")[:120],
+                "count": _money(source.get("count")),
+                "rating": source.get("rating"),
+                "signal": str(source.get("signal") or "Signal requires confirmation")[:160],
+            }
+            for source in (product.get("review_sources") or [])
+            if isinstance(source, dict)
+        ][:6],
+        "review_analysis": product.get("review_analysis") if isinstance(product.get("review_analysis"), dict) else {},
+        "price_history": product.get("price_history") if isinstance(product.get("price_history"), dict) else {},
         "evidence": [str(item)[:180] for item in (product.get("evidence") or []) if str(item).strip()][:8],
     }
 

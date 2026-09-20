@@ -120,6 +120,8 @@ KOKORO_DEVICE=auto
 5. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
 6. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
 
+Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
+
 The known item subtotal deliberately excludes shipping, tax, and any retailer-specific fees that the live source does not verify. The user must confirm those values at checkout.
 
 ## API surface

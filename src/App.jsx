@@ -430,7 +430,7 @@ function BriefSummary({ intent }) {
   return <p className="brief-summary">{fields.join(' • ')}</p>;
 }
 
-function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onSave, saved }) {
+function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
   const cleanDesc = sanitizeSnippet(product.description);
@@ -497,6 +497,15 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
           <div className="product-card__secondary-actions">
             <button
               type="button"
+              className="icon-action-btn"
+              onClick={() => onInspect(product)}
+              aria-label={`View evidence for ${cleanTitle}`}
+              title="View evidence"
+            >
+              <Icon name="shield" size={16} />
+            </button>
+            <button
+              type="button"
               className={`icon-action-btn ${saved ? 'is-saved' : ''}`}
               onClick={() => onSave(product.id)}
               aria-label={saved ? `Remove ${cleanTitle} from saved` : `Save ${cleanTitle}`}
@@ -521,7 +530,7 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
   );
 }
 
-function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProduct, onSave, saved }) {
+function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
   const cleanDesc = sanitizeSnippet(product.description);
@@ -554,6 +563,10 @@ function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProdu
               <button type="button" onClick={() => onOpenProduct(product)} disabled={!product.url}>
                 <span>Visit retailer</span>
                 <Icon name="external" size={12} />
+              </button>
+              <button type="button" onClick={() => onInspect(product)}>
+                <Icon name="shield" size={12} />
+                <span>Evidence</span>
               </button>
               <button type="button" className={saved ? 'is-saved' : ''} onClick={() => onSave(product.id)}>
                 <Icon name="bookmark" size={12} />
@@ -593,7 +606,7 @@ function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProdu
   );
 }
 
-function ResultsTable({ products, selectedIds, focusedId, onToggle, onFocus, onOpenProduct, onSave, savedIds }) {
+function ResultsTable({ products, selectedIds, focusedId, onToggle, onFocus, onOpenProduct, onInspect, onSave, savedIds }) {
   return (
     <div className="results-table-wrap">
       <table className="results-table">
@@ -617,6 +630,7 @@ function ResultsTable({ products, selectedIds, focusedId, onToggle, onFocus, onO
               onToggle={onToggle}
               onFocus={onFocus}
               onOpenProduct={onOpenProduct}
+              onInspect={onInspect}
               onSave={onSave}
               saved={savedIds.includes(product.id)}
             />
@@ -812,6 +826,7 @@ function DiscoverView({
   onToggle,
   onFocus,
   onOpenProduct,
+  onInspect,
   onSave,
   savedIds,
   voice,
@@ -926,6 +941,7 @@ function DiscoverView({
                   onToggle={onToggle}
                   onFocus={onFocus}
                   onOpenProduct={onOpenProduct}
+                  onInspect={onInspect}
                   onSave={onSave}
                   saved={savedIds.includes(product.id)}
                 />
@@ -939,6 +955,7 @@ function DiscoverView({
               onToggle={onToggle}
               onFocus={onFocus}
               onOpenProduct={onOpenProduct}
+              onInspect={onInspect}
               onSave={onSave}
               savedIds={savedIds}
             />
@@ -1058,6 +1075,86 @@ function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
           <Icon name="arrow" size={16} />
         </button>
         <small className="checkout-sheet__notice">Development order only. Live merchant payment requires a configured production gateway.</small>
+      </section>
+    </div>
+  );
+}
+
+function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
+  if (!product) return null;
+  const reviewScore = Number(product.review_reliability);
+  const reviewAnalysis = product.review_analysis || {};
+  const priceHistory = product.price_history || {};
+  const reviewSources = Array.isArray(product.review_sources) ? product.review_sources : [];
+  const evidence = Array.isArray(product.evidence) ? product.evidence : [];
+  const reviewLabel = reviewAnalysis.label || (Number.isFinite(reviewScore) ? `${Math.round(reviewScore * 100)}% reliability signal` : 'Not available');
+  const historyLabel = priceHistory.trend_label || 'Price history not returned by this source';
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="auth-sheet evidence-sheet" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
+        <button type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close evidence">
+          <Icon name="close" size={19} />
+        </button>
+        <span className="section-kicker">Evidence ledger</span>
+        <h2 id="evidence-title">Why this made the edit.</h2>
+        <p className="evidence-sheet__product">{sanitizeTitle(product.name)} · {product.seller || 'Retailer'}</p>
+
+        <div className="evidence-sheet__facts">
+          <div><span>Total today</span><strong>{formatPrice(productTotal(product))}</strong></div>
+          <div><span>Delivery</span><strong>{product.delivery_label || 'Confirm at retailer'}</strong></div>
+          <div><span>Review signal</span><strong>{reviewLabel}</strong></div>
+          <div><span>Price history</span><strong>{historyLabel}</strong></div>
+        </div>
+
+        <div className="evidence-sheet__section">
+          <div className="evidence-sheet__section-head">
+            <span className="section-kicker">Review cross-check</span>
+            {Number.isFinite(reviewScore) ? <strong>{Math.round(reviewScore * 100)}%</strong> : null}
+          </div>
+          <p>{product.review_summary || 'Review data needs retailer confirmation.'}</p>
+          {reviewAnalysis.detail ? <small>{reviewAnalysis.detail}</small> : null}
+          {reviewSources.length ? (
+            <ul className="evidence-sheet__list">
+              {reviewSources.map((source, index) => (
+                <li key={`${source.name || 'source'}-${index}`}>
+                  <span>{source.name || 'Review source'}</span>
+                  <small>{source.count ? `${source.count} reviews` : 'Sample size unknown'}{source.rating ? ` · ★ ${source.rating}` : ''} · {source.signal || 'Signal requires confirmation'}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <small>Independent review sources were not returned. Treat the rating as unverified.</small>
+          )}
+        </div>
+
+        <div className="evidence-sheet__section">
+          <div className="evidence-sheet__section-head">
+            <span className="section-kicker">Price context</span>
+            {priceHistory.median_90d ? <strong>90 days</strong> : null}
+          </div>
+          <div className="evidence-sheet__price-row">
+            <span>Low</span><b>{priceHistory.low_90d ? formatPrice(priceHistory.low_90d) : '—'}</b>
+            <span>Median</span><b>{priceHistory.median_90d ? formatPrice(priceHistory.median_90d) : '—'}</b>
+            <span>High</span><b>{priceHistory.high_90d ? formatPrice(priceHistory.high_90d) : '—'}</b>
+          </div>
+        </div>
+
+        <div className="evidence-sheet__section">
+          <span className="section-kicker">Source checks</span>
+          <ul className="evidence-sheet__checks">
+            {(evidence.length ? evidence : ['Source-linked product data', 'Confirm seller checkout details']).map((item) => (
+              <li key={item}><Icon name="check" size={13} /> {item}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="evidence-sheet__actions">
+          <button type="button" className="primary-button" onClick={() => onOpenProduct(product)} disabled={!product.url}>
+            Open retailer page <Icon name="external" size={15} />
+          </button>
+          <button type="button" className="secondary-button" onClick={onClose}>Close evidence</button>
+        </div>
       </section>
     </div>
   );
@@ -1654,6 +1751,7 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [evidenceProduct, setEvidenceProduct] = useState(null);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [toast, setToast] = useState('');
@@ -1967,6 +2065,10 @@ export default function App() {
     if (product?.url) window.open(product.url, '_blank', 'noopener,noreferrer');
   }, []);
 
+  const inspectProduct = useCallback((product) => {
+    setEvidenceProduct(product || null);
+  }, []);
+
   const view =
     activeView === 'discover' ? (
       <DiscoverView
@@ -1988,6 +2090,7 @@ export default function App() {
         onToggle={toggleProduct}
         onFocus={setFocusedId}
         onOpenProduct={openProduct}
+        onInspect={inspectProduct}
         onSave={toggleSaved}
         savedIds={savedIds}
         voice={voice}
@@ -2068,6 +2171,13 @@ export default function App() {
           isSubmitting={isCreatingOrder}
           onClose={() => setCheckoutOpen(false)}
           onConfirm={handleConfirmOrder}
+        />
+      ) : null}
+      {evidenceProduct ? (
+        <ProductEvidenceSheet
+          product={evidenceProduct}
+          onClose={() => setEvidenceProduct(null)}
+          onOpenProduct={openProduct}
         />
       ) : null}
       <Toast message={toast} />
