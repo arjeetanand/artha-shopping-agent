@@ -15,18 +15,33 @@ This is a real research and handoff flow, not a simulated payment system. Artha 
 
 ## Run locally
 
+The easiest way to start both the Python backend and the Vite frontend together:
+
 ```bash
-cp .env.example .env
-npm install
-python3 -m venv .venv
-.venv/bin/python -m pip install -r backend/requirements-kokoro.txt
-SHOPPINGHELP_PORT=8000 .venv/bin/python backend/server.py
+./run.sh
+# or: npm start
 ```
 
-In another terminal:
+This single command:
+1. Automatically detects `.venv` (or falls back to `python3`).
+2. Creates `.env` from `.env.example` if not present.
+3. Installs frontend dependencies if `node_modules/` is missing.
+4. Reads configured ports from `.env`.
+5. Starts the backend, waits for health check confirmation, and starts Vite.
+6. Gracefully shuts down both processes when you press `Ctrl+C`.
+
+### Manual / Separate Terminals
+
+If you prefer running services in separate terminals:
 
 ```bash
-SHOPPINGHELP_API_TARGET=http://127.0.0.1:8000 npm run dev
+# Terminal 1: Backend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements-kokoro.txt  # optional local voice
+SHOPPINGHELP_PORT=8001 .venv/bin/python backend/server.py
+
+# Terminal 2: Frontend
+SHOPPINGHELP_API_TARGET=http://127.0.0.1:8001 npm run dev -- --port 5176
 ```
 
 Open the Vite URL printed by the frontend. The app proxies `/api` to the Python server, so API keys never reach the browser.

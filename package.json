@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "start": "./run.sh",
     "dev": "vite",
     "backend": "python3 backend/server.py",
     "build": "vite build",
