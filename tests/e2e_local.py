@@ -98,6 +98,23 @@ def main() -> None:
         assert search["products"][0]["line_total"] == 10490
         assert any(product["delivery_fit"] is False for product in search["products"])
 
+        status, refined = request(
+            port,
+            "/api/agent/refine",
+            method="POST",
+            payload={
+                "text": "Actually show me options under ₹16,000 with reclining support",
+                "intent": search["intent"],
+                "products": search["products"],
+                "source": search["source"],
+            },
+        )
+        assert status == 200, refined
+        assert refined["source"]["refined"] is True
+        assert refined["intent"]["budget"] == 16000
+        assert "reclining" in refined["intent"]["must_have"]
+        assert refined["workflow"][0]["agent"] == "Follow-up agent"
+
         # Seed a real server-side session without invoking Google during local QA.
         os.environ.update(env)
         from backend.db import Database

@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
     from backend.settings import is_production
     from backend.usage import get_usage_summary, runtime_name
     from backend.voice import VoiceError, VoiceService
-    from backend.workflow import create_purchase_plan, run_search
+    from backend.workflow import create_purchase_plan, run_refinement, run_search
     from backend.orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
@@ -26,7 +26,7 @@ else:
     from .settings import is_production
     from .usage import get_usage_summary, runtime_name
     from .voice import VoiceError, VoiceService
-    from .workflow import create_purchase_plan, run_search
+    from .workflow import create_purchase_plan, run_refinement, run_search
     from .orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
 
 
@@ -223,6 +223,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if path == "/api/agent/search":
                 self._send(200, run_search(payload))
+                return
+            if path == "/api/agent/refine":
+                self._send(200, run_refinement(payload))
                 return
             if path == "/api/plans":
                 user = self._require_user()

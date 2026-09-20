@@ -144,7 +144,8 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `GET /api/auth/google/start` | Start Google OAuth with PKCE |
 | `GET /api/auth/google/callback` | Complete Google OAuth and create the session |
 | `POST /api/auth/logout` | End the local session |
-| `POST /api/agent/search` | Run the brief → search → evidence → decision workflow |
+| `POST /api/agent/search` | Run the brief → search → evidence → analysis → decision workflow |
+| `POST /api/agent/refine` | Apply a follow-up preference to an existing research set without repeating retailer discovery |
 | `GET /api/plans` | List the signed-in user's private purchase plans |
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |
 | `GET /api/orders` | List the signed-in user's confirmed orders and tracking timelines |

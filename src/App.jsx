@@ -24,6 +24,7 @@ import {
   getUsage,
   getVoiceStatus,
   requestReturn,
+  refineAgentSearch,
   runAgentSearch,
   signOut,
   speakText,
@@ -317,6 +318,7 @@ function Composer({
   onRemoveReference,
   onSearch,
   isSearching,
+  hasResults,
   onToast,
   onPickPrompt,
 }) {
@@ -342,13 +344,13 @@ function Composer({
     <div className="composer-container">
       <form className="composer" onSubmit={onSearch}>
         <label className="sr-only" htmlFor="shopping-brief">
-          Shopping brief
+          {hasResults ? 'Follow-up preference' : 'Shopping brief'}
         </label>
         <textarea
           id="shopping-brief"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Describe what you want (e.g., Office-ready neutral look under ₹15,000, breathable linen shirts, leather loafers)…"
+          placeholder={hasResults ? 'Ask a follow-up (e.g., show me options under ₹11,000 or make the delivery window tighter)…' : 'Describe what you want (e.g., Office-ready neutral look under ₹15,000, breathable linen shirts, leather loafers)…'}
           rows={2}
         />
         <div className="composer__footer">
@@ -378,7 +380,7 @@ function Composer({
               </>
             ) : (
               <>
-                <span>Find sources</span>
+                <span>{hasResults ? 'Refine shortlist' : 'Find sources'}</span>
                 <Icon name="arrow" size={17} />
               </>
             )}
@@ -454,6 +456,17 @@ function AgentStrip({ workflow, isSearching, searchStage, hasResults }) {
         })}
       </div>
     </section>
+  );
+}
+
+function ConversationTrail({ conversation }) {
+  if (!Array.isArray(conversation) || conversation.length < 2) return null;
+  const latest = conversation[conversation.length - 1];
+  return (
+    <div className="conversation-trail" aria-live="polite">
+      <span className="conversation-trail__label">Follow-up kept research</span>
+      <p>{latest?.text || 'The shortlist was refined from the existing evidence.'}</p>
+    </div>
   );
 }
 
@@ -912,6 +925,7 @@ function DiscoverView({
           onRemoveReference={onRemoveReference}
           onSearch={onSearch}
           isSearching={isSearching}
+          hasResults={result.products.length > 0}
           onToast={onToast}
           onPickPrompt={onPickPrompt}
         />
@@ -922,6 +936,7 @@ function DiscoverView({
           searchStage={searchStage}
           hasResults={result.products.length > 0}
         />
+        <ConversationTrail conversation={result.conversation} />
 
         <section className="results-section" aria-labelledby="results-heading">
           <div className="results-toolbar">
@@ -1924,20 +1939,37 @@ export default function App() {
     [],
   );
 
-  const startNewSearch = useCallback(() => setActiveView('discover'), []);
+  const startNewSearch = useCallback(() => {
+    setActiveView('discover');
+    setQuery(DEFAULT_INTENT.raw_text);
+    setPostUrl('');
+    setShowPostUrl(false);
+    setReference(null);
+    setResult(DEFAULT_RESULT);
+    setSelectedIds([]);
+    setFocusedId('');
+  }, []);
 
   const handleSearchWithPayload = useCallback(
     async (text, url, ref) => {
       if ((!text?.trim() && !url?.trim() && !ref?.dataUrl) || isSearching) return;
       setIsSearching(true);
       setSearchStage(0);
+      const shouldRefine = Boolean(result.search_id && result.products.length && text?.trim() && !url?.trim() && !ref?.dataUrl);
       try {
-        const body = await runAgentSearch({
-          text: text?.trim() || 'Find products that match this reference.',
-          post_url: url?.trim() || null,
-          image_name: ref?.name || null,
-          reference_image: referencePayload(ref),
-        });
+        const body = shouldRefine
+          ? await refineAgentSearch({
+              text: text.trim(),
+              intent: result.intent,
+              products: result.products,
+              source: result.source,
+            })
+          : await runAgentSearch({
+              text: text?.trim() || 'Find products that match this reference.',
+              post_url: url?.trim() || null,
+              image_name: ref?.name || null,
+              reference_image: referencePayload(ref),
+            });
         if (!body.products?.length) throw new Error('No retailer sources were found for that brief.');
         setResult(body);
         setSelectedIds(
@@ -1946,14 +1978,14 @@ export default function App() {
             : body.products.slice(0, 3).map((product) => product.id),
         );
         setFocusedId(body.products[0]?.id || '');
-        setToast('Live retailer sources checked and ranked.');
+        setToast(shouldRefine ? 'Shortlist refined from the existing research.' : 'Live retailer sources checked and ranked.');
       } catch (error) {
         setToast(error.message || 'The search could not complete. Please try again.');
       } finally {
         setIsSearching(false);
       }
     },
-    [isSearching],
+    [isSearching, result],
   );
 
   const handleSearch = useCallback(

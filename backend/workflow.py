@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import hashlib
 import ipaddress
 import re
@@ -520,6 +521,91 @@ def _default_selection(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return chosen
 
 
+def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, Any]:
+    brief = copy.deepcopy(previous)
+    follow_up = str(text or "").strip()
+    lowered = follow_up.lower()
+    if not follow_up:
+        return brief
+
+    delta_match = re.search(r"(?:increase|raise|add|extra|more)\D{0,18}(?:₹|rs\.?|inr)?\s*([\d,]+)", follow_up, flags=re.IGNORECASE)
+    explicit_budget = _parse_budget(follow_up)
+    if delta_match and any(term in lowered for term in ("budget", "spend", "pay", "price")):
+        brief["budget"] = _money(brief.get("budget")) + int(delta_match.group(1).replace(",", ""))
+    elif explicit_budget and any(term in lowered for term in ("under", "below", "within", "budget", "upto", "up to")):
+        brief["budget"] = explicit_budget
+
+    quantity_match = re.search(r"\b(\d{1,3})(?:\s+[a-z][a-z0-9&'-]*){0,3}\s+(?:units?|items?|pieces?|pairs?|chairs?|shirts?)\b", follow_up, flags=re.IGNORECASE)
+    if quantity_match:
+        brief["quantity"] = max(1, min(int(quantity_match.group(1)), 99))
+    brand = _parse_brand(follow_up)
+    if brand:
+        brief["brand"] = brand
+    if _parse_days(follow_up) is not None:
+        days = _parse_days(follow_up) or brief.get("arrive_by_days") or 5
+        brief["arrive_by_days"] = days
+        brief["arrive_by"] = f"within {days} days"
+    location_match = re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)", follow_up, flags=re.IGNORECASE)
+    if location_match:
+        location = location_match.group(1).strip(" .,\"")
+        brief["location"] = "Bengaluru" if location.lower() == "bangalore" else location
+    new_specs = _parse_specifications(follow_up)
+    if new_specs:
+        existing_specs = _brief_list(brief.get("must_have"), [])
+        brief["must_have"] = list(dict.fromkeys(existing_specs + new_specs))
+        brief["specifications"] = brief["must_have"]
+    if any(term in lowered for term in ("cheaper", "lower price", "save money", "less expensive")):
+        brief["nice_to_have"] = list(dict.fromkeys(_brief_list(brief.get("nice_to_have"), []) + ["lower total cost"]))
+    brief["raw_text"] = f"{brief.get('raw_text') or brief.get('description') or ''} Follow-up: {follow_up}".strip()
+    brief["description"] = f"{brief.get('description') or ''}. Follow-up preference: {follow_up}".strip(". ")
+    brief["follow_up"] = follow_up
+    brief["extraction_source"] = f"{brief.get('extraction_source') or 'existing research'} + follow-up refinement"
+    return brief
+
+
+def run_refinement(payload: dict[str, Any]) -> dict[str, Any]:
+    previous_intent = payload.get("intent") if isinstance(payload.get("intent"), dict) else {}
+    previous_products = payload.get("products") if isinstance(payload.get("products"), list) else []
+    text = str(payload.get("text") or payload.get("query") or "").strip()
+    if not previous_intent or not previous_products:
+        raise ValueError("A previous search is required before refining the shortlist")
+    if not text:
+        raise ValueError("Tell Artha what you would like to change")
+    brief = _merge_refinement_intent(previous_intent, text)
+    products = copy.deepcopy([product for product in previous_products if isinstance(product, dict)])
+    products, analysis_event = AnalysisAgent().run(products, brief)
+    products, ranking_event = RankingAgent().run(products, brief)
+    search_id = f"search-{uuid.uuid4().hex[:12]}"
+    follow_up_event = {
+        "agent": "Follow-up agent",
+        "status": "complete",
+        "detail": "Kept the completed research set and applied the new preference without repeating retailer discovery",
+    }
+    workflow = [follow_up_event, analysis_event, ranking_event]
+    db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
+    selected_products = _default_selection(products)
+    latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 5
+    source = copy.deepcopy(payload.get("source")) if isinstance(payload.get("source"), dict) else {"mode": "refined"}
+    source["refined"] = True
+    return {
+        "search_id": search_id,
+        "intent": brief,
+        "products": products,
+        "selected_product_ids": [product["id"] for product in selected_products],
+        "summary": {
+            "total": sum(_money(product.get("line_total")) or _money(product.get("total_price")) for product in selected_products),
+            "item_count": len(selected_products),
+            "delivery_label": f"All known deliveries arrive by {_date_label(latest_delivery)}" if latest_delivery else "Confirm delivery at retailer",
+        },
+        "workflow": workflow,
+        "source": source,
+        "conversation": [
+            {"role": "user", "text": text},
+            {"role": "assistant", "text": "I kept the completed research and updated the shortlist with that preference."},
+        ],
+    }
+
+
 def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     post_url = _reference_url(payload.get("post_url"))
     agent_payload = dict(payload)
@@ -543,6 +629,7 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
         "summary": {"total": total, "item_count": len(selected_products), "delivery_label": f"All known deliveries arrive by {_date_label(latest_delivery)}" if latest_delivery else "Confirm delivery at retailer"},
         "workflow": workflow,
         "source": source_meta,
+        "conversation": [{"role": "user", "text": brief["raw_text"]}],
     }
 
 

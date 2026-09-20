@@ -34,6 +34,10 @@ export function runAgentSearch(payload) {
   return request('/agent/search', { method: 'POST', body: JSON.stringify(payload) });
 }
 
+export function refineAgentSearch(payload) {
+  return request('/agent/refine', { method: 'POST', body: JSON.stringify(payload) });
+}
+
 export function getPlans() {
   return request('/plans');
 }

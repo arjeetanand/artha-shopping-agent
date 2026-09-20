@@ -26,6 +26,7 @@ export const DEFAULT_RESULT = {
     { agent: 'Analysis agent', status: 'idle', detail: 'Review and price signals will appear after search' },
     { agent: 'Decision agent', status: 'idle', detail: 'Ranked recommendations will appear after search' },
   ],
+  conversation: [],
   source: { mode: 'idle', scrape: false },
 };
 
