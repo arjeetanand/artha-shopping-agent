@@ -1,0 +1,25 @@
+{
+  "format": "account-neutral-make-scenario-spec",
+  "version": "1.0.0",
+  "note": "Make connection IDs, webhook URLs, Data Store IDs, and provider-specific module IDs must be bound in the target Make account. This is a reusable build specification, not a credential-bearing export.",
+  "scenarios": [
+    {
+      "name": "PA_01_User_Request_Gateway",
+      "trigger": "Webhooks > Custom webhook",
+      "response": "Webhooks > Webhook response",
+      "routes": ["shop", "confirm_purchase", "track_order", "advance_order", "cancel_order", "request_return"],
+      "modules": ["validate_payload", "load_or_create_session", "run_inspira_agent", "persist_session", "webhook_response"]
+    },
+    { "name": "PA_02_Order_Tracking", "trigger": "Scheduler", "modules": ["search_active_orders", "get_demo_status", "compare_status", "create_order_event", "update_order", "send_notification"] },
+    { "name": "PA_03_Get_Order_Status", "trigger": "Webhooks > Custom webhook", "modules": ["validate_track_request", "get_order", "get_events", "webhook_response"] },
+    { "name": "PA_TOOL_Analyze_Inspiration", "trigger": "Scenario input / AI Agent tool", "modules": ["validate_image_input", "multimodal_ai_call", "parse_json", "return_tool_json"] },
+    { "name": "PA_TOOL_Parse_Requirements", "trigger": "Scenario input / AI Agent tool", "modules": ["build_prompt", "structured_ai_call", "parse_json", "return_tool_json"] },
+    { "name": "PA_TOOL_Search_Products", "trigger": "Scenario input / AI Agent tool", "modules": ["http_dummyjson_search", "iterator", "mock_commerce_adapter", "array_aggregator", "return_tool_json"] },
+    { "name": "PA_TOOL_Evaluate_Constraints", "trigger": "Scenario input / AI Agent tool", "modules": ["iterator", "code_deterministic_filter", "array_aggregator", "return_tool_json"] },
+    { "name": "PA_TOOL_Rank_Products", "trigger": "Scenario input / AI Agent tool", "modules": ["iterator", "code_score", "sort_array", "limit_3", "return_tool_json"] },
+    { "name": "PA_TOOL_Create_Order", "trigger": "Scenario input / AI Agent tool", "modules": ["lookup_pending_purchase", "verify_approval", "recheck_inventory", "create_order_record", "update_pending_purchase", "return_order_json"] },
+    { "name": "PA_TOOL_Cancel_Order", "trigger": "Scenario input / AI Agent tool", "modules": ["get_order", "filter_cancellable", "update_order", "create_order_event", "return_json"] },
+    { "name": "PA_TOOL_Request_Return", "trigger": "Scenario input / AI Agent tool", "modules": ["get_order", "filter_returnable", "update_order", "create_order_event", "return_json"] }
+  ],
+  "dataStores": ["user_sessions", "purchase_requirements", "pending_purchases", "orders", "order_events", "user_preferences"]
+}

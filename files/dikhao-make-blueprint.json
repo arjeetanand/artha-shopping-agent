@@ -1,0 +1,387 @@
+{
+  "header": {
+    "panelType": "flow",
+    "appVersion": "1.0.0",
+    "migrationVersion": 1,
+    "name": "Dikhao - AI Shopping Orchestration",
+    "description": "End-to-end automation: User Input → AI Understanding → Product Search → Constraint Filtering → Recommendation → Purchase Orchestration",
+    "flowID": "dikhao-shopping-flow"
+  },
+  "flow": [
+    {
+      "id": 1,
+      "module": "webhook:Custom",
+      "version": 1,
+      "parameters": {},
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 0,
+          "y": 0
+        },
+        "restore": {
+          "parameters": {
+            "hook": 0
+          }
+        },
+        "notes": "Receives user input: image, text, or voice transcription"
+      },
+      "isEditable": true
+    },
+    {
+      "id": 2,
+      "module": "code:ExecuteCode",
+      "version": 1,
+      "parameters": {
+        "code": "// Parse and validate user input\nconst input = {\n  image: data.image || null,\n  text: data.text || '',\n  voice: data.voice || '',\n  timestamp: new Date().toISOString()\n};\n\nreturn {\n  raw_input: input,\n  input_type: input.image ? 'image' : input.voice ? 'voice' : 'text',\n  has_content: !!(input.image || input.text || input.voice)\n};"
+      },
+      "mapper": {
+        "data": "{{1.data}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 300,
+          "y": 0
+        },
+        "notes": "Module 1: Parse user input"
+      }
+    },
+    {
+      "id": 3,
+      "module": "builtin:JsonAggregator",
+      "version": 1,
+      "parameters": {
+        "sourceModule": 2
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 300,
+          "y": 100
+        },
+        "notes": "Aggregate parsed input for AI analysis"
+      }
+    },
+    {
+      "id": 4,
+      "module": "claude:SendMessage",
+      "version": 1,
+      "parameters": {
+        "model": "claude-3-5-sonnet",
+        "max_tokens": 1000,
+        "temperature": 0.7
+      },
+      "mapper": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Analyze this shopping request and extract intent:\nInput: {{2.raw_input.text}}\nImage provided: {{2.raw_input.image ? 'yes' : 'no'}}\n\nRespond with ONLY valid JSON (no markdown): {\"category\": \"...\", \"style\": \"...\", \"occasion\": \"...\", \"budget\": number, \"must_have\": [...], \"preferred\": [...], \"description\": \"...\"}"
+          }
+        ]
+      },
+      "metadata": {
+        "designer": {
+          "x": 600,
+          "y": 0
+        },
+        "notes": "Module 2: Call Claude AI for shopping intent analysis"
+      }
+    },
+    {
+      "id": 5,
+      "module": "code:ExecuteCode",
+      "version": 1,
+      "parameters": {
+        "code": "// Parse AI response and extract shopping intent\nlet intent = {};\ntry {\n  const cleanResponse = '{{4.content[0].text}}'.replace(/```json|```/g, '').trim();\n  intent = JSON.parse(cleanResponse);\n} catch (e) {\n  intent = {\n    category: 'fashion',\n    style: 'minimalist',\n    occasion: 'daily',\n    budget: 5000,\n    must_have: ['quality'],\n    preferred: ['sustainable'],\n    description: '{{2.raw_input.text}}'\n  };\n}\n\nreturn {\n  shopping_intent: intent,\n  budget_range: {\n    min: Math.max(0, intent.budget - 500),\n    max: Math.min(100000, intent.budget + 1000)\n  }\n};"
+      },
+      "mapper": {
+        "response": "{{4.content}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 900,
+          "y": 0
+        },
+        "notes": "Module 3: Extract and validate shopping intent"
+      }
+    },
+    {
+      "id": 6,
+      "module": "http:MakeRequest",
+      "version": 1,
+      "parameters": {
+        "url": "https://dummyjson.com/products",
+        "method": "GET"
+      },
+      "mapper": {
+        "query": {
+          "limit": "20",
+          "skip": "0"
+        }
+      },
+      "metadata": {
+        "designer": {
+          "x": 1200,
+          "y": 0
+        },
+        "notes": "Module 4: Search products from Fake Store API"
+      }
+    },
+    {
+      "id": 7,
+      "module": "builtin:Iterator",
+      "version": 1,
+      "parameters": {
+        "array": "{{6.products}}"
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 1200,
+          "y": 150
+        },
+        "notes": "Module 5: Iterate through retrieved products"
+      }
+    },
+    {
+      "id": 8,
+      "module": "code:ExecuteCode",
+      "version": 1,
+      "parameters": {
+        "code": "// Constraint filtering and scoring\nconst product = {{7.currentValue}};\nconst intent = {{5.shopping_intent}};\n\n// Hard constraints (deterministic)\nconst inBudget = product.price <= intent.budget;\nconst hasStock = (product.stock || 1) > 0;\nconst deliveryOk = true; // Assume all have acceptable delivery\n\n// Soft scoring (AI preference)\nlet matchScore = 50;\nconst categoryMatch = product.category && product.category.includes(intent.category.toLowerCase());\nif (categoryMatch) matchScore += 25;\nif (product.rating >= 4.5) matchScore += 15;\nif (inBudget) matchScore += 10;\n\nconst passes = inBudget && hasStock && deliveryOk;\n\nreturn {\n  product_id: product.id,\n  name: product.title,\n  brand: product.brand || 'Brand',\n  price: product.price,\n  rating: product.rating || 4.0,\n  stock: product.stock || Math.floor(Math.random() * 20) + 1,\n  features: [product.category, 'Verified seller'],\n  passes_constraints: passes,\n  match_score: passes ? matchScore : 0,\n  rejection_reason: !inBudget ? 'Exceeds budget' : !hasStock ? 'Out of stock' : null,\n  match_reasons: [\n    categoryMatch ? 'Matches ' + intent.category : null,\n    inBudget ? 'Within budget' : null,\n    product.rating >= 4.5 ? 'Highly rated' : null\n  ].filter(Boolean)\n};"
+      },
+      "mapper": {
+        "intent": "{{5.shopping_intent}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 1500,
+          "y": 150
+        },
+        "notes": "Module 6: Score and filter each product against constraints"
+      }
+    },
+    {
+      "id": 9,
+      "module": "builtin:BasicFilter",
+      "version": 1,
+      "parameters": {
+        "condition": "{{8.passes_constraints}}"
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 1800,
+          "y": 150
+        },
+        "notes": "Module 7: Keep only products that pass hard constraints"
+      }
+    },
+    {
+      "id": 10,
+      "module": "builtin:BasicAggregator",
+      "version": 1,
+      "parameters": {
+        "sourceModule": 9
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 2100,
+          "y": 150
+        },
+        "notes": "Module 8: Aggregate filtered products"
+      }
+    },
+    {
+      "id": 11,
+      "module": "code:ExecuteCode",
+      "version": 1,
+      "parameters": {
+        "code": "// Sort products by match score and select top 3\nconst products = {{10}};\nconst sorted = products.sort((a, b) => b.match_score - a.match_score).slice(0, 3);\n\nreturn {\n  recommended_products: sorted,\n  top_product: sorted[0] || null,\n  total_options: sorted.length,\n  selection_criteria: 'Sorted by match score, budget compliance, and stock availability'\n};"
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 2400,
+          "y": 150
+        },
+        "notes": "Module 9: Rank products and select recommendations"
+      }
+    },
+    {
+      "id": 12,
+      "module": "builtin:Router",
+      "version": 1,
+      "parameters": {
+        "routes": [
+          {
+            "condition": "{{11.total_options}} > 0",
+            "label": "Products found"
+          },
+          {
+            "condition": "{{11.total_options}} == 0",
+            "label": "No products match"
+          }
+        ]
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 2700,
+          "y": 100
+        },
+        "notes": "Module 10: Route based on product availability"
+      }
+    },
+    {
+      "id": 13,
+      "module": "http:MakeRequest",
+      "version": 1,
+      "parameters": {
+        "url": "https://mock-purchase-api.example.com/orders",
+        "method": "POST"
+      },
+      "mapper": {
+        "product_id": "{{11.top_product.product_id}}",
+        "user_id": "{{1.user_id}}",
+        "amount": "{{11.top_product.price}}",
+        "tax": "{{Math.round(11.top_product.price * 0.18)}}",
+        "shipping": "99",
+        "timestamp": "{{now()}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3000,
+          "y": 50
+        },
+        "notes": "Module 11: Create mock purchase order (Route 1)"
+      }
+    },
+    {
+      "id": 14,
+      "module": "code:ExecuteCode",
+      "version": 1,
+      "parameters": {
+        "code": "// Generate order confirmation\nconst order = {{13}};\nconst product = {{11.top_product}};\n\nreturn {\n  order_id: 'ORD' + Date.now(),\n  product: product,\n  status: 'confirmed',\n  payment_verified: true,\n  constraint_verification: {\n    budget_ok: true,\n    stock_ok: true,\n    delivery_ok: true\n  },\n  estimated_delivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()\n};"
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 3300,
+          "y": 50
+        },
+        "notes": "Module 12: Confirm order"
+      }
+    },
+    {
+      "id": 15,
+      "module": "http:MakeRequest",
+      "version": 1,
+      "parameters": {
+        "url": "https://your-backend.com/notify",
+        "method": "POST"
+      },
+      "mapper": {
+        "order_id": "{{14.order_id}}",
+        "status": "order_confirmed",
+        "details": "{{14}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3600,
+          "y": 50
+        },
+        "notes": "Module 13: Notify user of order confirmation"
+      }
+    },
+    {
+      "id": 16,
+      "module": "http:MakeRequest",
+      "version": 1,
+      "parameters": {
+        "url": "https://your-backend.com/notify",
+        "method": "POST"
+      },
+      "mapper": {
+        "status": "no_products_found",
+        "intent": "{{5.shopping_intent}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3000,
+          "y": 250
+        },
+        "notes": "Module 14: Notify user of no match (Route 2)"
+      }
+    }
+  ],
+  "connections": [
+    {
+      "source": 1,
+      "target": 2
+    },
+    {
+      "source": 2,
+      "target": 3
+    },
+    {
+      "source": 3,
+      "target": 4
+    },
+    {
+      "source": 4,
+      "target": 5
+    },
+    {
+      "source": 5,
+      "target": 6
+    },
+    {
+      "source": 6,
+      "target": 7
+    },
+    {
+      "source": 7,
+      "target": 8
+    },
+    {
+      "source": 8,
+      "target": 9
+    },
+    {
+      "source": 9,
+      "target": 10
+    },
+    {
+      "source": 10,
+      "target": 11
+    },
+    {
+      "source": 11,
+      "target": 12
+    },
+    {
+      "source": 12,
+      "target": 13,
+      "route": "Products found"
+    },
+    {
+      "source": 13,
+      "target": 14
+    },
+    {
+      "source": 14,
+      "target": 15
+    },
+    {
+      "source": 12,
+      "target": 16,
+      "route": "No products match"
+    }
+  ],
+  "scenarios": {
+    "tags": ["e-commerce", "ai-shopping", "automation"],
+    "status": "active"
+  }
+}

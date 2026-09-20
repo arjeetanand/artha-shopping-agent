@@ -1,0 +1,7 @@
+id,name,category,description,seller,price,rating,delivery_days,stock,features,match_reasons,crop_index,url
+linen-overshirt,Linen blend overshirt,Top,"Relaxed fit • Breathable linen blend • Sand",Myntra,3499,4.6,3,12,"breathable|linen|office-ready|neutral","From your reference|Breathable fabric|Easy to layer",0,https://www.myntra.com/
+cotton-trousers,Straight-fit cotton trousers,Bottom,"Mid rise • 100% cotton • Beige",AJIO,2699,4.5,4,18,"cotton|straight-fit|office-ready|neutral","Similar silhouette|Within budget|Comfortable cut",1,https://www.ajio.com/
+leather-loafers,Leather penny loafers,Shoes,"Genuine leather • Classic fit • Dark brown",Tata CLiQ,4999,4.4,2,7,"leather|classic|office-ready|durable","Polishes the look|Good seller signal|Highly rated",2,https://www.tatacliq.com/
+cotton-oxford,Cotton oxford shirt,Top,"Soft cotton • Regular fit • Cloud white",Myntra,2299,4.3,5,21,"cotton|breathable|office-ready|neutral","Lower cost|Breathable fabric|Easy to wear",0,https://www.myntra.com/
+pleated-trouser,Pleated relaxed trousers,Bottom,"Light twill • Relaxed leg • Stone",AJIO,3199,4.2,6,9,"cotton|relaxed-fit|neutral|durable","Roomier shape|Neutral palette|Comfortable cut",1,https://www.ajio.com/
+suede-derby,Suede derby shoes,Shoes,"Textured suede • Rubber sole • Walnut",Tata CLiQ,5799,4.5,3,5,"suede|classic|durable|office-ready","Soft contrast|Fast delivery|Strong material",2,https://www.tatacliq.com/
