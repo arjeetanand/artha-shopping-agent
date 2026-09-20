@@ -113,6 +113,22 @@ class Database:
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS payment_attempts (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    provider_order_id TEXT NOT NULL UNIQUE,
+                    amount INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS payment_attempts_user_index ON payment_attempts(user_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS usage_events (
                     id TEXT PRIMARY KEY,
                     runtime TEXT NOT NULL,
@@ -320,6 +336,58 @@ class Database:
                 ),
             )
         return order
+
+    def save_payment_attempt(self, attempt: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO payment_attempts (
+                    id, user_id, provider, provider_order_id, amount, currency,
+                    status, payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempt["id"],
+                    attempt["user_id"],
+                    attempt["provider"],
+                    attempt["provider_order_id"],
+                    attempt["amount"],
+                    attempt.get("currency") or "INR",
+                    attempt["status"],
+                    json.dumps(attempt, ensure_ascii=False),
+                    attempt["created_at"],
+                    attempt["updated_at"],
+                ),
+            )
+        return attempt
+
+    def get_payment_attempt(self, provider_order_id: str, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM payment_attempts WHERE provider_order_id = ? AND user_id = ?",
+                (provider_order_id, user_id),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            value = json.loads(row["payload_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def update_payment_attempt(self, attempt: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE payment_attempts SET status = ?, payload_json = ?, updated_at = ? WHERE provider_order_id = ? AND user_id = ?",
+                (
+                    attempt["status"],
+                    json.dumps(attempt, ensure_ascii=False),
+                    attempt["updated_at"],
+                    attempt["provider_order_id"],
+                    attempt["user_id"],
+                ),
+            )
+        return attempt
 
     def record_usage_event(self, event: dict[str, Any]) -> None:
         with self._connect() as connection:

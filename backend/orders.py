@@ -68,15 +68,9 @@ def _timeline(status: str, created_at: str, delivery_days: int) -> list[dict[str
     ]
 
 
-def create_order(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
+def canonical_order_preview(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
     if not payload.get("confirmed"):
         raise OrderError("Order confirmation is required before checkout.")
-    provider = setting("PAYMENT_PROVIDER", "sandbox").lower()
-    if is_production() and provider == "sandbox":
-        raise OrderError("A production payment provider is not configured. No order was created.")
-    if provider != "sandbox":
-        raise OrderError(f"Payment provider '{provider}' has no enabled merchant adapter. No order was created.")
-
     plan_id = str(payload.get("plan_id") or "").strip() or None
     plan = db.get_purchase_plan(plan_id, user_id) if plan_id else None
     if plan_id and not plan:
@@ -103,25 +97,48 @@ def create_order(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
         raise OrderError("The selected products do not contain a verified payable total.")
 
     total = sum(item["line_total"] for item in items)
-    created_at = now_iso()
     delivery_days = max((item.get("delivery_days") or 5 for item in items), default=5)
+    return {
+        "plan_id": plan_id,
+        "search_id": search_id,
+        "items": items,
+        "total": total,
+        "delivery_days": delivery_days,
+        "location": str(payload.get("location") or (payload.get("intent") or {}).get("location") or "your delivery location")[:160],
+    }
+
+
+def create_order(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
+    provider = setting("PAYMENT_PROVIDER", "sandbox").lower()
+    if is_production() and provider == "sandbox":
+        raise OrderError("A production payment provider is not configured. No order was created.")
+    if provider not in {"sandbox", "razorpay"}:
+        raise OrderError(f"Payment provider '{provider}' has no enabled merchant adapter. No order was created.")
+    if provider == "razorpay" and not payload.get("payment_verified"):
+        raise OrderError("Complete the secure payment step before recording this order.")
+
+    preview = canonical_order_preview(payload, user_id)
+    created_at = now_iso()
+    payment = payload.get("payment") if isinstance(payload.get("payment"), dict) else {}
     order = {
         "id": f"ORD-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
         "user_id": user_id,
-        "plan_id": plan_id,
-        "search_id": search_id,
+        "plan_id": preview["plan_id"],
+        "search_id": preview["search_id"],
         "status": "confirmed",
-        "payment_status": "sandbox_authorized",
+        "payment_status": "sandbox_authorized" if provider == "sandbox" else "paid",
         "payment_provider": provider,
+        "payment_reference": str(payment.get("payment_id") or "")[:120] or None,
+        "payment_order_id": str(payment.get("order_id") or "")[:120] or None,
         "currency": "INR",
-        "total": total,
-        "items": items,
-        "location": str(payload.get("location") or (payload.get("intent") or {}).get("location") or "your delivery location")[:160],
-        "delivery_days": delivery_days,
+        "total": preview["total"],
+        "items": preview["items"],
+        "location": preview["location"],
+        "delivery_days": preview["delivery_days"],
         "created_at": created_at,
         "updated_at": created_at,
-        "timeline": _timeline("confirmed", created_at, delivery_days),
-        "notice": "Sandbox order recorded locally. No card was charged and no merchant checkout was submitted." if provider == "sandbox" else "Payment authorization confirmed by the configured provider.",
+        "timeline": _timeline("confirmed", created_at, preview["delivery_days"]),
+        "notice": "Sandbox order recorded locally. No card was charged and no merchant checkout was submitted." if provider == "sandbox" else "Razorpay payment signature verified. Retailer fulfillment still requires a configured merchant adapter.",
     }
     return db.save_order(order)
 

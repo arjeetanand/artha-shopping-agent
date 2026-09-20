@@ -2,7 +2,7 @@
 
 Artha turns a natural-language shopping brief, reference image, or product/post URL into a source-linked purchase plan. It extracts the constraints, searches live retailer sources through Anakin, normalizes the evidence, applies budget and delivery constraints, and lets a signed-in user save private retailer handoffs.
 
-This is a real research and handoff flow, not a simulated payment system. Artha never collects payment credentials, sends an order to a retailer, or claims that retailer checkout is complete. The user opens each saved retailer link and completes checkout on the retailer's own secure site.
+This is a real research and handoff flow with a clearly separated local sandbox and an opt-in production payment adapter. Artha never collects payment credentials in its own UI, sends an order to a retailer, or claims retailer fulfillment without an adapter. With Razorpay configured, payment is completed in Razorpay's hosted checkout; saved retailer plans still require the user to open each retailer link unless a merchant adapter is configured.
 
 ## What runs where
 
@@ -75,6 +75,12 @@ npm run test:e2e
 
 The test covers the example brief, constraint-aware ranking, seven-stage workflow, server-side checkout-price verification, order creation, delivery progression, return, refund, and cleanup. It uses `SHOPPINGHELP_SEARCH_MODE=fixture` and never touches the developer database or a payment provider.
 
+The offline payment contract can be exercised without credentials or network calls:
+
+```bash
+npm run test:payments
+```
+
 ## Configure providers
 
 Copy the names from `.env.example` into `.env`; keep `.env` out of source control.
@@ -125,6 +131,10 @@ KOKORO_SPEED=0.98
 KOKORO_DEVICE=auto
 ```
 
+### Payments
+
+`PAYMENT_PROVIDER=sandbox` is the safe local default. For a real INR checkout, set `PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID`, and `RAZORPAY_KEY_SECRET` on the Python server only. Artha creates the Razorpay order server-side, loads the hosted Standard Checkout in the browser, and verifies Razorpay's signed callback before it records an Artha order. It never accepts a card number or secret in the React app. A verified payment still does not claim retailer fulfillment; that requires a separate merchant adapter.
+
 ## Workflow
 
 1. **Brief agent** extracts category, quantity, preferred brand, budget, location, delivery window, must-have specifications, and visual/style cues.
@@ -156,7 +166,9 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |
 | `GET /api/orders` | List the signed-in user's confirmed orders and tracking timelines |
 | `GET /api/orders/:id` | Read one user-scoped order |
-| `POST /api/orders` | Create an explicitly confirmed local sandbox order during development |
+| `POST /api/orders` | Create an explicitly confirmed sandbox order or verified provider order |
+| `POST /api/payments/order` | Create a server-side Razorpay payment order for a verified search or saved plan |
+| `POST /api/payments/verify` | Verify the Razorpay callback signature and record the paid Artha order |
 | `POST /api/orders/:id/cancel` | Cancel a cancellable sandbox order |
 | `POST /api/orders/:id/advance` | Advance a sandbox order through delivery statuses for local tracker testing |
 | `POST /api/orders/:id/return` | Record a sandbox return request after delivery |
@@ -173,6 +185,7 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 - No Google OAuth token, payment credential, or reference-image bytes are persisted.
 - The service cannot charge a card, submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions.
 - In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
+- Razorpay is opt-in and server-only: the browser receives only the public key and hosted-checkout order metadata. The backend verifies `order_id|payment_id` with the secret before persisting a paid state; failed or replayed attempts do not create an order.
 - Orders created from a search are rehydrated from the server-side verified search result, so a modified browser payload cannot change the catalog price or quantity at checkout.
 - The development tracker can advance through delivery, return, and refund states for QA; production status changes must come from merchant webhooks or a supported order API.
 - Live saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.

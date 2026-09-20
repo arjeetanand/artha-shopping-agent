@@ -59,6 +59,14 @@ export function createOrder(payload) {
   return request('/orders', { method: 'POST', body: JSON.stringify(payload) });
 }
 
+export function createPaymentOrder(payload) {
+  return request('/payments/order', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function verifyPayment(payload) {
+  return request('/payments/verify', { method: 'POST', body: JSON.stringify(payload) });
+}
+
 export function getOrder(orderId) {
   return request(`/orders/${encodeURIComponent(orderId)}`);
 }

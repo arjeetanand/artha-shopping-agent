@@ -25,9 +25,11 @@ import {
   getVoiceStatus,
   requestReturn,
   refineAgentSearch,
+  createPaymentOrder,
   runAgentSearch,
   signOut,
   speakText,
+  verifyPayment,
   warmVoice,
 } from './lib/api';
 
@@ -44,6 +46,21 @@ const NAV_ITEMS = [
   { id: 'usage', label: 'Usage', icon: 'chart' },
 ];
 const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans', orders: 'Orders & tracking', usage: 'Usage & runtime' };
+let razorpayLoader;
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) return Promise.resolve(window.Razorpay);
+  if (razorpayLoader) return razorpayLoader;
+  razorpayLoader = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => (window.Razorpay ? resolve(window.Razorpay) : reject(new Error('Razorpay Checkout did not load.')));
+    script.onerror = () => reject(new Error('Razorpay Checkout could not load. Check the network and try again.'));
+    document.head.appendChild(script);
+  });
+  return razorpayLoader;
+}
 
 function readSavedIds() {
   try {
@@ -1140,9 +1157,10 @@ function AuthSheet({ onClose, onSignIn }) {
   );
 }
 
-function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
+function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClose, onConfirm }) {
   const [confirmed, setConfirmed] = useState(false);
   const total = products.reduce((sum, product) => sum + productTotal(product), 0);
+  const livePayment = paymentProvider === 'razorpay';
 
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -1150,11 +1168,12 @@ function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
         <button type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close checkout">
           <Icon name="close" size={19} />
         </button>
-        <span className="section-kicker">Local sandbox checkout</span>
-        <h2 id="checkout-title">Ready to place this order?</h2>
+        <span className="section-kicker">{livePayment ? 'Secure hosted checkout' : 'Local sandbox checkout'}</span>
+        <h2 id="checkout-title">{livePayment ? 'Ready to pay securely?' : 'Ready to place this order?'}</h2>
         <p>
-          Artha will record a purchase order for {products.length} selected {products.length === 1 ? 'item' : 'items'} and start its tracking timeline.
-          No card details are collected in this development checkout.
+          {livePayment
+            ? `Razorpay will securely handle payment for ${products.length} selected ${products.length === 1 ? 'item' : 'items'}. Artha records the order only after the signed payment callback is verified.`
+            : `Artha will record a purchase order for ${products.length} selected ${products.length === 1 ? 'item' : 'items'} and start its tracking timeline. No card details are collected in this development checkout.`}
         </p>
         <div className="checkout-sheet__facts">
           <span>Total</span>
@@ -1169,10 +1188,10 @@ function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
           <span>I reviewed the items, total, and delivery estimate.</span>
         </label>
         <button type="button" className="primary-button" disabled={!confirmed || isSubmitting} onClick={onConfirm}>
-          {isSubmitting ? 'Creating order…' : 'Confirm order'}
+          {isSubmitting ? (livePayment ? 'Opening secure checkout…' : 'Creating order…') : livePayment ? 'Continue to payment' : 'Confirm order'}
           <Icon name="arrow" size={16} />
         </button>
-        <small className="checkout-sheet__notice">Development order only. Live merchant payment requires a configured production gateway.</small>
+        <small className="checkout-sheet__notice">{livePayment ? 'Razorpay handles card and UPI details. Artha never sees payment credentials.' : 'Development order only. Live payment requires a configured production gateway.'}</small>
       </section>
     </div>
   );
@@ -1871,7 +1890,7 @@ export default function App() {
   const [savedIds, setSavedIds] = useState(readSavedIds);
   const [plans, setPlans] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' } });
+  const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' }, payment_provider: 'sandbox', payment_configured: true });
   const [voice, setVoice] = useState({ provider: 'browser', label: 'Local browser voice' });
   const [usage, setUsage] = useState(null);
   const [usageWindow, setUsageWindow] = useState(30);
@@ -2125,20 +2144,62 @@ export default function App() {
       setAuthOpen(true);
       return;
     }
+    if (health.payment_configured === false) {
+      setToast('Checkout is not configured on this deployment yet. No order was created.');
+      return;
+    }
     setCheckoutOpen(true);
-  }, [selectedProducts.length, user]);
+  }, [health.payment_configured, selectedProducts.length, user]);
 
   const handleConfirmOrder = useCallback(async () => {
     if (!selectedProducts.length || !user || isCreatingOrder) return;
     setIsCreatingOrder(true);
+    const hostedPayment = health.payment_provider === 'razorpay';
+    let checkoutOpened = false;
+    const purchasePayload = {
+      confirmed: true,
+      search_id: result.search_id,
+      products: selectedProducts,
+      intent: result.intent,
+      location: result.intent?.location,
+    };
     try {
-      const body = await createOrder({
-        confirmed: true,
-        search_id: result.search_id,
-        products: selectedProducts,
-        intent: result.intent,
-        location: result.intent?.location,
-      });
+      if (hostedPayment) {
+        const paymentBody = await createPaymentOrder(purchasePayload);
+        const Razorpay = await loadRazorpayCheckout();
+        const checkout = new Razorpay({
+          key: paymentBody.payment.key_id,
+          amount: paymentBody.payment.amount,
+          currency: paymentBody.payment.currency,
+          name: paymentBody.payment.name,
+          description: paymentBody.payment.description,
+          order_id: paymentBody.payment.order_id,
+          prefill: paymentBody.payment.prefill,
+          theme: { color: '#ef3d78' },
+          handler: async (response) => {
+            try {
+              const verified = await verifyPayment(response);
+              setOrders((current) => [verified.order, ...current.filter((order) => order.id !== verified.order.id)]);
+              setCheckoutOpen(false);
+              setActiveView('orders');
+              setToast(`Payment verified. Order ${verified.order.id} is confirmed.`);
+            } catch (error) {
+              setToast(error.message || 'Payment verification failed. No order was recorded.');
+            } finally {
+              setIsCreatingOrder(false);
+            }
+          },
+          modal: { ondismiss: () => { setIsCreatingOrder(false); setToast('Payment was cancelled. No order was recorded.'); } },
+        });
+        checkout.on('payment.failed', () => {
+          setIsCreatingOrder(false);
+          setToast('Payment failed. No order was recorded.');
+        });
+        checkout.open();
+        checkoutOpened = true;
+        return;
+      }
+      const body = await createOrder(purchasePayload);
       setOrders((current) => [body.order, ...current.filter((order) => order.id !== body.order.id)]);
       setCheckoutOpen(false);
       setActiveView('orders');
@@ -2146,9 +2207,9 @@ export default function App() {
     } catch (error) {
       setToast(error.message || 'The order could not be created.');
     } finally {
-      setIsCreatingOrder(false);
+      if (!checkoutOpened) setIsCreatingOrder(false);
     }
-  }, [isCreatingOrder, result.intent, result.search_id, selectedProducts, user]);
+  }, [health.payment_provider, isCreatingOrder, result.intent, result.search_id, selectedProducts, user]);
 
   const handleCancelOrder = useCallback(async (orderId) => {
     try {
@@ -2367,6 +2428,7 @@ export default function App() {
         <CheckoutSheet
           products={selectedProducts}
           intent={result.intent}
+          paymentProvider={health.payment_provider}
           isSubmitting={isCreatingOrder}
           onClose={() => setCheckoutOpen(false)}
           onConfirm={handleConfirmOrder}

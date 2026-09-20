@@ -19,6 +19,7 @@ if __package__ in {None, ""}:
     from backend.voice import VoiceError, VoiceService
     from backend.workflow import create_purchase_plan, run_refinement, run_search
     from backend.orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
+    from backend.payments import PaymentError, create_payment_order, payment_status, verify_payment
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
     from .clients import AnakinClient, BriefModel
@@ -28,6 +29,7 @@ else:
     from .voice import VoiceError, VoiceService
     from .workflow import create_purchase_plan, run_refinement, run_search
     from .orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
+    from .payments import PaymentError, create_payment_order, payment_status, verify_payment
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -127,6 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/health":
                 brief = BriefModel().status()
                 voice = VoiceService().status()
+                payment = payment_status()
                 self._send(
                     200,
                     {
@@ -135,6 +138,9 @@ class Handler(BaseHTTPRequestHandler):
                         "anakin_configured": AnakinClient().configured,
                         "ai": brief,
                         "voice": voice,
+                        "payment": payment,
+                        "payment_provider": payment["provider"],
+                        "payment_configured": payment["configured"],
                         "environment": os.environ.get("APP_ENV", "development"),
                     },
                 )
@@ -214,6 +220,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(error.status, {"error": str(error)})
         except OrderError as error:
             self._send(400, {"error": str(error)})
+        except PaymentError as error:
+            self._send(error.status, {"error": str(error)})
         except Exception:
             self._send(500, {"error": "Internal server error"})
 
@@ -234,6 +242,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/orders":
                 user = self._require_user()
                 self._send(201, {"order": create_order(payload, user["id"])})
+                return
+            if path == "/api/payments/order":
+                user = self._require_user()
+                self._send(201, {"payment": create_payment_order(payload, user)})
+                return
+            if path == "/api/payments/verify":
+                user = self._require_user()
+                self._send(201, {"order": verify_payment(payload, user)})
                 return
             if path.startswith("/api/orders/") and path.endswith("/cancel"):
                 user = self._require_user()
@@ -287,6 +303,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(error.status, {"error": str(error)})
         except OrderError as error:
             self._send(400, {"error": str(error)})
+        except PaymentError as error:
+            self._send(error.status, {"error": str(error)})
         except ValueError as error:
             self._send(400, {"error": str(error)})
         except RuntimeError as error:
