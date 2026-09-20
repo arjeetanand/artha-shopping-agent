@@ -3420,3 +3420,4 @@ button, input, textarea { border-radius: 0 !important; }
 @media(max-width:820px){.conversation-trail{display:block;margin:-34px 0 28px}.conversation-trail p{margin-top:6px}.agent-strip__steps{grid-template-columns:1fr}}
 
 @media(max-width:820px){.mobile-nav{grid-template-columns:repeat(5,minmax(0,1fr));gap:0}.mobile-nav button{min-width:0;padding-inline:2px;font-size:9px}.mobile-nav button svg{width:18px;height:18px}.mobile-nav button span{white-space:nowrap}}
+@media(max-width:820px){.mobile-plan-bar{background:#101010;color:#fff;border:1px solid #161616;border-radius:0;box-shadow:none}.mobile-plan-bar__count{color:#aaa}.mobile-plan-bar__total{color:var(--primary)}.mobile-plan-bar__actions{display:flex;gap:6px}.mobile-plan-bar__checkout{min-height:36px;padding:0 12px;border:1px solid #fff;border-radius:0;background:transparent;color:#fff;font-size:12px}.mobile-plan-bar__checkout:hover{background:#fff;color:#101010}}

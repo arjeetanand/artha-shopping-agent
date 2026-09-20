@@ -1123,14 +1123,19 @@ function DiscoverView({
               ₹{selectedProducts.reduce((sum, p) => sum + productTotal(p), 0).toLocaleString('en-IN')}
             </strong>
           </div>
-          <button
-            type="button"
-            className="primary-button mobile-plan-bar__cta"
-            onClick={onSavePlan}
-            disabled={isSavingPlan}
-          >
-            {isSavingPlan ? 'Saving…' : user ? 'Save Plan' : 'Sign in to Save'}
-          </button>
+          <div className="mobile-plan-bar__actions">
+            <button
+              type="button"
+              className="primary-button mobile-plan-bar__cta"
+              onClick={onSavePlan}
+              disabled={isSavingPlan}
+            >
+              {isSavingPlan ? 'Saving…' : user ? 'Save Plan' : 'Sign in to Save'}
+            </button>
+            <button type="button" className="secondary-button mobile-plan-bar__checkout" onClick={onStartCheckout}>
+              {paymentProvider === 'razorpay' ? 'Pay' : 'Order'}
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
