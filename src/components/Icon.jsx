@@ -4,6 +4,7 @@ const paths = {
   arrow: <><path d="M4 12h15" /><path d="m13 6 6 6-6 6" /></>,
   bookmark: <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z" />,
   box: <><path d="m4 8 8-4 8 4-8 4-8-4Z" /><path d="M4 8v8l8 4 8-4V8M12 12v8" /></>,
+  chart: <><path d="M4 19V5" /><path d="M4 19h16" /><path d="m7 15 3-4 3 2 5-6" /></>,
   check: <path d="m5 12 4 4L19 6" />,
   checkCircle: <><circle cx="12" cy="12" r="9" /><path d="m9 12 2 2 4-4" /></>,
   chevron: <path d="m7 10 5 5 5-5" />,

@@ -9,6 +9,7 @@ import urllib.request
 from typing import Any
 
 from .settings import is_production, setting
+from .usage import record_usage
 
 
 ANAKIN_BASE_URL = setting("ANAKIN_BASE_URL", "https://api.anakin.io/v1").rstrip("/")
@@ -82,13 +83,15 @@ class AnakinClient:
     def search(self, query: str, num_results: int = 8) -> dict[str, Any]:
         if not self.configured:
             raise RuntimeError("Anakin is not configured")
-        return _request_json(
+        result = _request_json(
             f"{ANAKIN_BASE_URL}/search",
             method="POST",
             payload={"prompt": query, "limit": min(max(num_results, 1), 10), "region": "in", "language": "en"},
             headers=self._headers(),
             timeout=45,
         )
+        record_usage("anakin", "live_search", model="search", input_characters=len(query))
+        return result
 
     def scrape_inline(self, url: str) -> dict[str, Any]:
         if not self.configured:
@@ -106,12 +109,14 @@ class AnakinClient:
                 time.sleep(1.5)
                 result = _request_json(f"{ANAKIN_BASE_URL}/url-scraper/{job_id}", headers=self._headers(), timeout=30)
                 if result.get("status") == "completed":
+                    record_usage("anakin", "reference_scrape", model="url-scraper", input_characters=len(url))
                     return result
                 if result.get("status") == "failed":
                     raise RuntimeError("Anakin could not extract that URL")
             raise TimeoutError("Anakin extraction timed out")
         if result.get("status") == "failed":
             raise RuntimeError("Anakin could not extract that URL")
+        record_usage("anakin", "reference_scrape", model="url-scraper", input_characters=len(url))
         return result
 
 
@@ -149,6 +154,17 @@ class OllamaClient:
             )
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError, urllib.error.HTTPError):
             return None
+        input_tokens = response.get("prompt_eval_count")
+        output_tokens = response.get("eval_count")
+        total_tokens = response.get("total_tokens")
+        record_usage(
+            "ollama",
+            "brief_extraction",
+            model=payload["model"],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        )
         return _json_object(response.get("response"))
 
 
@@ -189,6 +205,16 @@ class GeminiClient:
             )
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError, urllib.error.HTTPError):
             return None
+        metadata = response.get("usageMetadata") or {}
+        record_usage(
+            "gemini",
+            "brief_extraction",
+            model=self.model,
+            input_tokens=metadata.get("promptTokenCount"),
+            output_tokens=metadata.get("candidatesTokenCount"),
+            total_tokens=metadata.get("totalTokenCount"),
+            cached_tokens=metadata.get("cachedContentTokenCount"),
+        )
         candidates = response.get("candidates") or []
         parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
         text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
@@ -212,7 +238,8 @@ class BriefModel:
     def status(self) -> dict[str, object]:
         active = self.provider
         configured = self.gemini.configured if active == "gemini" else self.ollama.configured
-        return {"provider": active, "configured": configured, "gemini_configured": self.gemini.configured, "ollama_enabled": self.ollama.configured}
+        model = self.gemini.model if active == "gemini" else self.ollama.model
+        return {"provider": active, "model": model, "configured": configured, "gemini_configured": self.gemini.configured, "ollama_enabled": self.ollama.configured}
 
     def extract_brief(self, text: str, reference_image: dict[str, str] | None = None) -> tuple[dict[str, Any] | None, str]:
         image_context = reference_image["name"] if reference_image else "none"

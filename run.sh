@@ -53,8 +53,33 @@ fi
 export SHOPPINGHELP_PORT="$BACKEND_PORT"
 export SHOPPINGHELP_API_TARGET="http://127.0.0.1:$BACKEND_PORT"
 
-# 5. Clean termination on Ctrl+C (SIGINT) or kill (SIGTERM)
+# 5. Clean up any stale processes occupying configured ports
+free_port() {
+  local port="$1"
+  local desc="$2"
+  local pids
+  pids=$(lsof -a -ti -i :"$port" -sTCP:LISTEN 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    echo "⚠️  Port $port ($desc) is already in use by PID(s): $pids"
+    echo "🧹 Terminating stale process on port $port..."
+    kill $pids 2>/dev/null || true
+    sleep 0.5
+    local remaining
+    remaining=$(lsof -a -ti -i :"$port" -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$remaining" ]; then
+      kill -9 $remaining 2>/dev/null || true
+      sleep 0.5
+    fi
+    echo "✅ Port $port freed."
+  fi
+}
+
+free_port "$BACKEND_PORT" "backend"
+free_port "$FRONTEND_PORT" "frontend"
+
+# 6. Clean termination on Ctrl+C (SIGINT) or kill (SIGTERM)
 cleanup() {
+  trap - SIGINT SIGTERM EXIT
   echo ""
   echo "🛑 Shutting down Artha services..."
   if [ -n "$BACKEND_PID" ]; then
@@ -63,30 +88,41 @@ cleanup() {
   if [ -n "$FRONTEND_PID" ]; then
     kill "$FRONTEND_PID" 2>/dev/null || true
   fi
-  wait 2>/dev/null || true
+  wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
   echo "✅ Stopped all services cleanly."
   exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# 6. Start Python Backend
+# 7. Start Python Backend
 echo "🚀 Starting Artha Backend on http://127.0.0.1:$BACKEND_PORT ($PYTHON_BIN)..."
 $PYTHON_BIN backend/server.py &
 BACKEND_PID=$!
 
 # Wait for backend health check
 echo "⏳ Waiting for backend to initialize..."
+backend_ready=false
 for i in {1..20}; do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "❌ Error: Backend process failed to start or crashed."
+    exit 1
+  fi
   if curl -s "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1; then
     echo "✅ Backend is healthy at http://127.0.0.1:$BACKEND_PORT"
+    backend_ready=true
     break
   fi
   sleep 0.5
 done
 
-# 7. Start Vite Frontend
+if [ "$backend_ready" != "true" ]; then
+  echo "❌ Error: Backend failed to respond to health check in time."
+  exit 1
+fi
+
+# 8. Start Vite Frontend
 echo "🚀 Starting Vite Frontend on http://127.0.0.1:$FRONTEND_PORT..."
-npx vite --host 127.0.0.1 --port "$FRONTEND_PORT" &
+npx vite --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort &
 FRONTEND_PID=$!
 
 echo ""

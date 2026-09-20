@@ -12,6 +12,7 @@ This is a real research and handoff flow, not a simulated payment system. Artha 
 - **Ollama** is selected by default in local development for brief extraction.
 - **Gemini** is selected by default when `APP_ENV=production`; it can analyze reference images as well as text.
 - **Kokoro** is the preferred local voice when the optional local voice environment is installed, with browser SpeechSynthesis as a fallback. **ElevenLabs** is selected by default in production.
+- **Usage & runtime** keeps a persistent SQLite ledger of provider-reported AI tokens, plus clearly marked unmetered Anakin search and server voice activity. The UI can filter the ledger by local or production runtime without pretending to switch the running deployment.
 
 ## Run locally
 
@@ -131,13 +132,15 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `POST /api/agent/search` | Run the brief → search → evidence → decision workflow |
 | `GET /api/plans` | List the signed-in user's private purchase plans |
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |
+| `GET /api/usage?days=30&runtime=all` | View token totals, provider breakdowns, and recent activity; production requires Google sign-in |
 | `GET /api/voice/status` | Selected voice provider and availability |
 | `POST /api/voice/warm` | Warm the selected local Kokoro voice before playback |
 | `POST /api/voice/speak` | Produce the summary audio or local-browser speech instruction |
 
 ## Data and safety notes
 
-- SQLite stores searches, OAuth state, hashed sessions, users, and user-scoped purchase plans in `backend/shoppinghelp.sqlite3`.
+- SQLite stores searches, OAuth state, hashed sessions, users, user-scoped purchase plans, and provider usage events in `backend/shoppinghelp.sqlite3`.
+- Usage events store counts and metadata only: provider, operation, model name, token counts when reported, character/byte counts for unmetered activity, runtime, status, and timestamp. Provider credentials are never written to the ledger.
 - No Google OAuth token, payment credential, or reference-image bytes are persisted.
 - The service cannot charge a card, submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions.
 - Saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.

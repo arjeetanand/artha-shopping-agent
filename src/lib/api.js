@@ -38,6 +38,11 @@ export function getPlans() {
   return request('/plans');
 }
 
+export function getUsage({ days = 30, runtime = 'all' } = {}) {
+  const params = new URLSearchParams({ days: String(days), runtime });
+  return request(`/usage?${params.toString()}`);
+}
+
 export function createPlan(payload) {
   return request('/plans', { method: 'POST', body: JSON.stringify(payload) });
 }

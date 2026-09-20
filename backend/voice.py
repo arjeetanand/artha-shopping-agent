@@ -15,6 +15,7 @@ from threading import RLock
 from typing import Any
 
 from .settings import is_production, setting
+from .usage import record_usage
 
 
 class VoiceError(RuntimeError):
@@ -201,6 +202,7 @@ class VoiceService:
         return {
             "provider": provider,
             "label": label,
+            "model": self.model_id if provider == "elevenlabs" else (KOKORO_MODEL_REPO if provider == "kokoro" else "browser-speech"),
             "configured": provider not in {"unconfigured", "kokoro-unavailable"},
             "local": provider in {"browser", "kokoro", "kokoro-unavailable"},
             "requested_local_provider": requested_local,
@@ -221,7 +223,10 @@ class VoiceService:
         if self.provider == "browser":
             raise VoiceError("Local browser voice is selected; speech is synthesized in the browser.")
         if self.provider == "kokoro":
-            return _kokoro_audio(text), "audio/wav"
+            normalized = " ".join((text or "").split())
+            audio = _kokoro_audio(normalized)
+            record_usage("kokoro", "voice_synthesis", model=KOKORO_MODEL_REPO, input_characters=len(normalized), output_bytes=len(audio))
+            return audio, "audio/wav"
         if self.provider == "kokoro-unavailable":
             raise VoiceError("Kokoro local voice is unavailable. Install backend/requirements-kokoro.txt and restart the app.")
         if self.provider != "elevenlabs":
@@ -245,7 +250,9 @@ class VoiceService:
         )
         try:
             with urllib.request.urlopen(request, timeout=45) as response:
-                return response.read(), response.headers.get_content_type() or "audio/mpeg"
+                audio = response.read()
+                record_usage("elevenlabs", "voice_synthesis", model=self.model_id, input_characters=len(text), output_bytes=len(audio))
+                return audio, response.headers.get_content_type() or "audio/mpeg"
         except urllib.error.HTTPError as error:
             if error.code in {401, 403}:
                 raise VoiceError("ElevenLabs rejected the configured API key or voice access. Check ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID.") from error

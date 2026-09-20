@@ -14,12 +14,16 @@ if __package__ in {None, ""}:
     from backend.auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
     from backend.clients import AnakinClient, BriefModel
     from backend.db import db
+    from backend.settings import is_production
+    from backend.usage import get_usage_summary, runtime_name
     from backend.voice import VoiceError, VoiceService
     from backend.workflow import create_purchase_plan, run_search
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
     from .clients import AnakinClient, BriefModel
     from .db import db
+    from .settings import is_production
+    from .usage import get_usage_summary, runtime_name
     from .voice import VoiceError, VoiceService
     from .workflow import create_purchase_plan, run_search
 
@@ -149,6 +153,37 @@ class Handler(BaseHTTPRequestHandler):
                 separator = "&" if "?" in destination else "?"
                 self._redirect(f"{destination}{separator}{urlencode({'auth': 'success'})}", session_cookie(token))
                 return
+            if path == "/api/usage":
+                if is_production():
+                    self._require_user()
+                try:
+                    days = int((query.get("days") or ["30"])[0])
+                except ValueError as error:
+                    raise ApiError("Usage window must be a number of days", 400) from error
+                if not 1 <= days <= 365:
+                    raise ApiError("Usage window must be between 1 and 365 days", 400)
+                requested_runtime = (query.get("runtime") or ["all"])[0].lower()
+                if requested_runtime not in {"all", "local", "production"}:
+                    raise ApiError("Usage runtime must be all, local, or production", 400)
+                brief = BriefModel().status()
+                voice = VoiceService().status()
+                summary = get_usage_summary(
+                    days=days,
+                    runtime=None if requested_runtime == "all" else requested_runtime,
+                )
+                self._send(
+                    200,
+                    {
+                        **summary,
+                        "active_runtime": runtime_name(),
+                        "environment": os.environ.get("APP_ENV", "development"),
+                        "active_ai": brief,
+                        "active_voice": voice,
+                        "anakin_configured": AnakinClient().configured,
+                        "google_configured": google_configured(),
+                    },
+                )
+                return
             if path == "/api/plans":
                 user = self._require_user()
                 self._send(200, {"plans": db.list_purchase_plans(user["id"])})
@@ -209,7 +244,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as err:
+        if err.errno == 48:
+            print(f"[artha] ❌ Error: Port {PORT} is already in use by another process.", file=sys.stderr)
+            print(f"[artha] Run: lsof -ti :{PORT} | xargs kill -9", file=sys.stderr)
+        raise
     print(f"Artha API listening on http://{HOST}:{PORT}")
     print("Google OAuth, Anakin extraction, provider routing, and voice status are ready.")
     try:

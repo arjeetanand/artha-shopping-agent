@@ -98,6 +98,25 @@ class Database:
                 );
 
                 CREATE INDEX IF NOT EXISTS purchase_plans_user_index ON purchase_plans(user_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS usage_events (
+                    id TEXT PRIMARY KEY,
+                    runtime TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    model TEXT,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    total_tokens INTEGER,
+                    cached_tokens INTEGER,
+                    input_characters INTEGER,
+                    output_bytes INTEGER,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS usage_events_created_index ON usage_events(created_at DESC);
+                CREATE INDEX IF NOT EXISTS usage_events_runtime_index ON usage_events(runtime, created_at DESC);
                 """
             )
 
@@ -190,6 +209,104 @@ class Database:
         with self._connect() as connection:
             rows = connection.execute("SELECT payload_json FROM purchase_plans WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
+
+    def record_usage_event(self, event: dict[str, Any]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO usage_events (
+                    id, runtime, provider, operation, model, input_tokens, output_tokens,
+                    total_tokens, cached_tokens, input_characters, output_bytes, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event["id"],
+                    event["runtime"],
+                    event["provider"],
+                    event["operation"],
+                    event.get("model") or None,
+                    event.get("input_tokens"),
+                    event.get("output_tokens"),
+                    event.get("total_tokens"),
+                    event.get("cached_tokens"),
+                    event.get("input_characters"),
+                    event.get("output_bytes"),
+                    event.get("status") or "success",
+                    event["created_at"],
+                ),
+            )
+
+    def usage_summary(self, *, days: int = 30, runtime: str | None = None) -> dict[str, Any]:
+        safe_days = max(1, min(int(days), 365))
+        since = (datetime.now(timezone.utc) - timedelta(days=safe_days)).isoformat(timespec="seconds")
+        where = ["created_at >= ?"]
+        params: list[Any] = [since]
+        if runtime in {"local", "production"}:
+            where.append("runtime = ?")
+            params.append(runtime)
+        clause = " AND ".join(where)
+
+        with self._connect() as connection:
+            totals = connection.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS requests,
+                    COUNT(total_tokens) AS metered_requests,
+                    COUNT(*) - COUNT(total_tokens) AS unmetered_requests,
+                    SUM(input_tokens) AS input_tokens,
+                    SUM(output_tokens) AS output_tokens,
+                    SUM(total_tokens) AS total_tokens,
+                    SUM(cached_tokens) AS cached_tokens,
+                    SUM(input_characters) AS input_characters,
+                    SUM(output_bytes) AS output_bytes
+                FROM usage_events
+                WHERE {clause}
+                """,
+                params,
+            ).fetchone()
+            by_provider = connection.execute(
+                f"""
+                SELECT
+                    provider,
+                    operation,
+                    runtime,
+                    COUNT(*) AS requests,
+                    COUNT(total_tokens) AS metered_requests,
+                    SUM(input_tokens) AS input_tokens,
+                    SUM(output_tokens) AS output_tokens,
+                    SUM(total_tokens) AS total_tokens,
+                    SUM(cached_tokens) AS cached_tokens,
+                    SUM(input_characters) AS input_characters,
+                    SUM(output_bytes) AS output_bytes
+                FROM usage_events
+                WHERE {clause}
+                GROUP BY provider, operation, runtime
+                ORDER BY COALESCE(SUM(total_tokens), 0) DESC, requests DESC, provider ASC
+                """,
+                params,
+            ).fetchall()
+            recent = connection.execute(
+                f"""
+                SELECT id, runtime, provider, operation, model, input_tokens, output_tokens,
+                       total_tokens, cached_tokens, input_characters, output_bytes, status, created_at
+                FROM usage_events
+                WHERE {clause}
+                ORDER BY created_at DESC
+                LIMIT 24
+                """,
+                params,
+            ).fetchall()
+
+        def row_dict(row: sqlite3.Row) -> dict[str, Any]:
+            return dict(row)
+
+        return {
+            "window_days": safe_days,
+            "filter_runtime": runtime or "all",
+            "totals": row_dict(totals),
+            "by_provider": [row_dict(row) for row in by_provider],
+            "recent": [row_dict(row) for row in recent],
+        }
 
 
 db = Database()

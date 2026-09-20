@@ -15,6 +15,7 @@ import {
   getHealth,
   getPlans,
   getSession,
+  getUsage,
   getVoiceStatus,
   runAgentSearch,
   signOut,
@@ -30,8 +31,9 @@ const NAV_ITEMS = [
   { id: 'discover', label: 'Discover', icon: 'search' },
   { id: 'saved', label: 'Saved', icon: 'bookmark' },
   { id: 'plans', label: 'Purchase plans', icon: 'box' },
+  { id: 'usage', label: 'Usage', icon: 'chart' },
 ];
-const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans' };
+const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans', usage: 'Usage & runtime' };
 
 function readSavedIds() {
   try {
@@ -94,6 +96,7 @@ function Logo({ onClick }) {
 
 function NavRail({ activeView, onNavigate, onReset, health, planCount }) {
   const live = health?.anakin_configured;
+  const production = health?.environment === 'production';
   return (
     <aside className="nav-rail">
       <div className="nav-rail__top">
@@ -118,8 +121,8 @@ function NavRail({ activeView, onNavigate, onReset, health, planCount }) {
         <div className="connection-status">
           <span className={`connection-dot ${live ? 'is-live' : ''}`} />
           <div className="connection-status__text">
-            <strong>{live ? 'Live search active' : 'Local development mode'}</strong>
-            <small>{health?.ai?.provider === 'gemini' ? 'Gemini API' : 'Ollama local'}</small>
+            <strong>{production ? 'Production API' : 'Local API'}</strong>
+            <small>{live ? 'Anakin live search' : 'Search provider not ready'} · {health?.ai?.provider === 'gemini' ? 'Gemini' : 'Ollama'}</small>
           </div>
         </div>
         <div className="nav-rail__rule" />
@@ -1208,6 +1211,288 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
   );
 }
 
+function formatUsageCount(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? new Intl.NumberFormat('en-IN').format(numeric) : '—';
+}
+
+function usageProviderName(provider) {
+  return {
+    anakin: 'Anakin',
+    ollama: 'Ollama',
+    gemini: 'Gemini',
+    kokoro: 'Kokoro',
+    elevenlabs: 'ElevenLabs',
+  }[provider] || provider || 'Unknown provider';
+}
+
+function usageOperationName(operation) {
+  return String(operation || 'activity')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function usageRuntimeName(runtime) {
+  return runtime === 'production' ? 'Production' : 'Local';
+}
+
+function usageRequestLabel(value) {
+  const count = formatUsageCount(value);
+  return `${count} ${Number(value) === 1 ? 'request' : 'requests'}`;
+}
+
+function usageTimestamp(value) {
+  const parsed = new Date(value || '');
+  if (Number.isNaN(parsed.getTime())) return 'Time unavailable';
+  return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(parsed);
+}
+
+function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntimeChange, onRefresh, isLoading, error, onSignIn }) {
+  const totals = usage?.totals || {};
+  const providerRows = usage?.by_provider || [];
+  const recent = usage?.recent || [];
+  const activeAi = usage?.active_ai || {};
+  const activeVoice = usage?.active_voice || {};
+  const activeRuntime = usageRuntimeName(usage?.active_runtime);
+  const maxTokens = Math.max(...providerRows.map((row) => Number(row.total_tokens || 0)), 1);
+  const maxRequests = Math.max(...providerRows.map((row) => Number(row.requests || 0)), 1);
+  const hasUsage = providerRows.length > 0 || recent.length > 0;
+
+  return (
+    <div className="page-stack usage-page">
+      <div className="page-heading usage-heading">
+        <div>
+          <span className="section-kicker">Operations</span>
+          <h1>
+            Usage you can see.
+            <br />
+            Runtime, without guesswork.
+          </h1>
+          <p>Track metered AI tokens and unmetered source and voice activity from the same Artha workspace.</p>
+        </div>
+        <button type="button" className="quiet-action usage-refresh" onClick={onRefresh} disabled={isLoading}>
+          <Icon name="waveform" size={15} />
+          <span>{isLoading ? 'Refreshing…' : 'Refresh ledger'}</span>
+        </button>
+      </div>
+
+      <section className="usage-toolbar" aria-label="Usage filters">
+        <div className="usage-toolbar__runtime">
+          <span className={`usage-status-dot ${usage?.environment === 'production' ? 'is-production' : ''}`} />
+          <div>
+            <strong>Active server: {activeRuntime}</strong>
+            <small>Filters change the ledger view; they do not switch the running deployment.</small>
+          </div>
+        </div>
+        <div className="usage-toolbar__controls">
+          <fieldset className="usage-toggle-group">
+            <legend>View runtime</legend>
+            <div className="usage-toggle-group__buttons">
+              {['all', 'local', 'production'].map((option) => (
+                <button
+                  type="button"
+                  key={option}
+                  aria-pressed={usageRuntime === option}
+                  className={usageRuntime === option ? 'is-selected' : ''}
+                  onClick={() => onRuntimeChange(option)}
+                >
+                  {option === 'all' ? 'All' : usageRuntimeName(option)}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="usage-toggle-group">
+            <legend>Window</legend>
+            <div className="usage-toggle-group__buttons">
+              {[7, 30, 90].map((days) => (
+                <button
+                  type="button"
+                  key={days}
+                  aria-pressed={usageWindow === days}
+                  className={usageWindow === days ? 'is-selected' : ''}
+                  onClick={() => onWindowChange(days)}
+                >
+                  {days}d
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        </div>
+      </section>
+
+      {error ? (
+        <div className="usage-error" role="alert">
+          <div>
+            <strong>Usage ledger unavailable.</strong>
+            <p>{error}</p>
+          </div>
+          <div className="usage-error__actions">
+            {onSignIn && /sign in/i.test(error) ? (
+              <button type="button" className="primary-button" onClick={onSignIn}>Sign in</button>
+            ) : null}
+            <button type="button" className="quiet-action" onClick={onRefresh}>Retry</button>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="usage-runtime-grid" aria-label="Runtime status">
+        <article className="usage-runtime-card">
+          <span className="usage-card__label">Server runtime</span>
+          <strong>{activeRuntime}</strong>
+          <small>{usage?.environment || 'development'} environment</small>
+        </article>
+        <article className="usage-runtime-card">
+          <span className="usage-card__label">AI route</span>
+          <strong>{usageProviderName(activeAi.provider)}</strong>
+          <small>{activeAi.model || (activeAi.configured ? 'Configured' : 'Not configured')}</small>
+        </article>
+        <article className="usage-runtime-card">
+          <span className="usage-card__label">Live sources</span>
+          <strong>{usage?.anakin_configured ? 'Anakin ready' : 'Not configured'}</strong>
+          <small>Search requests are tracked as unmetered activity.</small>
+        </article>
+        <article className="usage-runtime-card">
+          <span className="usage-card__label">Voice route</span>
+          <strong>{activeVoice.label || usageProviderName(activeVoice.provider)}</strong>
+          <small>{activeVoice.model || 'Browser speech'}</small>
+        </article>
+      </section>
+
+      <section className="usage-metrics" aria-label="Usage totals" aria-live="polite">
+        {[
+          ['Total tokens', totals.total_tokens, 'input + output, when the provider reports it'],
+          ['Input tokens', totals.input_tokens, 'prompt tokens reported by the AI provider'],
+          ['Output tokens', totals.output_tokens, 'generated tokens reported by the AI provider'],
+          ['Cached tokens', totals.cached_tokens, 'provider-reported cached prompt tokens'],
+          ['Requests', totals.requests ?? 0, `${formatUsageCount(totals.metered_requests ?? 0)} metered · ${formatUsageCount(totals.unmetered_requests ?? 0)} activity`],
+        ].map(([label, value, meta]) => (
+          <article className="usage-metric-card" key={label}>
+            <span className="usage-card__label">{label}</span>
+            <strong>{formatUsageCount(value)}</strong>
+            <small>{meta}</small>
+          </article>
+        ))}
+      </section>
+
+      <div className="usage-content-grid">
+        <section className="usage-panel">
+          <div className="usage-panel__header">
+            <div>
+              <span className="section-kicker">Provider view</span>
+              <h2>Where activity is going</h2>
+            </div>
+            <span className="usage-panel__caption">{usage?.window_days || usageWindow} day window</span>
+          </div>
+          {providerRows.length ? (
+            <div className="usage-provider-list">
+              {providerRows.map((row) => {
+                const tokenCount = Number(row.total_tokens || 0);
+                const requestCount = Number(row.requests || 0);
+                const width = tokenCount ? Math.max(8, (tokenCount / maxTokens) * 100) : Math.max(8, (requestCount / maxRequests) * 100);
+                return (
+                  <div className="usage-provider-row" key={`${row.provider}-${row.operation}-${row.runtime}`}>
+                    <div className="usage-provider-row__topline">
+                      <div>
+                        <strong>{usageProviderName(row.provider)}</strong>
+                        <span>{usageOperationName(row.operation)} · {usageRuntimeName(row.runtime)}</span>
+                      </div>
+                      <b>{row.total_tokens === null ? usageRequestLabel(row.requests) : `${formatUsageCount(row.total_tokens)} tokens`}</b>
+                    </div>
+                    <div className="usage-provider-bar" aria-hidden="true">
+                      <span style={{ width: `${width}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="usage-empty">
+              <Icon name="chart" size={22} />
+              <strong>No activity in this window.</strong>
+              <p>Run a search or play a server voice summary and the ledger will appear here.</p>
+            </div>
+          )}
+        </section>
+
+        <section className="usage-panel usage-panel--activity">
+          <div className="usage-panel__header">
+            <div>
+              <span className="section-kicker">Recent events</span>
+              <h2>Latest activity</h2>
+            </div>
+            <span className="usage-panel__caption">No secrets stored</span>
+          </div>
+          {recent.length ? (
+            <ul className="usage-event-list">
+              {recent.slice(0, 8).map((event) => (
+                <li className="usage-event" key={event.id}>
+                  <div>
+                    <strong>{usageProviderName(event.provider)}</strong>
+                    <small>{usageOperationName(event.operation)} · {usageRuntimeName(event.runtime)} · {usageTimestamp(event.created_at)}</small>
+                  </div>
+                  <span>{event.total_tokens === null ? `${formatUsageCount(event.input_characters || event.output_bytes || event.requests || 0)} ${event.input_characters ? 'chars' : event.output_bytes ? 'bytes' : 'events'}` : `${formatUsageCount(event.total_tokens)} tokens`}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="usage-empty usage-empty--compact">
+              <p>No recent provider events yet.</p>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="usage-panel usage-panel--table">
+        <div className="usage-panel__header">
+          <div>
+            <span className="section-kicker">Inspect</span>
+            <h2>Token and activity breakdown</h2>
+          </div>
+          <span className="usage-panel__caption">Raw counts from the persistent ledger</span>
+        </div>
+        {hasUsage ? (
+          <div className="usage-table-wrap">
+            <table className="usage-table">
+              <caption className="sr-only">Provider token and activity breakdown</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Provider</th>
+                  <th scope="col">Operation</th>
+                  <th scope="col">Runtime</th>
+                  <th scope="col">Input</th>
+                  <th scope="col">Output</th>
+                  <th scope="col">Cached</th>
+                  <th scope="col">Total</th>
+                  <th scope="col">Requests</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providerRows.map((row) => (
+                  <tr key={`table-${row.provider}-${row.operation}-${row.runtime}`}>
+                    <td>{usageProviderName(row.provider)}</td>
+                    <td>{usageOperationName(row.operation)}</td>
+                    <td>{usageRuntimeName(row.runtime)}</td>
+                    <td>{formatUsageCount(row.input_tokens)}</td>
+                    <td>{formatUsageCount(row.output_tokens)}</td>
+                    <td>{formatUsageCount(row.cached_tokens)}</td>
+                    <td>{formatUsageCount(row.total_tokens)}</td>
+                    <td>{formatUsageCount(row.requests)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="usage-empty usage-empty--table">
+            <p>There are no events to break down for this runtime and window.</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function Toast({ message }) {
   return message ? (
     <div className="toast" role="status">
@@ -1232,6 +1517,11 @@ export default function App() {
   const [plans, setPlans] = useState([]);
   const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' } });
   const [voice, setVoice] = useState({ provider: 'browser', label: 'Local browser voice' });
+  const [usage, setUsage] = useState(null);
+  const [usageWindow, setUsageWindow] = useState(30);
+  const [usageRuntime, setUsageRuntime] = useState('all');
+  const [isUsageLoading, setIsUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState('');
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
@@ -1249,6 +1539,19 @@ export default function App() {
     const body = await getPlans();
     setPlans(body.plans || []);
   }, [user?.id]);
+
+  const refreshUsage = useCallback(async () => {
+    setIsUsageLoading(true);
+    setUsageError('');
+    try {
+      const body = await getUsage({ days: usageWindow, runtime: usageRuntime });
+      setUsage(body);
+    } catch (error) {
+      setUsageError(error.message || 'Could not load usage right now.');
+    } finally {
+      setIsUsageLoading(false);
+    }
+  }, [usageRuntime, usageWindow]);
 
   useEffect(() => {
     let active = true;
@@ -1297,6 +1600,10 @@ export default function App() {
   useEffect(() => {
     if (activeView === 'plans') refreshPlans().catch((error) => setToast(error.message));
   }, [activeView, refreshPlans]);
+
+  useEffect(() => {
+    if (activeView === 'usage') refreshUsage();
+  }, [activeView, refreshUsage]);
 
   useEffect(() => {
     if (!isSearching) return undefined;
@@ -1520,6 +1827,18 @@ export default function App() {
         onTogglePlan={toggleProduct}
         selectedIds={selectedIds}
       />
+    ) : activeView === 'usage' ? (
+      <UsageView
+        usage={usage}
+        usageWindow={usageWindow}
+        usageRuntime={usageRuntime}
+        onWindowChange={setUsageWindow}
+        onRuntimeChange={setUsageRuntime}
+        onRefresh={refreshUsage}
+        isLoading={isUsageLoading}
+        error={usageError}
+        onSignIn={() => beginGoogleSignIn('/usage')}
+      />
     ) : (
       <PlansView
         user={user}
@@ -1542,7 +1861,7 @@ export default function App() {
         <TopHeader
           activeView={activeView}
           user={user}
-          onSignIn={() => beginGoogleSignIn(`/${activeView === 'plans' ? 'plans' : ''}`)}
+          onSignIn={() => beginGoogleSignIn(activeView === 'plans' ? '/plans' : activeView === 'usage' ? '/usage' : '/')}
           onSignOut={handleSignOut}
         />
         {view}
