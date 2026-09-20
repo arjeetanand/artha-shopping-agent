@@ -2293,7 +2293,7 @@ export default function App() {
       setToast('Select at least one product before listening to an edit.');
       return;
     }
-    const opportunityText = result.summary?.opportunity ? ` One nearby option is ${sanitizeTitle(result.summary.opportunity.name)} for ${formatPrice(result.summary.opportunity.extra)} more than the stated budget.` : '';
+    const opportunityText = result.summary?.opportunity ? ` One other option is ${sanitizeTitle(result.summary.opportunity.name)} for ${formatPrice(result.summary.opportunity.extra)} more than the stated budget.` : '';
     const text = `Your purchase plan includes ${selectedProducts.map((p) => sanitizeTitle(p.name)).join(', ')}. The current subtotal is ${formatPrice(selectedProducts.reduce((sum, p) => sum + productTotal(p), 0))}. ${result.summary?.delivery_label || 'Confirm delivery with each retailer.'}${opportunityText}`;
     try {
       setIsSpeaking(true);
