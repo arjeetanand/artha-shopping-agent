@@ -98,8 +98,11 @@ def main() -> None:
         assert search["intent"]["location_source"].startswith("browser_permission")
         assert "location_coordinates" not in search["intent"]
         assert search["intent"]["quantity"] == 1
-        assert len(search["workflow"]) == 6
+        assert len(search["workflow"]) == 7
         assert search["workflow"][1]["agent"] == "Location agent"
+        assert search["workflow"][4]["agent"] == "Research agent"
+        assert search["products"][0]["research_status"] == "complete"
+        assert search["products"][0]["research_sources"][0]["status"] == "catalog"
         assert search["products"][0]["eligible"] is True
         assert search["products"][0]["line_total"] == 10490
         assert any(product["delivery_fit"] is False for product in search["products"])

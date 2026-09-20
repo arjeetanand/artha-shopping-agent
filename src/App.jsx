@@ -1184,6 +1184,7 @@ function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
   const reviewAnalysis = product.review_analysis || {};
   const priceHistory = product.price_history || {};
   const reviewSources = Array.isArray(product.review_sources) ? product.review_sources : [];
+  const researchSources = Array.isArray(product.research_sources) ? product.research_sources : [];
   const evidence = Array.isArray(product.evidence) ? product.evidence : [];
   const reviewLabel = reviewAnalysis.label || (Number.isFinite(reviewScore) ? `${Math.round(reviewScore * 100)}% reliability signal` : 'Not available');
   const historyLabel = priceHistory.trend_label || 'Price history not returned by this source';
@@ -1236,6 +1237,25 @@ function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
             <span>Median</span><b>{priceHistory.median_90d ? formatPrice(priceHistory.median_90d) : '—'}</b>
             <span>High</span><b>{priceHistory.high_90d ? formatPrice(priceHistory.high_90d) : '—'}</b>
           </div>
+        </div>
+
+        <div className="evidence-sheet__section">
+          <div className="evidence-sheet__section-head">
+            <span className="section-kicker">Research trail</span>
+            <strong>{researchSources.length ? `${researchSources.length} check${researchSources.length === 1 ? '' : 's'}` : 'Not available'}</strong>
+          </div>
+          {researchSources.length ? (
+            <ul className="evidence-sheet__list">
+              {researchSources.map((source, index) => (
+                <li key={`${source.name || 'research'}-${index}`}>
+                  <span>{source.name || 'Research source'}</span>
+                  <small>{source.status || 'unknown'} · {source.detail || 'Research detail unavailable'}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <small>Direct product-page research was not returned. Treat seller and review signals as unverified.</small>
+          )}
         </div>
 
         <div className="evidence-sheet__section">

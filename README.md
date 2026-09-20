@@ -73,7 +73,7 @@ Run the complete deterministic flow against a temporary server and SQLite databa
 npm run test:e2e
 ```
 
-The test covers the example brief, constraint-aware ranking, six-stage workflow, server-side checkout-price verification, order creation, delivery progression, return, refund, and cleanup. It uses `SHOPPINGHELP_SEARCH_MODE=fixture` and never touches the developer database or a payment provider.
+The test covers the example brief, constraint-aware ranking, seven-stage workflow, server-side checkout-price verification, order creation, delivery progression, return, refund, and cleanup. It uses `SHOPPINGHELP_SEARCH_MODE=fixture` and never touches the developer database or a payment provider.
 
 ## Configure providers
 
@@ -131,10 +131,11 @@ KOKORO_DEVICE=auto
 2. **Location agent** uses the typed city or an explicitly permissioned browser location, with optional Google Maps geocoding and no coordinate persistence.
 3. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
 4. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
-5. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
-6. **Decision agent** ranks by fit and excludes products with a known budget, delivery-window, or stock-quantity failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
-7. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
-8. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
+5. **Research agent** checks up to six returned live product pages in parallel through Anakin's URL scraper, fills only missing structured fields, records price mismatches, and keeps direct-page failures visibly unverified. Fixture mode uses its deterministic catalog evidence without network calls.
+6. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
+7. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, and evidence, and excludes products with a known constraint failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
+8. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
+9. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
 

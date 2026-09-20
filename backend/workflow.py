@@ -5,8 +5,10 @@ import binascii
 import copy
 import hashlib
 import ipaddress
+import json
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlparse
@@ -356,6 +358,7 @@ class ExtractionAgent:
             "review_sources": data.get("review_sources") if isinstance(data, dict) and isinstance(data.get("review_sources"), list) else [],
             "review_analysis": data.get("review_analysis") if isinstance(data, dict) and isinstance(data.get("review_analysis"), dict) else {},
             "price_history": data.get("price_history") if isinstance(data, dict) and isinstance(data.get("price_history"), dict) else {},
+            "seller_reliability": data.get("seller_reliability") if isinstance(data, dict) else None,
         }
 
     def run(self, raw_products: list[dict[str, Any]], source_meta: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -383,6 +386,13 @@ class AnalysisAgent:
             reliability = None
         if not sources:
             return reliability, product.get("review_analysis") if isinstance(product.get("review_analysis"), dict) else {}
+
+        if reliability is None and len(sources) < 2:
+            return None, {
+                "label": "Single-source review metadata",
+                "detail": "A retailer exposed review metadata, but an independent source was not available for authenticity cross-checking.",
+                "caution_flags": 1,
+            }
 
         signal_text = " ".join(str(source.get("signal") or "") for source in sources).lower()
         caution_terms = ("duplicate", "repeated", "anomaly", "limited", "small sample", "inconsistent")
@@ -444,6 +454,174 @@ class AnalysisAgent:
         }
 
 
+def _scraped_mapping(value: Any) -> dict[str, Any]:
+    """Extract a safe structured mapping from an Anakin scrape response."""
+    if isinstance(value, dict):
+        for key in ("generatedJson", "generated_json", "product", "result"):
+            nested = value.get(key)
+            if isinstance(nested, dict):
+                return _scraped_mapping(nested)
+            if isinstance(nested, str):
+                parsed = _scraped_mapping(nested)
+                if parsed:
+                    return parsed
+        data = value.get("data")
+        if isinstance(data, dict) and data:
+            nested = _scraped_mapping(data)
+            return nested or data
+        return value
+    if isinstance(value, str):
+        candidate = value.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        if not candidate.startswith("{"):
+            return {}
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _scraped_text(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    chunks = []
+    for key in ("markdown", "content", "text", "description", "summary"):
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            chunks.append(item.strip())
+    return " ".join(chunks)[:12000]
+
+
+class ResearchAgent:
+    """Parallel direct-page checks for live product evidence.
+
+    The agent only fills missing structured fields or records a transparent
+    mismatch. It never turns unstructured page copy into a verified price,
+    stock, review, or seller claim.
+    """
+
+    name = "Research agent"
+
+    def __init__(self) -> None:
+        self.anakin = AnakinClient()
+
+    @staticmethod
+    def _host(url: str) -> str:
+        return re.sub(r"^www\.", "", urlparse(url).netloc).split(":")[0] or "product page"
+
+    @staticmethod
+    def _review_source(product: dict[str, Any], data: dict[str, Any], text: str, host: str) -> dict[str, Any] | None:
+        sources = data.get("review_sources") if isinstance(data.get("review_sources"), list) else []
+        if sources:
+            candidate = sources[0] if isinstance(sources[0], dict) else {}
+            return {
+                "name": str(candidate.get("name") or f"{host} retailer reviews")[:120],
+                "count": _money(candidate.get("count")) or None,
+                "rating": candidate.get("rating"),
+                "signal": str(candidate.get("signal") or "Direct retailer page; independent corroboration unavailable")[:180],
+            }
+        count_match = re.search(r"(\d[\d,]*)\s+(?:verified\s+)?(?:customer\s+)?(?:reviews|ratings)\b", text, flags=re.IGNORECASE)
+        rating_match = re.search(r"\b([0-5](?:\.[0-9])?)\s*(?:/\s*5|out of 5|stars?)\b", text, flags=re.IGNORECASE)
+        if not count_match and not rating_match:
+            return None
+        return {
+            "name": f"{host} retailer reviews"[:120],
+            "count": int(count_match.group(1).replace(",", "")) if count_match else None,
+            "rating": float(rating_match.group(1)) if rating_match else None,
+            "signal": "Direct retailer page; limited independent corroboration",
+        }
+
+    def _one(self, product: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        enriched = copy.deepcopy(product)
+        url = str(enriched.get("url") or "")
+        host = self._host(url)
+        if not url:
+            enriched["research_status"] = "waiting"
+            enriched["research_sources"] = [{"name": "Product URL", "status": "missing", "detail": "No public product page was returned"}]
+            return enriched, False
+        try:
+            scraped = self.anakin.scrape_inline(url)
+        except Exception:
+            enriched["research_status"] = "waiting"
+            enriched["research_sources"] = [{"name": host, "status": "unavailable", "detail": "Direct page research could not be completed"}]
+            return enriched, False
+
+        data = _scraped_mapping(scraped)
+        text = _scraped_text(scraped)
+        evidence = [str(item) for item in (enriched.get("evidence") or []) if str(item).strip()]
+        fields: list[str] = []
+        for field in ("brand", "seller", "delivery_days", "delivery_label", "stock", "rating", "shipping_cost", "image", "seller_reliability"):
+            value = data.get(field)
+            if value in (None, "", [], {}):
+                continue
+            if enriched.get(field) in (None, "", [], {}):
+                enriched[field] = value
+                fields.append(field)
+
+        scraped_price = _money(data.get("price"))
+        current_price = _money(enriched.get("price"))
+        if scraped_price and current_price and scraped_price != current_price:
+            enriched["price_verification"] = "mismatch"
+            evidence.append(f"Search price {current_price} differs from direct page price {scraped_price}; confirm at checkout")
+        elif scraped_price and not current_price:
+            enriched["price"] = scraped_price
+            fields.append("price")
+
+        for field in ("features", "review_sources", "price_history"):
+            value = data.get(field)
+            if value and not enriched.get(field):
+                enriched[field] = value
+                fields.append(field)
+
+        review_source = self._review_source(enriched, data, text, host)
+        if review_source:
+            existing_sources = [source for source in (enriched.get("review_sources") or []) if isinstance(source, dict)]
+            if not any(str(source.get("name") or "").lower() == review_source["name"].lower() for source in existing_sources):
+                existing_sources.append(review_source)
+            enriched["review_sources"] = existing_sources[:6]
+            fields.append("review metadata")
+
+        enriched["research_status"] = "complete"
+        enriched["research_sources"] = [{"name": host, "status": "complete", "detail": "Direct product page checked", "fields": fields[:8]}]
+        evidence.append(f"Direct product page checked on {host}")
+        enriched["evidence"] = list(dict.fromkeys(evidence))[:10]
+        return enriched, True
+
+    def run(self, products: list[dict[str, Any]], source_meta: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+        mode = str(source_meta.get("mode") or "").lower()
+        if mode == "sandbox":
+            for product in products:
+                product["research_status"] = "complete"
+                product["research_sources"] = [{"name": str(product.get("source_label") or "Local catalog"), "status": "catalog", "detail": "Deterministic local evidence"}]
+            source_meta["research"] = {"mode": "fixture", "attempted": len(products), "completed": len(products)}
+            return products, {"agent": self.name, "status": "complete", "detail": "Local catalog evidence already includes seller, review, stock, and price signals"}, source_meta
+
+        candidate_entries = [(index, product) for index, product in enumerate(products) if str(product.get("url") or "")][:6]
+        candidates = [product for _, product in candidate_entries]
+        if not candidates:
+            source_meta["research"] = {"mode": "parallel_url_scrape", "attempted": 0, "completed": 0}
+            return products, {"agent": self.name, "status": "waiting", "detail": "No public product URLs were returned for direct research"}, source_meta
+
+        enriched = list(products)
+        completed = 0
+        with ThreadPoolExecutor(max_workers=min(4, len(candidates))) as executor:
+            futures = {executor.submit(self._one, product): index for index, product in candidate_entries}
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    product, ok = future.result()
+                except Exception:
+                    product, ok = copy.deepcopy(candidates[index]), False
+                    product["research_status"] = "waiting"
+                enriched[index] = product
+                completed += int(ok)
+        source_meta["research"] = {"mode": "parallel_url_scrape", "attempted": len(candidates), "completed": completed}
+        status = "complete" if completed else "waiting"
+        detail = f"Parallel direct-page checks completed for {completed}/{len(candidates)} products; missing fields remain unverified"
+        return enriched, {"agent": self.name, "status": status, "detail": detail}, source_meta
+
+
 class RankingAgent:
     name = "Decision agent"
 
@@ -480,7 +658,13 @@ class RankingAgent:
             stock_fit = stock_count >= quantity if stock_count is not None else None
             brand_bonus = 8 if brand_fit and requested_brand else -8 if requested_brand else 0
             stock_bonus = 4 if stock_fit is True else -8 if stock_fit is False else 0
-            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10 + deal_bonus + brand_bonus + stock_bonus)
+            seller_reliability = product.get("seller_reliability")
+            try:
+                seller_reliability = float(seller_reliability) if seller_reliability is not None else None
+            except (TypeError, ValueError):
+                seller_reliability = None
+            seller_bonus = 3 if seller_reliability is not None and seller_reliability >= 0.8 else -3 if seller_reliability is not None and seller_reliability < 0.5 else 0
+            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10 + deal_bonus + brand_bonus + stock_bonus + seller_bonus)
             product["match_score"] = min(99, max(42, match_score))
             product["budget_fit"] = line_total <= budget if line_total else None
             product["delivery_fit"] = delivery <= max_days if delivery is not None else None
@@ -491,6 +675,7 @@ class RankingAgent:
                 "Within budget" if product["budget_fit"] is True else "Over budget" if product["budget_fit"] is False else "Price needs confirmation",
                 "Within delivery window" if product["delivery_fit"] is True else "Misses delivery window" if product["delivery_fit"] is False else "Delivery needs confirmation",
                 f"{quantity} in stock" if stock_fit is True and quantity > 1 else "Stock covers quantity" if stock_fit is True else f"Only {stock_count} in stock" if stock_fit is False else "Availability needs confirmation",
+                "Seller signal available" if seller_reliability is not None else "Seller reliability needs confirmation",
             ]
             if requested_brand:
                 product["reason_tags"].append("Preferred brand" if brand_fit else "Brand preference not met")
@@ -615,9 +800,10 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     brief, location_event = LocationAgent().run(brief, payload)
     raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
     products, evidence_event = ExtractionAgent().run(raw_products, source_meta)
+    products, research_event, source_meta = ResearchAgent().run(products, source_meta)
     products, analysis_event = AnalysisAgent().run(products, brief)
     products, ranking_event = RankingAgent().run(products, brief)
-    workflow = [brief_event, location_event, search_event, evidence_event, analysis_event, ranking_event]
+    workflow = [brief_event, location_event, search_event, evidence_event, research_event, analysis_event, ranking_event]
     search_id = f"search-{uuid.uuid4().hex[:12]}"
     db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
     selected_products = _default_selection(products)
@@ -663,6 +849,17 @@ def _safe_plan_item(product: dict[str, Any]) -> dict[str, Any]:
         "source_kind": str(product.get("source_kind") or "source"),
         "review_summary": str(product.get("review_summary") or "Review evidence requires retailer confirmation")[:240],
         "review_reliability": product.get("review_reliability"),
+        "seller_reliability": product.get("seller_reliability"),
+        "research_status": str(product.get("research_status") or "unverified")[:24],
+        "research_sources": [
+            {
+                "name": str(source.get("name") or "Research source")[:120],
+                "status": str(source.get("status") or "unknown")[:24],
+                "detail": str(source.get("detail") or "Research detail unavailable")[:180],
+            }
+            for source in (product.get("research_sources") or [])
+            if isinstance(source, dict)
+        ][:6],
         "review_sources": [
             {
                 "name": str(source.get("name") or "Review source")[:120],
