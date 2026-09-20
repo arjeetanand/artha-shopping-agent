@@ -21,6 +21,7 @@ export const DEFAULT_RESULT = {
   summary: { total: 0, item_count: 0, delivery_label: 'Run a live search to confirm delivery timing' },
   workflow: [
     { agent: 'Brief agent', status: 'idle', detail: 'Waiting for your shopping brief' },
+    { agent: 'Location agent', status: 'idle', detail: 'Using your typed delivery location or optional permission' },
     { agent: 'Search agent', status: 'idle', detail: 'Waiting to query live retailer sources' },
     { agent: 'Evidence agent', status: 'idle', detail: 'Source evidence will appear after search' },
     { agent: 'Analysis agent', status: 'idle', detail: 'Review and price signals will appear after search' },

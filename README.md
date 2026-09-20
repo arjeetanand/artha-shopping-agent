@@ -73,7 +73,7 @@ Run the complete deterministic flow against a temporary server and SQLite databa
 npm run test:e2e
 ```
 
-The test covers the example brief, constraint-aware ranking, five-stage workflow, server-side checkout-price verification, order creation, delivery progression, return, refund, and cleanup. It uses `SHOPPINGHELP_SEARCH_MODE=fixture` and never touches the developer database or a payment provider.
+The test covers the example brief, constraint-aware ranking, six-stage workflow, server-side checkout-price verification, order creation, delivery progression, return, refund, and cleanup. It uses `SHOPPINGHELP_SEARCH_MODE=fixture` and never touches the developer database or a payment provider.
 
 ## Configure providers
 
@@ -92,6 +92,10 @@ The flow uses authorization-code OAuth with PKCE. It verifies the Google user id
 ### Search and URL extraction
 
 Set `ANAKIN_API_KEY`. The browser calls the Python API; only Python calls Anakin. Search results are marked **Live source** and keep their source URLs. A pasted product or post URL is first sent through Anakin's URL scraper and contributes context to the retailer search.
+
+### Delivery location
+
+The composer keeps the typed delivery city as the source of truth. **Use my location** requests approximate browser coordinates only after an explicit click; coordinates are validated, used for optional geocoding, and never persisted. In production, set `GOOGLE_MAPS_API_KEY` if you want Google Maps to resolve a permissioned location into a delivery city. If permission is denied or geocoding is unavailable, Artha keeps the city the shopper typed.
 
 ### AI routing and reference images
 
@@ -124,12 +128,13 @@ KOKORO_DEVICE=auto
 ## Workflow
 
 1. **Brief agent** extracts category, quantity, preferred brand, budget, location, delivery window, must-have specifications, and visual/style cues.
-2. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
-3. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
-4. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
-5. **Decision agent** ranks by fit and excludes products with a known budget, delivery-window, or stock-quantity failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
-6. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
-7. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
+2. **Location agent** uses the typed city or an explicitly permissioned browser location, with optional Google Maps geocoding and no coordinate persistence.
+3. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
+4. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
+5. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
+6. **Decision agent** ranks by fit and excludes products with a known budget, delivery-window, or stock-quantity failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
+7. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
+8. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
 

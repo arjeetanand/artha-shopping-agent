@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from .clients import AnakinClient, BriefModel, parse_price
 from .catalog import FixtureCatalogClient
 from .db import db, now_iso
+from .location import LocationAgent
 from .settings import setting
 
 
@@ -611,11 +612,12 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     agent_payload = dict(payload)
     agent_payload["post_url"] = post_url
     brief, brief_event = BriefAgent().run(agent_payload)
+    brief, location_event = LocationAgent().run(brief, payload)
     raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
     products, evidence_event = ExtractionAgent().run(raw_products, source_meta)
     products, analysis_event = AnalysisAgent().run(products, brief)
     products, ranking_event = RankingAgent().run(products, brief)
-    workflow = [brief_event, search_event, evidence_event, analysis_event, ranking_event]
+    workflow = [brief_event, location_event, search_event, evidence_event, analysis_event, ranking_event]
     search_id = f"search-{uuid.uuid4().hex[:12]}"
     db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
     selected_products = _default_selection(products)

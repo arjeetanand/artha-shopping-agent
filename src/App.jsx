@@ -71,11 +71,11 @@ function readPendingSearch() {
   }
 }
 
-function preservePendingSearch({ query, postUrl, result, selectedIds }) {
+function preservePendingSearch({ query, postUrl, result, selectedIds, location }) {
   try {
     window.sessionStorage.setItem(
       PENDING_SEARCH_KEY,
-      JSON.stringify({ saved_at: Date.now(), query, postUrl, result, selectedIds }),
+      JSON.stringify({ saved_at: Date.now(), query, postUrl, result, selectedIds, location }),
     );
   } catch {
     /* Private browsing can deny session storage; sign-in still works. */
@@ -294,6 +294,42 @@ function VoiceInputButton({ onTranscript, onError }) {
   );
 }
 
+function LocationButton({ location, onLocation, onError }) {
+  const [isRequesting, setIsRequesting] = useState(false);
+
+  const requestLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      onError('This browser does not expose location permission. Type your delivery city instead.');
+      return;
+    }
+    setIsRequesting(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setIsRequesting(false);
+        onLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+      },
+      () => {
+        setIsRequesting(false);
+        onError('Location permission was not granted. Type your delivery city instead.');
+      },
+      { enableHighAccuracy: false, maximumAge: 300000, timeout: 8000 },
+    );
+  }, [onError, onLocation]);
+
+  return (
+    <button
+      type="button"
+      className={`secondary-control ${location ? 'is-selected' : ''}`}
+      onClick={requestLocation}
+      disabled={isRequesting}
+      title="Share your approximate location for delivery-aware research"
+    >
+      <Icon name="truck" size={16} />
+      <span>{isRequesting ? 'Locating…' : location ? 'Location ready' : 'Use my location'}</span>
+    </button>
+  );
+}
+
 function ReferenceChip({ reference, onRemove }) {
   return reference ? (
     <span className="reference-chip">
@@ -314,6 +350,8 @@ function Composer({
   showPostUrl,
   setShowPostUrl,
   reference,
+  location,
+  onLocation,
   onReferenceChange,
   onRemoveReference,
   onSearch,
@@ -370,6 +408,7 @@ function Composer({
               <span>Paste URL</span>
             </button>
             <VoiceInputButton onTranscript={setQuery} onError={onToast} />
+            <LocationButton location={location} onLocation={onLocation} onError={onToast} />
             <ReferenceChip reference={reference} onRemove={onRemoveReference} />
           </div>
           <button type="submit" className="primary-button composer__submit" disabled={isSearching || !canSearch}>
@@ -423,7 +462,7 @@ function Composer({
 }
 
 function AgentStrip({ workflow, isSearching, searchStage, hasResults }) {
-  const lastStage = Math.max((workflow?.length || 5) - 1, 0);
+  const lastStage = Math.max((workflow?.length || 6) - 1, 0);
   return (
     <section className="agent-strip" aria-label="Agent workflow">
       <div className="agent-strip__heading">
@@ -869,6 +908,8 @@ function DiscoverView({
   showPostUrl,
   setShowPostUrl,
   reference,
+  location,
+  onLocation,
   onReferenceChange,
   onRemoveReference,
   onSearch,
@@ -921,6 +962,8 @@ function DiscoverView({
           showPostUrl={showPostUrl}
           setShowPostUrl={setShowPostUrl}
           reference={reference}
+          location={location}
+          onLocation={onLocation}
           onReferenceChange={onReferenceChange}
           onRemoveReference={onRemoveReference}
           onSearch={onSearch}
@@ -1797,6 +1840,7 @@ export default function App() {
   const [activeView, setActiveView] = useState(() => viewFromPath(window.location.pathname));
   const [query, setQuery] = useState(() => pendingSearch?.query || DEFAULT_INTENT.raw_text);
   const [postUrl, setPostUrl] = useState(() => pendingSearch?.postUrl || '');
+  const [location, setLocation] = useState(() => pendingSearch?.location || null);
   const [showPostUrl, setShowPostUrl] = useState(false);
   const [reference, setReference] = useState(null);
   const [result, setResult] = useState(() => pendingSearch?.result || DEFAULT_RESULT);
@@ -1921,9 +1965,10 @@ export default function App() {
 
   useEffect(() => {
     if (!isSearching) return undefined;
-    const timer = window.setInterval(() => setSearchStage((current) => Math.min(current + 1, 4)), 620);
+    const maxStage = Math.max((result.workflow?.length || 6) - 1, 0);
+    const timer = window.setInterval(() => setSearchStage((current) => Math.min(current + 1, maxStage)), 620);
     return () => window.clearInterval(timer);
-  }, [isSearching]);
+  }, [isSearching, result.workflow?.length]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -1943,6 +1988,7 @@ export default function App() {
     setActiveView('discover');
     setQuery(DEFAULT_INTENT.raw_text);
     setPostUrl('');
+    setLocation(null);
     setShowPostUrl(false);
     setReference(null);
     setResult(DEFAULT_RESULT);
@@ -1969,6 +2015,7 @@ export default function App() {
               post_url: url?.trim() || null,
               image_name: ref?.name || null,
               reference_image: referencePayload(ref),
+              location_coordinates: location,
             });
         if (!body.products?.length) throw new Error('No retailer sources were found for that brief.');
         setResult(body);
@@ -1985,7 +2032,7 @@ export default function App() {
         setIsSearching(false);
       }
     },
-    [isSearching, result],
+    [isSearching, location, result],
   );
 
   const handleSearch = useCallback(
@@ -2189,10 +2236,10 @@ export default function App() {
 
   const startSignIn = useCallback(
     (next = '/') => {
-      preservePendingSearch({ query, postUrl, result, selectedIds });
+      preservePendingSearch({ query, postUrl, result, selectedIds, location });
       beginGoogleSignIn(next);
     },
-    [postUrl, query, result, selectedIds],
+    [location, postUrl, query, result, selectedIds],
   );
 
   const view =
@@ -2206,6 +2253,8 @@ export default function App() {
         showPostUrl={showPostUrl}
         setShowPostUrl={setShowPostUrl}
         reference={reference}
+        location={location}
+        onLocation={setLocation}
         onReferenceChange={setReference}
         onRemoveReference={() => setReference(null)}
         onSearch={handleSearch}
