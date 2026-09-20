@@ -65,6 +65,16 @@ Check the provider routing without exposing credentials:
 curl http://127.0.0.1:8000/api/health
 ```
 
+### Local end-to-end smoke test
+
+Run the complete deterministic flow against a temporary server and SQLite database:
+
+```bash
+npm run test:e2e
+```
+
+The test covers the example brief, constraint-aware ranking, five-stage workflow, server-side checkout-price verification, order creation, delivery progression, return, refund, and cleanup. It uses `SHOPPINGHELP_SEARCH_MODE=fixture` and never touches the developer database or a payment provider.
+
 ## Configure providers
 
 Copy the names from `.env.example` into `.env`; keep `.env` out of source control.

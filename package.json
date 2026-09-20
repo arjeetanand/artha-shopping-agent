@@ -7,6 +7,7 @@
     "start": "./run.sh",
     "dev": "vite",
     "backend": "python3 backend/server.py",
+    "test:e2e": "python3 tests/e2e_local.py",
     "build": "vite build",
     "preview": "vite preview"
   },
