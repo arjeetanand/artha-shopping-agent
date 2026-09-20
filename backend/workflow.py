@@ -10,7 +10,7 @@ import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .clients import AnakinClient, BriefModel, parse_price
@@ -792,18 +792,74 @@ def run_refinement(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_search(payload: dict[str, Any]) -> dict[str, Any]:
+WORKFLOW_AGENTS = (
+    "Brief agent",
+    "Location agent",
+    "Search agent",
+    "Evidence agent",
+    "Research agent",
+    "Analysis agent",
+    "Decision agent",
+)
+
+
+def initial_workflow() -> list[dict[str, Any]]:
+    return [
+        {"agent": "Brief agent", "status": "queued", "detail": "Waiting to extract your shopping requirements"},
+        {"agent": "Location agent", "status": "queued", "detail": "Using your typed delivery location or optional permission"},
+        {"agent": "Search agent", "status": "queued", "detail": "Waiting to query retailer sources"},
+        {"agent": "Evidence agent", "status": "queued", "detail": "Source evidence will be normalized after discovery"},
+        {"agent": "Research agent", "status": "queued", "detail": "Parallel product-page checks will validate seller and review signals"},
+        {"agent": "Analysis agent", "status": "queued", "detail": "Review and price signals will be cross-checked"},
+        {"agent": "Decision agent", "status": "queued", "detail": "Recommendations will be ranked against your constraints"},
+    ]
+
+
+def run_search(payload: dict[str, Any], progress: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[str, Any]:
+    workflow = initial_workflow()
+
+    def emit() -> None:
+        if progress:
+            try:
+                progress(copy.deepcopy(workflow))
+            except Exception:
+                pass
+
+    def set_stage(index: int, status: str, detail: str) -> None:
+        workflow[index] = {"agent": WORKFLOW_AGENTS[index], "status": status, "detail": detail}
+        emit()
+
     post_url = _reference_url(payload.get("post_url"))
     agent_payload = dict(payload)
     agent_payload["post_url"] = post_url
+    set_stage(0, "working", "Extracting category, budget, quantity, location, and preferences")
     brief, brief_event = BriefAgent().run(agent_payload)
+    workflow[0] = brief_event
+    emit()
+    set_stage(1, "working", "Checking typed delivery location and optional browser permission")
     brief, location_event = LocationAgent().run(brief, payload)
+    workflow[1] = location_event
+    emit()
+    set_stage(2, "working", "Searching retailer sources and reference context")
     raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
+    workflow[2] = search_event
+    emit()
+    set_stage(3, "working", "Normalizing price, stock, delivery, seller, and review evidence")
     products, evidence_event = ExtractionAgent().run(raw_products, source_meta)
+    workflow[3] = evidence_event
+    emit()
+    set_stage(4, "working", "Checking direct product pages in parallel")
     products, research_event, source_meta = ResearchAgent().run(products, source_meta)
+    workflow[4] = research_event
+    emit()
+    set_stage(5, "working", "Cross-checking review and price-history signals")
     products, analysis_event = AnalysisAgent().run(products, brief)
+    workflow[5] = analysis_event
+    emit()
+    set_stage(6, "working", "Ranking options against every stated constraint")
     products, ranking_event = RankingAgent().run(products, brief)
-    workflow = [brief_event, location_event, search_event, evidence_event, research_event, analysis_event, ranking_event]
+    workflow[6] = ranking_event
+    emit()
     search_id = f"search-{uuid.uuid4().hex[:12]}"
     db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
     selected_products = _default_selection(products)

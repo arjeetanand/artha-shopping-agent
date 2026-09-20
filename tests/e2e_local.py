@@ -109,6 +109,24 @@ def main() -> None:
         assert search["products"][0]["line_total"] == 10490
         assert any(product["delivery_fit"] is False for product in search["products"])
 
+        status, queued = request(
+            port,
+            "/api/agent/search/jobs",
+            method="POST",
+            payload={"text": "Office chair under ₹12,000 delivered to Bangalore within 5 days"},
+        )
+        assert status == 202 and queued["status"] in {"queued", "running", "complete"}, queued
+        job = queued
+        for _ in range(40):
+            if job["status"] in {"complete", "failed"}:
+                break
+            time.sleep(0.05)
+            status, job = request(port, f"/api/agent/search/jobs/{queued['job_id']}")
+            assert status == 200, job
+        assert job["status"] == "complete", job
+        assert job["result"]["products"][0]["id"] == search["products"][0]["id"]
+        assert any(stage["agent"] == "Research agent" for stage in job["workflow"])
+
         status, refined = request(
             port,
             "/api/agent/refine",

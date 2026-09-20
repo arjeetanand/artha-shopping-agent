@@ -149,6 +149,8 @@ KOKORO_DEVICE=auto
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
 
+Live searches can be started asynchronously with `POST /api/agent/search/jobs` and polled at `GET /api/agent/search/jobs/:job_id`. The job returns queued, working, complete, waiting, or failed stage snapshots while Anakin and parallel direct-page checks run, so the UI can keep the workflow visible instead of holding a blank request open.
+
 The known item subtotal deliberately excludes shipping, tax, and any retailer-specific fees that the live source does not verify. The user must confirm those values at checkout.
 
 ## API surface
@@ -161,6 +163,8 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `GET /api/auth/google/callback` | Complete Google OAuth and create the session |
 | `POST /api/auth/logout` | End the local session |
 | `POST /api/agent/search` | Run the brief → search → evidence → analysis → decision workflow |
+| `POST /api/agent/search/jobs` | Start the same research workflow asynchronously and return a job id |
+| `GET /api/agent/search/jobs/:job_id` | Poll workflow stage progress and read the completed result |
 | `POST /api/agent/refine` | Apply a follow-up preference to an existing research set without repeating retailer discovery |
 | `GET /api/plans` | List the signed-in user's private purchase plans |
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |

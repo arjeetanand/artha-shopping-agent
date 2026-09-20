@@ -26,7 +26,7 @@ import {
   requestReturn,
   refineAgentSearch,
   createPaymentOrder,
-  runAgentSearch,
+  runAgentSearchAsync,
   signOut,
   speakText,
   verifyPayment,
@@ -2049,12 +2049,18 @@ export default function App() {
               products: result.products,
               source: result.source,
             })
-          : await runAgentSearch({
+          : await runAgentSearchAsync({
               text: text?.trim() || 'Find products that match this reference.',
               post_url: url?.trim() || null,
               image_name: ref?.name || null,
               reference_image: referencePayload(ref),
               location_coordinates: location,
+            }, (job) => {
+              if (Array.isArray(job?.workflow) && job.workflow.length) {
+                setResult((current) => ({ ...current, workflow: job.workflow }));
+                const workingIndex = job.workflow.findIndex((stage) => stage.status === 'working');
+                if (workingIndex >= 0) setSearchStage(workingIndex);
+              }
             });
         if (!body.products?.length) throw new Error('No retailer sources were found for that brief.');
         setResult(body);

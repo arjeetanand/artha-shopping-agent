@@ -20,6 +20,7 @@ if __package__ in {None, ""}:
     from backend.workflow import create_purchase_plan, run_refinement, run_search
     from backend.orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
     from backend.payments import PaymentError, create_payment_order, payment_status, verify_payment
+    from backend.jobs import get_search_job, submit_search
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
     from .clients import AnakinClient, BriefModel
@@ -30,6 +31,7 @@ else:
     from .workflow import create_purchase_plan, run_refinement, run_search
     from .orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
     from .payments import PaymentError, create_payment_order, payment_status, verify_payment
+    from .jobs import get_search_job, submit_search
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -149,6 +151,15 @@ class Handler(BaseHTTPRequestHandler):
                 user = self._user()
                 self._send(200, {"authenticated": bool(user), "user": user})
                 return
+            if path.startswith("/api/agent/search/jobs/"):
+                job_id = path.removeprefix("/api/agent/search/jobs/").strip()
+                if not job_id or "/" in job_id:
+                    raise ApiError("Research job not found", 404)
+                job = get_search_job(job_id)
+                if not job:
+                    raise ApiError("Research job not found", 404)
+                self._send(200, job)
+                return
             if path == "/api/auth/google/start":
                 self._redirect(begin_google_auth((query.get("next") or ["/"])[0], self._app_origin()))
                 return
@@ -229,6 +240,9 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path.rstrip("/") or "/"
         try:
             payload = self._read_json()
+            if path == "/api/agent/search/jobs":
+                self._send(202, submit_search(payload))
+                return
             if path == "/api/agent/search":
                 self._send(200, run_search(payload))
                 return
