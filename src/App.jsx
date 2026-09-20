@@ -1556,15 +1556,16 @@ function OrdersView({ user, orders, onDiscover, onCancel, onAdvance, onRequestRe
                   {order.payment_provider === 'sandbox' && !['cancelled', 'delivered', 'return_requested', 'refunded'].includes(order.status) ? (
                     <button type="button" className="quiet-action" onClick={() => onAdvance(order.id)}>Advance sandbox status</button>
                   ) : null}
-                  {order.status !== 'cancelled' && !['delivered', 'return_requested', 'refunded'].includes(order.status) ? (
+                  {order.payment_provider === 'sandbox' && order.status !== 'cancelled' && !['delivered', 'return_requested', 'refunded'].includes(order.status) ? (
                     <button type="button" className="quiet-action" onClick={() => onCancel(order.id)}>Cancel order</button>
                   ) : null}
-                  {order.status === 'delivered' ? (
+                  {order.payment_provider === 'sandbox' && order.status === 'delivered' ? (
                     <button type="button" className="quiet-action" onClick={() => onRequestReturn(order.id)}>Request return</button>
                   ) : null}
-                  {order.status === 'return_requested' ? (
+                  {order.payment_provider === 'sandbox' && order.status === 'return_requested' ? (
                     <button type="button" className="quiet-action" onClick={() => onRefund(order.id)}>Record sandbox refund</button>
                   ) : null}
+                  {order.payment_provider !== 'sandbox' ? <small className="order-actions__note">Live status waits for the merchant adapter</small> : null}
                 </div>
               </div>
               <OrderTracker order={order} />

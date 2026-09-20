@@ -50,6 +50,14 @@ def main() -> None:
         assert order["payment_provider"] == "razorpay"
         assert order["payment_status"] == "paid"
         assert order["total"] == 1000
+        from backend.orders import OrderError, advance_order
+
+        try:
+            advance_order(order["id"], user["id"])
+        except OrderError as error:
+            assert "merchant adapter" in str(error)
+        else:
+            raise AssertionError("live order tracker advanced without a merchant adapter")
         print("payment_adapter_ok", order["id"])
 
 

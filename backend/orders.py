@@ -154,8 +154,14 @@ def get_order(order_id: str, user_id: str) -> dict[str, Any]:
     return order
 
 
+def _assert_sandbox_tracker(order: dict[str, Any]) -> None:
+    if order.get("payment_provider") != "sandbox":
+        raise OrderError("Live delivery, cancellation, return, and refund updates require a merchant adapter webhook.")
+
+
 def cancel_order(order_id: str, user_id: str) -> dict[str, Any]:
     order = get_order(order_id, user_id)
+    _assert_sandbox_tracker(order)
     if order.get("status") in {"delivered", "cancelled"}:
         raise OrderError("This order can no longer be cancelled.")
     order["status"] = "cancelled"
@@ -168,6 +174,7 @@ def cancel_order(order_id: str, user_id: str) -> dict[str, Any]:
 
 def advance_order(order_id: str, user_id: str) -> dict[str, Any]:
     order = get_order(order_id, user_id)
+    _assert_sandbox_tracker(order)
     status = order.get("status")
     if status not in ORDER_STATUSES[:-1]:
         raise OrderError("This order has no further sandbox delivery step.")
@@ -181,6 +188,7 @@ def advance_order(order_id: str, user_id: str) -> dict[str, Any]:
 
 def request_return(order_id: str, user_id: str) -> dict[str, Any]:
     order = get_order(order_id, user_id)
+    _assert_sandbox_tracker(order)
     if order.get("status") != "delivered":
         raise OrderError("A return can be requested after the order is delivered.")
     order["status"] = "return_requested"
@@ -193,6 +201,7 @@ def request_return(order_id: str, user_id: str) -> dict[str, Any]:
 
 def complete_refund(order_id: str, user_id: str) -> dict[str, Any]:
     order = get_order(order_id, user_id)
+    _assert_sandbox_tracker(order)
     if order.get("status") != "return_requested":
         raise OrderError("Request a return before recording a sandbox refund.")
     order["status"] = "refunded"
