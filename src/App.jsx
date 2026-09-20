@@ -1200,6 +1200,7 @@ function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClos
 function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
   if (!product) return null;
   const reviewScore = Number(product.review_reliability);
+  const sellerScore = Number(product.seller_reliability);
   const reviewAnalysis = product.review_analysis || {};
   const priceHistory = product.price_history || {};
   const reviewSources = Array.isArray(product.review_sources) ? product.review_sources : [];
@@ -1222,6 +1223,7 @@ function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
           <div><span>Total today</span><strong>{formatPrice(productTotal(product))}</strong></div>
           <div><span>Delivery</span><strong>{product.delivery_label || 'Confirm at retailer'}</strong></div>
           <div><span>Review signal</span><strong>{reviewLabel}</strong></div>
+          <div><span>Seller signal</span><strong>{Number.isFinite(sellerScore) ? `${Math.round(sellerScore * 100)}%` : 'Not verified'}</strong></div>
           <div><span>Price history</span><strong>{historyLabel}</strong></div>
         </div>
 

@@ -81,6 +81,12 @@ The offline payment contract can be exercised without credentials or network cal
 npm run test:payments
 ```
 
+The OAuth state/PKCE and redirect-safety contract can also be checked offline:
+
+```bash
+npm run test:auth
+```
+
 ## Configure providers
 
 Copy the names from `.env.example` into `.env`; keep `.env` out of source control.
