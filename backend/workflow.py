@@ -11,7 +11,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .clients import AnakinClient, BriefModel, parse_price
+from .catalog import FixtureCatalogClient
 from .db import db, now_iso
+from .settings import setting
 
 
 MAX_REFERENCE_IMAGE_BYTES = 4 * 1024 * 1024
@@ -115,6 +117,41 @@ class BriefAgent:
         text = str(payload.get("text") or payload.get("query") or "").strip()
         reference_image = _reference_image(payload)
         image_name = str(reference_image["name"] if reference_image else payload.get("image_name") or "").strip()
+        if setting("SHOPPINGHELP_SEARCH_MODE", "live").lower() in {"fixture", "sandbox", "mock"}:
+            lowered = text.lower()
+            budget = _parse_budget(text) or 18000
+            arrive_days = _parse_days(text) or 5
+            if "chair" in lowered:
+                category, occasion = "Office chair", "Office"
+                must_have = ["back support", "ergonomic"]
+            elif any(word in lowered for word in ("shirt", "outfit", "dress", "shoe", "loafers")):
+                category, occasion = "Clothing", "Everyday"
+                must_have = ["breathable", "neutral palette"]
+            else:
+                category, occasion = "Shopping", "Everyday"
+                must_have = []
+            location_match = re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)", text, flags=re.IGNORECASE)
+            location = location_match.group(1).strip(" .,\"") if location_match else payload.get("location") or "Bengaluru"
+            if str(location).lower() == "bangalore":
+                location = "Bengaluru"
+            brief = {
+                "category": category,
+                "occasion": occasion,
+                "budget": budget,
+                "location": location,
+                "arrive_by_days": arrive_days,
+                "arrive_by": f"within {arrive_days} days",
+                "must_have": must_have,
+                "nice_to_have": ["durable", "good value"],
+                "style": "practical and considered",
+                "description": text or "Find a considered product",
+                "raw_text": text or "Find a considered product",
+                "image_name": image_name or None,
+                "reference_image": {"name": image_name, "mime_type": reference_image["mime_type"]} if reference_image else None,
+                "post_url": payload.get("post_url") or None,
+                "extraction_source": "local fixture rules",
+            }
+            return brief, {"agent": self.name, "status": "complete", "detail": "Local fixture rules extracted price, place, delivery, and must-haves"}
         llm_brief, provider = self.model.extract_brief(text, reference_image)
         provider_status = self.model.status()
         if not provider_status["configured"]:
@@ -169,6 +206,15 @@ class SearchAgent:
         self.anakin = AnakinClient()
 
     def run(self, brief: dict[str, Any], post_url: str | None) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+        search_mode = setting("SHOPPINGHELP_SEARCH_MODE", "live").lower()
+        if search_mode in {"fixture", "sandbox", "mock"}:
+            response = FixtureCatalogClient().search(brief, num_results=10)
+            sources = response.get("results") or []
+            return (
+                sources,
+                {"agent": self.name, "status": "complete", "detail": f"Local catalog returned {len(sources)} constraint-test sources"},
+                {"mode": "sandbox", "provider": "fixture_catalog", "scrape": "not_requested"},
+            )
         if not self.anakin.configured:
             raise RuntimeError("Anakin live extraction is not configured. Add ANAKIN_API_KEY and restart the API.")
         source_context = ""
@@ -213,6 +259,8 @@ class ExtractionAgent:
         content = str(raw.get("content") or raw.get("snippet") or raw.get("description") or "")
         generated = raw.get("generatedJson") or raw.get("data") or {}
         data = generated.get("data") if isinstance(generated, dict) and isinstance(generated.get("data"), dict) else generated
+        if not isinstance(data, dict) or not data:
+            data = raw
         if isinstance(data, dict):
             title = str(data.get("name") or data.get("title") or title)
             content = str(data.get("description") or data.get("summary") or content)
@@ -220,34 +268,46 @@ class ExtractionAgent:
         price = _money(raw_price) or parse_price(f"{title} {content}") or 0
         url = str(raw.get("url") or raw.get("link") or "")
         host = re.sub(r"^www\.", "", urlparse(url).netloc).split(":")[0] if url else "Web source"
+        shipping_cost = _money(data.get("shipping_cost")) if isinstance(data, dict) else 0
+        delivery_days = data.get("delivery_days") if isinstance(data, dict) else None
+        try:
+            delivery_days = int(delivery_days) if delivery_days is not None else None
+        except (TypeError, ValueError):
+            delivery_days = None
+        source_kind = str(raw.get("source_kind") or "live_web")
         return {
-            "id": f"live-{index}-{hashlib.sha1((url or title).encode()).hexdigest()[:8]}",
+            "id": str(raw.get("id") or f"live-{index}-{hashlib.sha1((url or title).encode()).hexdigest()[:8]}"),
             "name": title[:180],
             "category": str(data.get("category") if isinstance(data, dict) and data.get("category") else "Product"),
             "description": content[:180] or "Live retailer result. Confirm current price and delivery on the source page.",
-            "seller": host.title(),
+            "seller": str(data.get("seller") if isinstance(data, dict) and data.get("seller") else host.title()),
             "price": price,
-            "rating": 0,
-            "delivery_days": None,
-            "delivery_label": "Confirm at retailer",
-            "stock": None,
-            "features": [],
-            "match_reasons": ["Live retailer source", "Source linked"],
+            "shipping_cost": shipping_cost,
+            "total_price": price + shipping_cost,
+            "rating": data.get("rating") if isinstance(data, dict) else 0,
+            "delivery_days": delivery_days,
+            "delivery_label": str(data.get("delivery_label") if isinstance(data, dict) and data.get("delivery_label") else "Confirm at retailer"),
+            "stock": data.get("stock") if isinstance(data, dict) else None,
+            "features": data.get("features") if isinstance(data, dict) and isinstance(data.get("features"), list) else [],
+            "match_reasons": data.get("match_reasons") if isinstance(data, dict) and isinstance(data.get("match_reasons"), list) else ["Source linked"],
             "crop_index": index % 3,
             "url": url,
-            "image": "",
-            "source_kind": "live_web",
-            "source_label": "Live retailer source",
-            "evidence": ["Anakin live extraction", "Confirm seller checkout details"],
+            "image": str(data.get("image") if isinstance(data, dict) else ""),
+            "source_kind": source_kind,
+            "source_label": str(raw.get("source_label") or ("Live retailer source" if source_kind == "live_web" else "Catalog source")),
+            "evidence": data.get("evidence") if isinstance(data, dict) and isinstance(data.get("evidence"), list) else ["Source-linked product data", "Confirm seller checkout details"],
+            "review_summary": str(data.get("review_summary") or "Review evidence requires retailer confirmation") if isinstance(data, dict) else "Review evidence requires retailer confirmation",
+            "review_reliability": data.get("review_reliability") if isinstance(data, dict) else None,
         }
 
     def run(self, raw_products: list[dict[str, Any]], source_meta: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        if source_meta.get("mode") != "live":
-            raise RuntimeError("Live retailer evidence is required to build a purchase shortlist.")
+        if source_meta.get("mode") not in {"live", "sandbox"}:
+            raise RuntimeError("A configured retailer source is required to build a purchase shortlist.")
         products = [self._from_live(raw, index) for index, raw in enumerate(raw_products) if isinstance(raw, dict)]
         if not products:
             raise RuntimeError("Anakin returned no usable retailer fields for this brief.")
-        return products[:10], {"agent": self.name, "status": "complete", "detail": "Normalized live source fields and retailer evidence"}
+        detail = "Normalized local catalog fields and constraint evidence" if source_meta.get("mode") == "sandbox" else "Normalized live source fields and retailer evidence"
+        return products[:10], {"agent": self.name, "status": "complete", "detail": detail}
 
 
 class RankingAgent:
@@ -260,19 +320,27 @@ class RankingAgent:
         for product in products:
             features = " ".join(product.get("features") or []).lower()
             must_have = [str(item).lower() for item in (brief.get("must_have") or [])]
-            feature_score = sum(1 for item in must_have if item in features) / max(len(must_have), 1)
+            feature_score = sum(1 for item in must_have if item in features or all(token in features for token in item.split())) / max(len(must_have), 1)
             price = _money(product.get("price"))
+            shipping_cost = _money(product.get("shipping_cost"))
+            total_price = _money(product.get("total_price")) or price + shipping_cost
+            product["shipping_cost"] = shipping_cost
+            product["total_price"] = total_price or None
             delivery = product.get("delivery_days")
-            budget_score = max(0, min(1, 1 - max(price - budget, 0) / budget)) if price else 0.35
+            budget_score = max(0, min(1, 1 - max(total_price - budget, 0) / budget)) if total_price else 0.35
             delivery_score = 0.35 if delivery is None else max(0, min(1, 1 - max(delivery - max_days, 0) / max(max_days, 1)))
-            match_score = round(58 + feature_score * 18 + budget_score * 14 + delivery_score * 10)
+            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10)
             product["match_score"] = min(99, max(42, match_score))
-            product["budget_fit"] = price <= budget if price else None
+            product["budget_fit"] = total_price <= budget if total_price else None
             product["delivery_fit"] = delivery <= max_days if delivery is not None else None
             product["delivery_label"] = product.get("delivery_label") or (f"Arrives {_date_label(delivery)}" if delivery else "Confirm at retailer")
-            product["reason_tags"] = ["AI match", "Source linked"]
+            product["reason_tags"] = [
+                "Within budget" if product["budget_fit"] is True else "Over budget" if product["budget_fit"] is False else "Price needs confirmation",
+                "Within delivery window" if product["delivery_fit"] is True else "Misses delivery window" if product["delivery_fit"] is False else "Delivery needs confirmation",
+            ]
+            product["eligible"] = product["budget_fit"] is not False and product["delivery_fit"] is not False
             ranked.append(product)
-        ranked.sort(key=lambda item: (-item.get("match_score", 0), item.get("price") or 10**9))
+        ranked.sort(key=lambda item: (-item.get("match_score", 0), item.get("total_price") or 10**9))
         return ranked, {"agent": self.name, "status": "complete", "detail": "Ranked by fit, budget, delivery, and source evidence"}
 
 
@@ -310,7 +378,7 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     search_id = f"search-{uuid.uuid4().hex[:12]}"
     db.save_search(search_id, brief["raw_text"], brief, workflow)
     selected_products = _default_selection(products)
-    total = sum(_money(product.get("price")) for product in selected_products)
+    total = sum(_money(product.get("total_price")) or _money(product.get("price")) for product in selected_products)
     latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 5
     return {
         "search_id": search_id,
@@ -328,16 +396,24 @@ def _safe_plan_item(product: dict[str, Any]) -> dict[str, Any]:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         url = ""
+    item_price = _money(product.get("price"))
+    shipping_cost = _money(product.get("shipping_cost"))
+    total_price = _money(product.get("total_price")) or item_price + shipping_cost
     return {
         "id": str(product.get("id") or uuid.uuid4().hex),
         "name": str(product.get("name") or "Retailer product")[:180],
         "seller": str(product.get("seller") or "Retailer")[:100],
-        "price": _money(product.get("price")),
+        "price": item_price,
+        "shipping_cost": shipping_cost,
+        "total_price": total_price,
         "delivery_label": str(product.get("delivery_label") or "Confirm at retailer")[:120],
         "url": url,
         "image": str(product.get("image") or ""),
         "crop_index": _money(product.get("crop_index")),
         "source_kind": str(product.get("source_kind") or "source"),
+        "review_summary": str(product.get("review_summary") or "Review evidence requires retailer confirmation")[:240],
+        "review_reliability": product.get("review_reliability"),
+        "evidence": [str(item)[:180] for item in (product.get("evidence") or []) if str(item).strip()][:8],
     }
 
 
@@ -352,7 +428,7 @@ def create_purchase_plan(payload: dict[str, Any], user_id: str) -> dict[str, Any
         "user_id": user_id,
         "search_id": payload.get("search_id"),
         "status": "ready_for_checkout",
-        "total": sum(product["price"] for product in products),
+        "total": sum(product["total_price"] for product in products),
         "items": products,
         "created_at": timestamp,
         "updated_at": timestamp,

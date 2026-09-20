@@ -9,6 +9,7 @@ This is a real research and handoff flow, not a simulated payment system. Artha 
 - **React + Vite** provides the responsive web interface.
 - **Python standard library API** handles provider credentials, Google OAuth, workflow orchestration, and SQLite persistence.
 - **Anakin** supplies live source search and optional URL extraction.
+- **Local fixture catalog** is available only when `SHOPPINGHELP_SEARCH_MODE=fixture`; it keeps development and end-to-end tests deterministic without sending test briefs to a third party.
 - **Ollama** is selected by default in local development for brief extraction.
 - **Gemini** is selected by default when `APP_ENV=production`; it can analyze reference images as well as text.
 - **Kokoro** is the preferred local voice when the optional local voice environment is installed, with browser SpeechSynthesis as a fallback. **ElevenLabs** is selected by default in production.
@@ -117,6 +118,7 @@ KOKORO_DEVICE=auto
 3. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
 4. **Decision agent** ranks by fit and excludes products with a known budget or delivery-window failure from the default plan.
 5. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
+6. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
 
 The known item subtotal deliberately excludes shipping, tax, and any retailer-specific fees that the live source does not verify. The user must confirm those values at checkout.
 
@@ -132,6 +134,10 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `POST /api/agent/search` | Run the brief → search → evidence → decision workflow |
 | `GET /api/plans` | List the signed-in user's private purchase plans |
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |
+| `GET /api/orders` | List the signed-in user's confirmed orders and tracking timelines |
+| `GET /api/orders/:id` | Read one user-scoped order |
+| `POST /api/orders` | Create an explicitly confirmed local sandbox order during development |
+| `POST /api/orders/:id/cancel` | Cancel a cancellable sandbox order |
 | `GET /api/usage?days=30&runtime=all` | View token totals, provider breakdowns, and recent activity; production requires Google sign-in |
 | `GET /api/voice/status` | Selected voice provider and availability |
 | `POST /api/voice/warm` | Warm the selected local Kokoro voice before playback |
@@ -143,4 +149,5 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 - Usage events store counts and metadata only: provider, operation, model name, token counts when reported, character/byte counts for unmetered activity, runtime, status, and timestamp. Provider credentials are never written to the ledger.
 - No Google OAuth token, payment credential, or reference-image bytes are persisted.
 - The service cannot charge a card, submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions.
-- Saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.
+- In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
+- Live saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.

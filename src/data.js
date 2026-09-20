@@ -75,6 +75,11 @@ export function formatPrice(value) {
   return price > 0 ? `₹${price.toLocaleString('en-IN')}` : 'Check retailer';
 }
 
+export function productTotal(product = {}) {
+  const total = Number(product.total_price ?? product.price ?? 0);
+  return Number.isFinite(total) ? total : 0;
+}
+
 export function formatDate(value) {
   if (!value) return '—';
   const date = new Date(value);

@@ -18,6 +18,7 @@ if __package__ in {None, ""}:
     from backend.usage import get_usage_summary, runtime_name
     from backend.voice import VoiceError, VoiceService
     from backend.workflow import create_purchase_plan, run_search
+    from backend.orders import OrderError, cancel_order, create_order, get_order, list_orders
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
     from .clients import AnakinClient, BriefModel
@@ -26,6 +27,7 @@ else:
     from .usage import get_usage_summary, runtime_name
     from .voice import VoiceError, VoiceService
     from .workflow import create_purchase_plan, run_search
+    from .orders import OrderError, cancel_order, create_order, get_order, list_orders
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -188,6 +190,17 @@ class Handler(BaseHTTPRequestHandler):
                 user = self._require_user()
                 self._send(200, {"plans": db.list_purchase_plans(user["id"])})
                 return
+            if path == "/api/orders":
+                user = self._require_user()
+                self._send(200, {"orders": list_orders(user["id"])})
+                return
+            if path.startswith("/api/orders/"):
+                user = self._require_user()
+                order_id = path.removeprefix("/api/orders/").strip()
+                if not order_id or "/" in order_id:
+                    raise ApiError("Order not found", 404)
+                self._send(200, {"order": get_order(order_id, user["id"])})
+                return
             if path == "/api/voice/status":
                 self._send(200, VoiceService().status())
                 return
@@ -199,6 +212,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(error.status, {"error": str(error)})
         except ApiError as error:
             self._send(error.status, {"error": str(error)})
+        except OrderError as error:
+            self._send(400, {"error": str(error)})
         except Exception:
             self._send(500, {"error": "Internal server error"})
 
@@ -212,6 +227,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/plans":
                 user = self._require_user()
                 self._send(201, {"plan": create_purchase_plan(payload, user["id"])})
+                return
+            if path == "/api/orders":
+                user = self._require_user()
+                self._send(201, {"order": create_order(payload, user["id"])})
+                return
+            if path.startswith("/api/orders/") and path.endswith("/cancel"):
+                user = self._require_user()
+                order_id = path.removeprefix("/api/orders/").removesuffix("/cancel").strip("/")
+                if not order_id:
+                    raise ApiError("Order not found", 404)
+                self._send(200, {"order": cancel_order(order_id, user["id"])})
                 return
             if path == "/api/auth/logout":
                 logout(self.headers.get("Cookie"))
@@ -235,6 +261,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(503, {"error": str(error)})
         except ApiError as error:
             self._send(error.status, {"error": str(error)})
+        except OrderError as error:
+            self._send(400, {"error": str(error)})
         except ValueError as error:
             self._send(400, {"error": str(error)})
         except RuntimeError as error:

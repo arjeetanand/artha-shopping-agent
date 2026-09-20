@@ -47,6 +47,22 @@ export function createPlan(payload) {
   return request('/plans', { method: 'POST', body: JSON.stringify(payload) });
 }
 
+export function getOrders() {
+  return request('/orders');
+}
+
+export function createOrder(payload) {
+  return request('/orders', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function getOrder(orderId) {
+  return request(`/orders/${encodeURIComponent(orderId)}`);
+}
+
+export function cancelOrder(orderId) {
+  return request(`/orders/${encodeURIComponent(orderId)}/cancel`, { method: 'POST', body: JSON.stringify({}) });
+}
+
 export function getVoiceStatus() {
   return request('/voice/status');
 }

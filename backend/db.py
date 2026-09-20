@@ -99,6 +99,19 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS purchase_plans_user_index ON purchase_plans(user_id, created_at DESC);
 
+                CREATE TABLE IF NOT EXISTS orders (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    plan_id TEXT,
+                    status TEXT NOT NULL,
+                    total INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS usage_events (
                     id TEXT PRIMARY KEY,
                     runtime TEXT NOT NULL,
@@ -119,6 +132,16 @@ class Database:
                 CREATE INDEX IF NOT EXISTS usage_events_runtime_index ON usage_events(runtime, created_at DESC);
                 """
             )
+            order_columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()}
+            migrations = {
+                "user_id": "TEXT",
+                "plan_id": "TEXT",
+                "currency": "TEXT NOT NULL DEFAULT 'INR'",
+            }
+            for column, definition in migrations.items():
+                if column not in order_columns:
+                    connection.execute(f"ALTER TABLE orders ADD COLUMN {column} {definition}")
+            connection.execute("CREATE INDEX IF NOT EXISTS orders_user_index ON orders(user_id, created_at DESC)")
 
     def save_search(self, search_id: str, query: str, intent: dict[str, Any], workflow: list[dict[str, Any]]) -> None:
         with self._connect() as connection:
@@ -209,6 +232,65 @@ class Database:
         with self._connect() as connection:
             rows = connection.execute("SELECT payload_json FROM purchase_plans WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
+
+    def get_purchase_plan(self, plan_id: str, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM purchase_plans WHERE id = ? AND user_id = ?",
+                (plan_id, user_id),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def save_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO orders (id, user_id, plan_id, status, total, currency, payload_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    order["id"],
+                    order["user_id"],
+                    order.get("plan_id"),
+                    order["status"],
+                    order["total"],
+                    order.get("currency") or "INR",
+                    json.dumps(order, ensure_ascii=False),
+                    order["created_at"],
+                    order["updated_at"],
+                ),
+            )
+        return order
+
+    def list_orders(self, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM orders WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def get_order(self, order_id: str, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM orders WHERE id = ? AND user_id = ?",
+                (order_id, user_id),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def update_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE orders SET status = ?, payload_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (
+                    order["status"],
+                    json.dumps(order, ensure_ascii=False),
+                    order["updated_at"],
+                    order["id"],
+                    order["user_id"],
+                ),
+            )
+        return order
 
     def record_usage_event(self, event: dict[str, Any]) -> None:
         with self._connect() as connection:

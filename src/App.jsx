@@ -6,13 +6,17 @@ import {
   SUGGESTED_SEARCHES,
   formatDate,
   formatPrice,
+  productTotal,
   sanitizeSnippet,
   sanitizeTitle,
 } from './data';
 import {
   beginGoogleSignIn,
+  cancelOrder,
+  createOrder,
   createPlan,
   getHealth,
+  getOrders,
   getPlans,
   getSession,
   getUsage,
@@ -31,9 +35,10 @@ const NAV_ITEMS = [
   { id: 'discover', label: 'Discover', icon: 'search' },
   { id: 'saved', label: 'Saved', icon: 'bookmark' },
   { id: 'plans', label: 'Purchase plans', icon: 'box' },
+  { id: 'orders', label: 'Orders', icon: 'truck' },
   { id: 'usage', label: 'Usage', icon: 'chart' },
 ];
-const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans', usage: 'Usage & runtime' };
+const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans', orders: 'Orders & tracking', usage: 'Usage & runtime' };
 
 function readSavedIds() {
   try {
@@ -89,7 +94,6 @@ function Logo({ onClick }) {
   return (
     <button type="button" className="brand-mark" onClick={onClick} aria-label="Go to Artha discover">
       <span className="brand-mark__text">Artha</span>
-      <span className="brand-mark__badge">AI</span>
     </button>
   );
 }
@@ -440,9 +444,9 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
         <ProductThumb product={product} />
         <div className="product-card__badges">
           <SourceMark product={product} />
-          <span className="match-badge" title={`Match Score: ${product.match_score || 90}%`}>
+          <span className={`match-badge ${product.eligible === false ? 'is-invalid' : ''}`} title={product.eligible === false ? product.reason_tags?.join(' · ') : `Match Score: ${product.match_score || 90}%`}>
             <Icon name="spark" size={12} />
-            <span>{product.match_score || 92}% Match</span>
+            <span>{product.eligible === false ? 'Not a fit' : `${product.match_score || 92}% Match`}</span>
           </span>
         </div>
       </div>
@@ -459,7 +463,7 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
 
         <div className="product-card__meta">
           <div className="product-card__pricing">
-            <strong className="product-card__price">{formatPrice(product.price)}</strong>
+            <strong className="product-card__price">{formatPrice(productTotal(product))}</strong>
             <span className="product-card__rating">
               {product.rating ? (
                 <>
@@ -476,6 +480,7 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
             <Icon name="truck" size={14} />
             <span>{product.delivery_label || 'Confirm at store'}</span>
           </div>
+          <small className={`constraint-note ${product.eligible === false ? 'is-invalid' : ''}`}>{(product.reason_tags || []).join(' · ')}</small>
         </div>
 
         <div className="product-card__actions">
@@ -562,7 +567,7 @@ function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProdu
         <SourceMark product={product} />
       </td>
       <td className="col-price">
-        <strong className="price-val">{formatPrice(product.price)}</strong>
+        <strong className="price-val">{formatPrice(productTotal(product))}</strong>
         <small className="price-sub">{product.rating ? `★ ${product.rating}` : live ? 'Live price' : 'Estimated'}</small>
       </td>
       <td className="col-delivery">
@@ -666,9 +671,10 @@ function SummaryPanel({
   user,
   onSavePlan,
   isSavingPlan,
+  onStartCheckout,
   onRemoveItem,
 }) {
-  const total = selectedProducts.reduce((sum, product) => sum + Number(product.price || 0), 0);
+  const total = selectedProducts.reduce((sum, product) => sum + productTotal(product), 0);
   const live = sourceMode === 'live';
   const awaitingSearch = sourceMode === 'idle';
 
@@ -694,7 +700,7 @@ function SummaryPanel({
                 <small>{product.seller}</small>
               </div>
               <div className="summary-item__right">
-                <b>{formatPrice(product.price)}</b>
+                <b>{formatPrice(productTotal(product))}</b>
                 <button
                   type="button"
                   className="summary-item__remove"
@@ -742,6 +748,13 @@ function SummaryPanel({
         <span>{isSavingPlan ? 'Saving plan…' : user ? 'Save purchase plan' : 'Sign in to save plan'}</span>
         <Icon name="arrow" size={17} />
       </button>
+
+      {sourceMode === 'sandbox' && selectedProducts.length ? (
+        <button type="button" className="secondary-button summary-checkout-button" onClick={onStartCheckout}>
+          <span>Review sandbox order</span>
+          <Icon name="arrow" size={15} />
+        </button>
+      ) : null}
 
       <div className="checkout-trust">
         <p className="checkout-note">
@@ -807,6 +820,7 @@ function DiscoverView({
   user,
   onSavePlan,
   isSavingPlan,
+  onStartCheckout,
   onToast,
   onPickPrompt,
   onSelectAll,
@@ -822,13 +836,12 @@ function DiscoverView({
       <section className="main-column">
         <div className="hero-copy">
           <h1>
-            Your next purchase,
+            Find the right
             <br />
-            <em>thoughtfully sourced.</em>
+            things.
           </h1>
           <p>
-            Describe your aesthetic, speak your brief, upload an inspiration photo, or paste a link.
-            Artha finds verified retailer sources and builds your private shortlist.
+            Describe your style. Artha finds the strongest retailer options and makes comparison feel simple.
           </p>
         </div>
 
@@ -943,6 +956,7 @@ function DiscoverView({
         user={user}
         onSavePlan={onSavePlan}
         isSavingPlan={isSavingPlan}
+        onStartCheckout={onStartCheckout}
         onRemoveItem={onRemoveSelectedItem}
       />
 
@@ -952,7 +966,7 @@ function DiscoverView({
           <div className="mobile-plan-bar__info">
             <span className="mobile-plan-bar__count">{selectedProducts.length} items in plan</span>
             <strong className="mobile-plan-bar__total">
-              ₹{selectedProducts.reduce((sum, p) => sum + Number(p.price || 0), 0).toLocaleString('en-IN')}
+              ₹{selectedProducts.reduce((sum, p) => sum + productTotal(p), 0).toLocaleString('en-IN')}
             </strong>
           </div>
           <button
@@ -1006,6 +1020,44 @@ function AuthSheet({ onClose, onSignIn }) {
           <Icon name="shield" size={13} />
           <span>We never ask for payment card information. Checkout happens directly with retailers.</span>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const total = products.reduce((sum, product) => sum + productTotal(product), 0);
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="auth-sheet checkout-sheet" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <button type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close checkout">
+          <Icon name="close" size={19} />
+        </button>
+        <span className="section-kicker">Local sandbox checkout</span>
+        <h2 id="checkout-title">Ready to place this order?</h2>
+        <p>
+          Artha will record a purchase order for {products.length} selected {products.length === 1 ? 'item' : 'items'} and start its tracking timeline.
+          No card details are collected in this development checkout.
+        </p>
+        <div className="checkout-sheet__facts">
+          <span>Total</span>
+          <strong>{formatPrice(total)}</strong>
+          <span>Delivery</span>
+          <strong>{intent?.arrive_by || 'Confirm with retailer'}</strong>
+          <span>Location</span>
+          <strong>{intent?.location || 'Your delivery location'}</strong>
+        </div>
+        <label className="checkout-sheet__confirm">
+          <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+          <span>I reviewed the items, total, and delivery estimate.</span>
+        </label>
+        <button type="button" className="primary-button" disabled={!confirmed || isSubmitting} onClick={onConfirm}>
+          {isSubmitting ? 'Creating order…' : 'Confirm order'}
+          <Icon name="arrow" size={16} />
+        </button>
+        <small className="checkout-sheet__notice">Development order only. Live merchant payment requires a configured production gateway.</small>
       </section>
     </div>
   );
@@ -1157,7 +1209,7 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
                 </div>
                 <div className="saved-card__body">
                   <h3>{sanitizeTitle(product.name)}</h3>
-                  <p className="saved-card__price">{formatPrice(product.price)}</p>
+                  <p className="saved-card__price">{formatPrice(productTotal(product))}</p>
                   <p className="saved-card__delivery">
                     <Icon name="truck" size={13} />
                     <span>{product.delivery_label || 'Check store'}</span>
@@ -1205,6 +1257,81 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
             <span>Find items now</span>
             <Icon name="arrow" size={16} />
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderTracker({ order }) {
+  return (
+    <div className="order-tracker" aria-label={`Order ${order.id} tracking timeline`}>
+      {(order.timeline || []).map((step) => (
+        <div className={`order-step ${step.complete ? 'is-complete' : ''}`} key={step.key}>
+          <span className="order-step__node">{step.complete ? <Icon name="check" size={12} /> : null}</span>
+          <div>
+            <strong>{step.label}</strong>
+            <small>{step.detail}</small>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrdersView({ user, orders, onDiscover, onCancel }) {
+  if (!user) {
+    return (
+      <div className="page-stack">
+        <SignInPrompt onSignIn={() => beginGoogleSignIn('/orders')} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-stack orders-page">
+      <div className="page-heading">
+        <div>
+          <span className="section-kicker">Purchase tracker</span>
+          <h1>Know what happens next.</h1>
+          <p>Every confirmed order keeps its total, seller handoff, delivery estimate, and next status in one place.</p>
+        </div>
+        <button type="button" className="primary-button" onClick={onDiscover}>
+          <span>Find something else</span>
+          <Icon name="arrow" size={16} />
+        </button>
+      </div>
+      {orders.length ? (
+        <div className="orders-list">
+          {orders.map((order) => (
+            <article className="order-card" key={order.id}>
+              <header className="order-card__header">
+                <div>
+                  <span className="section-kicker">{order.payment_provider === 'sandbox' ? 'Sandbox order' : 'Confirmed order'}</span>
+                  <h2>{order.id}</h2>
+                  <p>Created {formatDate(order.created_at)} · Delivering to {order.location}</p>
+                </div>
+                <span className={`order-status order-status--${order.status}`}>{order.status.replace(/_/g, ' ')}</span>
+              </header>
+              <div className="order-card__summary">
+                <div>
+                  <strong>{formatPrice(order.total)}</strong>
+                  <small>{order.items?.length || 0} {order.items?.length === 1 ? 'item' : 'items'} · {order.notice}</small>
+                </div>
+                {order.status !== 'cancelled' && order.status !== 'delivered' ? (
+                  <button type="button" className="quiet-action" onClick={() => onCancel(order.id)}>Cancel order</button>
+                ) : null}
+              </div>
+              <OrderTracker order={order} />
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <span className="empty-state__icon"><Icon name="truck" size={26} /></span>
+          <h2>No orders yet.</h2>
+          <p>Run a local catalog search, review the total, and confirm an order to see its tracker here.</p>
+          <button type="button" className="primary-button empty-state__btn" onClick={onDiscover}>Start discovering <Icon name="arrow" size={16} /></button>
         </div>
       )}
     </div>
@@ -1515,6 +1642,7 @@ export default function App() {
   const [searchStage, setSearchStage] = useState(0);
   const [savedIds, setSavedIds] = useState(readSavedIds);
   const [plans, setPlans] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' } });
   const [voice, setVoice] = useState({ provider: 'browser', label: 'Local browser voice' });
   const [usage, setUsage] = useState(null);
@@ -1525,6 +1653,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [toast, setToast] = useState('');
   const audioRef = useRef(null);
@@ -1538,6 +1668,12 @@ export default function App() {
     if (!user?.id) return;
     const body = await getPlans();
     setPlans(body.plans || []);
+  }, [user?.id]);
+
+  const refreshOrders = useCallback(async () => {
+    if (!user?.id) return;
+    const body = await getOrders();
+    setOrders(body.orders || []);
   }, [user?.id]);
 
   const refreshUsage = useCallback(async () => {
@@ -1600,6 +1736,10 @@ export default function App() {
   useEffect(() => {
     if (activeView === 'plans') refreshPlans().catch((error) => setToast(error.message));
   }, [activeView, refreshPlans]);
+
+  useEffect(() => {
+    if (activeView === 'orders') refreshOrders().catch((error) => setToast(error.message));
+  }, [activeView, refreshOrders]);
 
   useEffect(() => {
     if (activeView === 'usage') refreshUsage();
@@ -1718,6 +1858,50 @@ export default function App() {
     }
   }, [isSavingPlan, result.search_id, selectedProducts, user]);
 
+  const handleStartCheckout = useCallback(() => {
+    if (!selectedProducts.length) {
+      setToast('Select at least one product before checkout.');
+      return;
+    }
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    setCheckoutOpen(true);
+  }, [selectedProducts.length, user]);
+
+  const handleConfirmOrder = useCallback(async () => {
+    if (!selectedProducts.length || !user || isCreatingOrder) return;
+    setIsCreatingOrder(true);
+    try {
+      const body = await createOrder({
+        confirmed: true,
+        search_id: result.search_id,
+        products: selectedProducts,
+        intent: result.intent,
+        location: result.intent?.location,
+      });
+      setOrders((current) => [body.order, ...current.filter((order) => order.id !== body.order.id)]);
+      setCheckoutOpen(false);
+      setActiveView('orders');
+      setToast(`Order ${body.order.id} confirmed in the local tracker.`);
+    } catch (error) {
+      setToast(error.message || 'The order could not be created.');
+    } finally {
+      setIsCreatingOrder(false);
+    }
+  }, [isCreatingOrder, result.intent, result.search_id, selectedProducts, user]);
+
+  const handleCancelOrder = useCallback(async (orderId) => {
+    try {
+      const response = await cancelOrder(orderId);
+      setOrders((current) => current.map((order) => (order.id === orderId ? response.order : order)));
+      setToast('Order cancelled in the tracker.');
+    } catch (error) {
+      setToast(error.message || 'The order could not be cancelled.');
+    }
+  }, []);
+
   const stopSpeaking = useCallback(() => {
     audioRef.current?.pause();
     audioRef.current = null;
@@ -1734,7 +1918,7 @@ export default function App() {
       setToast('Select at least one product before listening to an edit.');
       return;
     }
-    const text = `Your purchase plan includes ${selectedProducts.map((p) => sanitizeTitle(p.name)).join(', ')}. The current subtotal is ${formatPrice(selectedProducts.reduce((sum, p) => sum + Number(p.price || 0), 0))}. ${result.summary?.delivery_label || 'Confirm delivery with each retailer.'}`;
+    const text = `Your purchase plan includes ${selectedProducts.map((p) => sanitizeTitle(p.name)).join(', ')}. The current subtotal is ${formatPrice(selectedProducts.reduce((sum, p) => sum + productTotal(p), 0))}. ${result.summary?.delivery_label || 'Confirm delivery with each retailer.'}`;
     try {
       setIsSpeaking(true);
       if (voice?.provider === 'browser') {
@@ -1771,6 +1955,7 @@ export default function App() {
       await signOut();
       setUser(null);
       setPlans([]);
+      setOrders([]);
       setActiveView('discover');
       setToast('Signed out. Your saved local picks remain in this browser.');
     } catch (error) {
@@ -1811,6 +1996,7 @@ export default function App() {
         user={user}
         onSavePlan={handleSavePlan}
         isSavingPlan={isSavingPlan}
+        onStartCheckout={handleStartCheckout}
         onToast={setToast}
         onPickPrompt={handlePickPrompt}
         onSelectAll={handleSelectAll}
@@ -1839,6 +2025,13 @@ export default function App() {
         error={usageError}
         onSignIn={() => beginGoogleSignIn('/usage')}
       />
+    ) : activeView === 'orders' ? (
+      <OrdersView
+        user={user}
+        orders={orders}
+        onDiscover={startNewSearch}
+        onCancel={handleCancelOrder}
+      />
     ) : (
       <PlansView
         user={user}
@@ -1861,13 +2054,22 @@ export default function App() {
         <TopHeader
           activeView={activeView}
           user={user}
-          onSignIn={() => beginGoogleSignIn(activeView === 'plans' ? '/plans' : activeView === 'usage' ? '/usage' : '/')}
+          onSignIn={() => beginGoogleSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
           onSignOut={handleSignOut}
         />
         {view}
       </main>
       <MobileNav activeView={activeView} onNavigate={setActiveView} planCount={plans.length} />
-      {authOpen ? <AuthSheet onClose={() => setAuthOpen(false)} onSignIn={() => beginGoogleSignIn('/plans')} /> : null}
+      {authOpen ? <AuthSheet onClose={() => setAuthOpen(false)} onSignIn={() => beginGoogleSignIn('/')} /> : null}
+      {checkoutOpen ? (
+        <CheckoutSheet
+          products={selectedProducts}
+          intent={result.intent}
+          isSubmitting={isCreatingOrder}
+          onClose={() => setCheckoutOpen(false)}
+          onConfirm={handleConfirmOrder}
+        />
+      ) : null}
       <Toast message={toast} />
     </div>
   );
