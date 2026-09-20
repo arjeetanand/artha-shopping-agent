@@ -29,6 +29,7 @@ import {
 
 const SAVED_KEY = 'artha:saved:v1';
 const LEGACY_SAVED_KEY = 'saathi:saved:v2';
+const PENDING_SEARCH_KEY = 'artha:pending-search:v1';
 const MAX_REFERENCE_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_REFERENCE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const NAV_ITEMS = [
@@ -48,6 +49,38 @@ function readSavedIds() {
   } catch {
     return [];
   }
+}
+
+function readPendingSearch() {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_SEARCH_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    if (!value || Date.now() - Number(value.saved_at || 0) > 30 * 60 * 1000) {
+      window.sessionStorage.removeItem(PENDING_SEARCH_KEY);
+      return null;
+    }
+    if (!value.result || !Array.isArray(value.result.products)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function preservePendingSearch({ query, postUrl, result, selectedIds }) {
+  try {
+    window.sessionStorage.setItem(
+      PENDING_SEARCH_KEY,
+      JSON.stringify({ saved_at: Date.now(), query, postUrl, result, selectedIds }),
+    );
+  } catch {
+    /* Private browsing can deny session storage; sign-in still works. */
+  }
+}
+
+function viewFromPath(pathname = '/') {
+  const path = String(pathname).replace(/\/+$/, '') || '/';
+  return ({ '/saved': 'saved', '/plans': 'plans', '/orders': 'orders', '/usage': 'usage' })[path] || 'discover';
 }
 
 function initials(name = '') {
@@ -426,6 +459,8 @@ function BriefSummary({ intent }) {
     intent?.occasion ? `Occasion: ${intent.occasion}` : null,
     ...(intent?.must_have || []).slice(0, 2),
     intent?.budget ? `Budget ₹${Number(intent.budget).toLocaleString('en-IN')}` : null,
+    intent?.quantity > 1 ? `Quantity ${intent.quantity}` : null,
+    intent?.brand ? `Preferred brand: ${intent.brand}` : null,
     intent?.location ? `Delivering to ${intent.location}` : null,
   ].filter(Boolean);
   return <p className="brief-summary">{fields.join(' • ')}</p>;
@@ -477,6 +512,7 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
               )}
             </span>
           </div>
+          {product.quantity > 1 ? <small className="product-card__quantity-note">{product.quantity} units · {formatPrice(product.unit_total || product.total_price)} each</small> : null}
           <div className="product-card__delivery">
             <Icon name="truck" size={14} />
             <span>{product.delivery_label || 'Confirm at store'}</span>
@@ -582,14 +618,14 @@ function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProdu
       </td>
       <td className="col-price">
         <strong className="price-val">{formatPrice(productTotal(product))}</strong>
-        <small className="price-sub">{product.rating ? `★ ${product.rating}` : live ? 'Live price' : 'Estimated'}</small>
+        <small className="price-sub">{product.quantity > 1 ? `${product.quantity} units · ${product.rating ? `★ ${product.rating}` : live ? 'Live price' : 'Estimated'}` : product.rating ? `★ ${product.rating}` : live ? 'Live price' : 'Estimated'}</small>
       </td>
       <td className="col-delivery">
         <div className="delivery-val">
           <Icon name="truck" size={13} />
           <span>{product.delivery_label || 'Confirm at retailer'}</span>
         </div>
-        <small className="stock-sub">{product.stock ? `${product.stock} available` : 'Check store'}</small>
+        <small className="stock-sub">{product.stock !== null && product.stock !== undefined && product.stock !== '' ? `${product.stock} available · qty ${product.quantity || 1}` : 'Check store'}</small>
       </td>
       <td className="col-evidence">
         <div className="evidence-cluster">
@@ -712,7 +748,7 @@ function SummaryPanel({
               <ProductThumb product={product} small />
               <div className="summary-item__info">
                 <strong title={product.name}>{sanitizeTitle(product.name)}</strong>
-                <small>{product.seller}</small>
+                <small>{product.seller}{product.quantity > 1 ? ` · ${product.quantity} units` : ''}</small>
               </div>
               <div className="summary-item__right">
                 <b>{formatPrice(productTotal(product))}</b>
@@ -1377,11 +1413,11 @@ function OrderTracker({ order }) {
   );
 }
 
-function OrdersView({ user, orders, onDiscover, onCancel }) {
+function OrdersView({ user, orders, onDiscover, onCancel, onSignIn }) {
   if (!user) {
     return (
       <div className="page-stack">
-        <SignInPrompt onSignIn={() => beginGoogleSignIn('/orders')} />
+        <SignInPrompt onSignIn={onSignIn} />
       </div>
     );
   }
@@ -1728,14 +1764,15 @@ function Toast({ message }) {
 }
 
 export default function App() {
-  const [activeView, setActiveView] = useState('discover');
-  const [query, setQuery] = useState(DEFAULT_INTENT.raw_text);
-  const [postUrl, setPostUrl] = useState('');
+  const [pendingSearch] = useState(readPendingSearch);
+  const [activeView, setActiveView] = useState(() => viewFromPath(window.location.pathname));
+  const [query, setQuery] = useState(() => pendingSearch?.query || DEFAULT_INTENT.raw_text);
+  const [postUrl, setPostUrl] = useState(() => pendingSearch?.postUrl || '');
   const [showPostUrl, setShowPostUrl] = useState(false);
   const [reference, setReference] = useState(null);
-  const [result, setResult] = useState(DEFAULT_RESULT);
-  const [selectedIds, setSelectedIds] = useState(DEFAULT_RESULT.selected_product_ids);
-  const [focusedId, setFocusedId] = useState(DEFAULT_RESULT.products[0]?.id || '');
+  const [result, setResult] = useState(() => pendingSearch?.result || DEFAULT_RESULT);
+  const [selectedIds, setSelectedIds] = useState(() => pendingSearch?.selectedIds || pendingSearch?.result?.selected_product_ids || DEFAULT_RESULT.selected_product_ids);
+  const [focusedId, setFocusedId] = useState(() => pendingSearch?.result?.products?.[0]?.id || DEFAULT_RESULT.products[0]?.id || '');
   const [isSearching, setIsSearching] = useState(false);
   const [searchStage, setSearchStage] = useState(0);
   const [savedIds, setSavedIds] = useState(readSavedIds);
@@ -1812,6 +1849,11 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'success') {
       setToast('You are signed in. Your purchase plans are private to this account.');
+      try {
+        window.sessionStorage.removeItem(PENDING_SEARCH_KEY);
+      } catch {
+        /* Private browsing can deny session storage. */
+      }
     }
     if (params.get('auth_error')) {
       setToast('Google sign-in did not finish. Please try again.');
@@ -2070,6 +2112,14 @@ export default function App() {
     setEvidenceProduct(product || null);
   }, []);
 
+  const startSignIn = useCallback(
+    (next = '/') => {
+      preservePendingSearch({ query, postUrl, result, selectedIds });
+      beginGoogleSignIn(next);
+    },
+    [postUrl, query, result, selectedIds],
+  );
+
   const view =
     activeView === 'discover' ? (
       <DiscoverView
@@ -2127,7 +2177,7 @@ export default function App() {
         onRefresh={refreshUsage}
         isLoading={isUsageLoading}
         error={usageError}
-        onSignIn={() => beginGoogleSignIn('/usage')}
+        onSignIn={() => startSignIn('/usage')}
       />
     ) : activeView === 'orders' ? (
       <OrdersView
@@ -2135,13 +2185,14 @@ export default function App() {
         orders={orders}
         onDiscover={startNewSearch}
         onCancel={handleCancelOrder}
+        onSignIn={() => startSignIn('/orders')}
       />
     ) : (
       <PlansView
         user={user}
         plans={plans}
         onDiscover={startNewSearch}
-        onSignIn={() => beginGoogleSignIn('/plans')}
+        onSignIn={() => startSignIn('/plans')}
       />
     );
 
@@ -2158,13 +2209,13 @@ export default function App() {
         <TopHeader
           activeView={activeView}
           user={user}
-          onSignIn={() => beginGoogleSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
+          onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
           onSignOut={handleSignOut}
         />
         {view}
       </main>
       <MobileNav activeView={activeView} onNavigate={setActiveView} planCount={plans.length} />
-      {authOpen ? <AuthSheet onClose={() => setAuthOpen(false)} onSignIn={() => beginGoogleSignIn('/')} /> : null}
+      {authOpen ? <AuthSheet onClose={() => setAuthOpen(false)} onSignIn={() => startSignIn('/')} /> : null}
       {checkoutOpen ? (
         <CheckoutSheet
           products={selectedProducts}

@@ -246,7 +246,7 @@ class BriefModel:
         prompt = f"""
 You are the brief agent for a real purchase-assistant in India.
 Extract shopping constraints from the user's request. Return JSON only with these keys:
-category, occasion, budget, location, arrive_by, arrive_by_days, must_have, nice_to_have, style, description.
+category, occasion, budget, quantity, brand, location, arrive_by, arrive_by_days, must_have, specifications, nice_to_have, style, description.
 Use null for unknown budget/location/date and arrays for must_have/nice_to_have.
 User request: {text}
 Reference image: {image_context}. If an image is attached, infer its product category, colours, silhouette, material cues, and style before extracting the brief.

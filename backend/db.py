@@ -52,6 +52,7 @@ class Database:
                     query TEXT NOT NULL,
                     intent_json TEXT NOT NULL,
                     workflow_json TEXT NOT NULL,
+                    products_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 );
 
@@ -142,13 +143,41 @@ class Database:
                 if column not in order_columns:
                     connection.execute(f"ALTER TABLE orders ADD COLUMN {column} {definition}")
             connection.execute("CREATE INDEX IF NOT EXISTS orders_user_index ON orders(user_id, created_at DESC)")
+            search_columns = {row[1] for row in connection.execute("PRAGMA table_info(searches)").fetchall()}
+            if "products_json" not in search_columns:
+                connection.execute("ALTER TABLE searches ADD COLUMN products_json TEXT NOT NULL DEFAULT '[]'")
 
-    def save_search(self, search_id: str, query: str, intent: dict[str, Any], workflow: list[dict[str, Any]]) -> None:
+    def save_search(
+        self,
+        search_id: str,
+        query: str,
+        intent: dict[str, Any],
+        workflow: list[dict[str, Any]],
+        products: list[dict[str, Any]] | None = None,
+    ) -> None:
         with self._connect() as connection:
             connection.execute(
-                "INSERT OR REPLACE INTO searches (id, query, intent_json, workflow_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                (search_id, query, json.dumps(intent, ensure_ascii=False), json.dumps(workflow, ensure_ascii=False), now_iso()),
+                "INSERT OR REPLACE INTO searches (id, query, intent_json, workflow_json, products_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    search_id,
+                    query,
+                    json.dumps(intent, ensure_ascii=False),
+                    json.dumps(workflow, ensure_ascii=False),
+                    json.dumps(products or [], ensure_ascii=False),
+                    now_iso(),
+                ),
             )
+
+    def get_search_products(self, search_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT products_json FROM searches WHERE id = ?", (search_id,)).fetchone()
+        if not row:
+            return []
+        try:
+            products = json.loads(row["products_json"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        return products if isinstance(products, list) else []
 
     def upsert_google_user(self, *, google_sub: str, email: str, name: str, picture: str) -> dict[str, Any]:
         timestamp = now_iso()

@@ -30,14 +30,20 @@ def _money(value: Any) -> int:
 def _safe_item(item: dict[str, Any]) -> dict[str, Any]:
     product_price = _money(item.get("price"))
     shipping = _money(item.get("shipping_cost"))
-    total = _money(item.get("total_price")) or product_price + shipping
+    unit_total = _money(item.get("unit_total")) or _money(item.get("total_price")) or product_price + shipping
+    quantity = max(1, min(_money(item.get("quantity")) or 1, 99))
+    total = unit_total * quantity
     return {
         "id": str(item.get("id") or uuid.uuid4().hex)[:120],
         "name": str(item.get("name") or "Retailer product")[:180],
         "seller": str(item.get("seller") or "Retailer")[:100],
+        "brand": str(item.get("brand") or "")[:100],
+        "quantity": quantity,
         "price": product_price,
         "shipping_cost": shipping,
-        "total_price": total,
+        "total_price": unit_total,
+        "unit_total": unit_total,
+        "line_total": total,
         "delivery_days": _money(item.get("delivery_days")) or None,
         "delivery_label": str(item.get("delivery_label") or "Confirm at retailer")[:120],
         "url": str(item.get("url") or "")[:1000],
@@ -67,7 +73,22 @@ def create_order(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
 
     plan_id = str(payload.get("plan_id") or "").strip() or None
     plan = db.get_purchase_plan(plan_id, user_id) if plan_id else None
-    raw_items = payload.get("products") or (plan or {}).get("items") or []
+    if plan_id and not plan:
+        raise OrderError("Purchase plan not found.")
+    search_id = str(payload.get("search_id") or "").strip() or None
+    submitted_items = payload.get("products") or []
+    if plan:
+        raw_items = (plan or {}).get("items") or []
+    elif search_id:
+        canonical_products = {str(item.get("id")): item for item in db.get_search_products(search_id) if isinstance(item, dict)}
+        if not isinstance(submitted_items, list) or not submitted_items:
+            raise OrderError("Select at least one product before checkout.")
+        requested_ids = [str(item.get("id")) for item in submitted_items if isinstance(item, dict) and item.get("id")]
+        if not requested_ids or any(product_id not in canonical_products for product_id in requested_ids):
+            raise OrderError("The selected product is no longer present in the verified search result.")
+        raw_items = [canonical_products[product_id] for product_id in requested_ids]
+    else:
+        raw_items = submitted_items
     if not isinstance(raw_items, list) or not raw_items:
         raise OrderError("Select at least one product before checkout.")
     items = [_safe_item(item) for item in raw_items if isinstance(item, dict)]
@@ -75,13 +96,14 @@ def create_order(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
     if not items:
         raise OrderError("The selected products do not contain a verified payable total.")
 
-    total = sum(item["total_price"] for item in items)
+    total = sum(item["line_total"] for item in items)
     created_at = now_iso()
     delivery_days = max((item.get("delivery_days") or 5 for item in items), default=5)
     order = {
         "id": f"ORD-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
         "user_id": user_id,
         "plan_id": plan_id,
+        "search_id": search_id,
         "status": "confirmed",
         "payment_status": "sandbox_authorized",
         "payment_provider": provider,

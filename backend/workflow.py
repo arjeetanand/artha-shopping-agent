@@ -47,6 +47,44 @@ def _parse_days(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _parse_quantity(text: str) -> int:
+    match = re.search(r"\b(\d{1,3})(?:\s+[a-z][a-z0-9&'-]*){0,3}\s+(?:units?|items?|pieces?|pairs?|chairs?|shirts?)\b", text, flags=re.IGNORECASE)
+    try:
+        return max(1, min(int(match.group(1)), 99)) if match else 1
+    except (AttributeError, ValueError):
+        return 1
+
+
+def _parse_brand(text: str) -> str | None:
+    known_brands = ("worknest", "desktheory", "dailyseat", "luma office", "linen trail")
+    lowered = text.lower()
+    for brand in known_brands:
+        if re.search(rf"\b{re.escape(brand)}\b", lowered):
+            return brand.title() if brand != "luma office" else "Luma Office"
+    match = re.search(
+        r"(?:brand|from|by)\s+([a-z][a-z0-9&' -]{1,36}?)(?=\s+(?:under|below|for|in|within|delivered|with|and)\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    value = re.sub(r"\s+", " ", match.group(1)).strip(" .,'\"")
+    return value[:60] if value else None
+
+
+def _parse_specifications(text: str) -> list[str]:
+    lowered = text.lower()
+    known = [
+        ("back support", ("back support", "lumbar", "ergonomic")),
+        ("breathable", ("breathable", "mesh", "linen")),
+        ("adjustable", ("adjustable", "height adjustable", "adjustable arms")),
+        ("waterproof", ("waterproof", "water resistant")),
+        ("neutral palette", ("neutral", "beige", "white", "black")),
+        ("reclining", ("reclin", "tilt")),
+    ]
+    return [label for label, tokens in known if any(token in lowered for token in tokens)]
+
+
 def _reference_image(payload: dict[str, Any]) -> dict[str, str] | None:
     """Validate a short-lived image payload without persisting its bytes."""
     value = payload.get("reference_image")
@@ -121,15 +159,17 @@ class BriefAgent:
             lowered = text.lower()
             budget = _parse_budget(text) or 18000
             arrive_days = _parse_days(text) or 5
+            quantity = _parse_quantity(text)
+            brand = _parse_brand(text)
             if "chair" in lowered:
                 category, occasion = "Office chair", "Office"
-                must_have = ["back support", "ergonomic"]
+                must_have = _parse_specifications(text) or ["back support", "ergonomic"]
             elif any(word in lowered for word in ("shirt", "outfit", "dress", "shoe", "loafers")):
                 category, occasion = "Clothing", "Everyday"
-                must_have = ["breathable", "neutral palette"]
+                must_have = _parse_specifications(text) or ["breathable", "neutral palette"]
             else:
                 category, occasion = "Shopping", "Everyday"
-                must_have = []
+                must_have = _parse_specifications(text)
             location_match = re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)", text, flags=re.IGNORECASE)
             location = location_match.group(1).strip(" .,\"") if location_match else payload.get("location") or "Bengaluru"
             if str(location).lower() == "bangalore":
@@ -138,10 +178,13 @@ class BriefAgent:
                 "category": category,
                 "occasion": occasion,
                 "budget": budget,
+                "quantity": quantity,
+                "brand": brand,
                 "location": location,
                 "arrive_by_days": arrive_days,
                 "arrive_by": f"within {arrive_days} days",
                 "must_have": must_have,
+                "specifications": must_have,
                 "nice_to_have": ["durable", "good value"],
                 "style": "practical and considered",
                 "description": text or "Find a considered product",
@@ -162,6 +205,7 @@ class BriefAgent:
         fallback_days = _parse_days(text) or 5
         source = llm_brief or {}
         source_budget = _money(source.get("budget"))
+        source_quantity = _money(source.get("quantity"))
         source_arrive_by_days = source.get("arrive_by_days")
         source_location = _brief_text(source.get("location"))
         if source_location.lower() in {"", "any", "any retail location", "unknown", "none", "null"}:
@@ -171,14 +215,20 @@ class BriefAgent:
         source_arrive_by = _brief_text(source.get("arrive_by"))
         source_style = _brief_text(source.get("style"))
         source_description = _brief_text(source.get("description"))
+        source_brand = _brief_text(source.get("brand"))
+        source_specs = _brief_list(source.get("specifications"), [])
+        source_must_have = _brief_list(source.get("must_have"), source_specs or ["breathable", "neutral palette", "office-ready"])
         brief = {
             "category": source_category or ("Fashion" if any(word in text.lower() for word in ["shirt", "pant", "shoe", "dress", "outfit", "look", "saree"]) else "Shopping"),
             "occasion": source_occasion or ("Office" if "office" in text.lower() else "Everyday"),
             "budget": source_budget or fallback_budget,
+            "quantity": max(1, min(source_quantity or _parse_quantity(text), 99)),
+            "brand": source_brand or _parse_brand(text),
             "location": source_location or payload.get("location") or "Bengaluru",
             "arrive_by_days": _money(source_arrive_by_days) if source_arrive_by_days is not None and source_arrive_by_days != "" else fallback_days,
             "arrive_by": source_arrive_by or f"within {fallback_days} days",
-            "must_have": _brief_list(source.get("must_have"), ["breathable", "neutral palette", "office-ready"]),
+            "must_have": source_must_have,
+            "specifications": source_specs or source_must_have,
             "nice_to_have": _brief_list(source.get("nice_to_have"), ["durable", "easy to layer"]),
             "style": source_style or "quietly considered",
             "description": source_description or text or "An office-ready neutral outfit",
@@ -232,6 +282,8 @@ class SearchAgent:
         try:
             query = (
                 f"Find purchasable {brief['category']} products in India for {brief['description']}. "
+                f"Quantity {brief.get('quantity') or 1}; preferred brand {brief.get('brand') or 'any'}; "
+                f"must-have specifications {', '.join(brief.get('must_have') or []) or 'none'}. "
                 f"Budget ₹{brief['budget']}; deliver to {brief['location']} {brief['arrive_by']}. "
                 "Prioritize official retailer product pages with price, availability, delivery and review evidence."
             )
@@ -279,6 +331,7 @@ class ExtractionAgent:
             "id": str(raw.get("id") or f"live-{index}-{hashlib.sha1((url or title).encode()).hexdigest()[:8]}"),
             "name": title[:180],
             "category": str(data.get("category") if isinstance(data, dict) and data.get("category") else "Product"),
+            "brand": str(data.get("brand") if isinstance(data, dict) and data.get("brand") else ""),
             "description": content[:180] or "Live retailer result. Confirm current price and delivery on the source page.",
             "seller": str(data.get("seller") if isinstance(data, dict) and data.get("seller") else host.title()),
             "price": price,
@@ -395,6 +448,8 @@ class RankingAgent:
     def run(self, products: list[dict[str, Any]], brief: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         budget = max(_money(brief.get("budget")), 1)
         max_days = brief.get("arrive_by_days") or 5
+        quantity = max(1, min(_money(brief.get("quantity")) or 1, 99))
+        requested_brand = str(brief.get("brand") or "").strip().lower()
         ranked: list[dict[str, Any]] = []
         for product in products:
             features = " ".join(product.get("features") or []).lower()
@@ -405,23 +460,41 @@ class RankingAgent:
             total_price = _money(product.get("total_price")) or price + shipping_cost
             product["shipping_cost"] = shipping_cost
             product["total_price"] = total_price or None
+            product["quantity"] = quantity
+            product["unit_total"] = total_price or None
+            product["line_total"] = total_price * quantity if total_price else None
             delivery = product.get("delivery_days")
-            budget_score = max(0, min(1, 1 - max(total_price - budget, 0) / budget)) if total_price else 0.35
+            line_total = product.get("line_total")
+            budget_score = max(0, min(1, 1 - max(line_total - budget, 0) / budget)) if line_total else 0.35
             delivery_score = 0.35 if delivery is None else max(0, min(1, 1 - max(delivery - max_days, 0) / max(max_days, 1)))
             deal_score = product.get("price_history", {}).get("deal_score") if isinstance(product.get("price_history"), dict) else None
             deal_bonus = max(0, min(5, round(float(deal_score or 0) * 5)))
-            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10 + deal_bonus)
+            product_text = " ".join(str(product.get(field) or "") for field in ("brand", "seller", "name")).lower()
+            brand_fit = True if not requested_brand else requested_brand in product_text
+            stock_value = product.get("stock")
+            stock_known = stock_value is not None and str(stock_value).strip() != ""
+            stock_match = re.search(r"\d+", str(stock_value)) if stock_known else None
+            stock_count = int(stock_match.group(0)) if stock_match else None
+            stock_fit = stock_count >= quantity if stock_count is not None else None
+            brand_bonus = 8 if brand_fit and requested_brand else -8 if requested_brand else 0
+            stock_bonus = 4 if stock_fit is True else -8 if stock_fit is False else 0
+            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10 + deal_bonus + brand_bonus + stock_bonus)
             product["match_score"] = min(99, max(42, match_score))
-            product["budget_fit"] = total_price <= budget if total_price else None
+            product["budget_fit"] = line_total <= budget if line_total else None
             product["delivery_fit"] = delivery <= max_days if delivery is not None else None
+            product["brand_fit"] = brand_fit if requested_brand else None
+            product["stock_fit"] = stock_fit
             product["delivery_label"] = product.get("delivery_label") or (f"Arrives {_date_label(delivery)}" if delivery else "Confirm at retailer")
             product["reason_tags"] = [
                 "Within budget" if product["budget_fit"] is True else "Over budget" if product["budget_fit"] is False else "Price needs confirmation",
                 "Within delivery window" if product["delivery_fit"] is True else "Misses delivery window" if product["delivery_fit"] is False else "Delivery needs confirmation",
+                f"{quantity} in stock" if stock_fit is True and quantity > 1 else "Stock covers quantity" if stock_fit is True else f"Only {stock_count} in stock" if stock_fit is False else "Availability needs confirmation",
             ]
-            product["eligible"] = product["budget_fit"] is not False and product["delivery_fit"] is not False
+            if requested_brand:
+                product["reason_tags"].append("Preferred brand" if brand_fit else "Brand preference not met")
+            product["eligible"] = product["budget_fit"] is not False and product["delivery_fit"] is not False and product["stock_fit"] is not False
             ranked.append(product)
-        ranked.sort(key=lambda item: (-item.get("match_score", 0), item.get("total_price") or 10**9))
+        ranked.sort(key=lambda item: (not item.get("eligible", True), -item.get("match_score", 0), item.get("line_total") or 10**9))
         return ranked, {"agent": self.name, "status": "complete", "detail": "Ranked by fit, budget, delivery, and source evidence"}
 
 
@@ -458,9 +531,9 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     products, ranking_event = RankingAgent().run(products, brief)
     workflow = [brief_event, search_event, evidence_event, analysis_event, ranking_event]
     search_id = f"search-{uuid.uuid4().hex[:12]}"
-    db.save_search(search_id, brief["raw_text"], brief, workflow)
+    db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
     selected_products = _default_selection(products)
-    total = sum(_money(product.get("total_price")) or _money(product.get("price")) for product in selected_products)
+    total = sum(_money(product.get("line_total")) or _money(product.get("total_price")) or _money(product.get("price")) for product in selected_products)
     latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 5
     return {
         "search_id": search_id,
@@ -481,13 +554,19 @@ def _safe_plan_item(product: dict[str, Any]) -> dict[str, Any]:
     item_price = _money(product.get("price"))
     shipping_cost = _money(product.get("shipping_cost"))
     total_price = _money(product.get("total_price")) or item_price + shipping_cost
+    quantity = max(1, min(_money(product.get("quantity")) or 1, 99))
+    line_total = _money(product.get("line_total")) or total_price * quantity
     return {
         "id": str(product.get("id") or uuid.uuid4().hex),
         "name": str(product.get("name") or "Retailer product")[:180],
         "seller": str(product.get("seller") or "Retailer")[:100],
+        "brand": str(product.get("brand") or "")[:100],
+        "quantity": quantity,
         "price": item_price,
         "shipping_cost": shipping_cost,
         "total_price": total_price,
+        "unit_total": total_price,
+        "line_total": line_total,
         "delivery_label": str(product.get("delivery_label") or "Confirm at retailer")[:120],
         "url": url,
         "image": str(product.get("image") or ""),
@@ -522,7 +601,7 @@ def create_purchase_plan(payload: dict[str, Any], user_id: str) -> dict[str, Any
         "user_id": user_id,
         "search_id": payload.get("search_id"),
         "status": "ready_for_checkout",
-        "total": sum(product["total_price"] for product in products),
+        "total": sum(product["line_total"] for product in products),
         "items": products,
         "created_at": timestamp,
         "updated_at": timestamp,

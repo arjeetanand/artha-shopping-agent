@@ -113,11 +113,11 @@ KOKORO_DEVICE=auto
 
 ## Workflow
 
-1. **Brief agent** extracts category, budget, location, delivery window, must-haves, and visual/style cues.
+1. **Brief agent** extracts category, quantity, preferred brand, budget, location, delivery window, must-have specifications, and visual/style cues.
 2. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
 3. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
 4. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
-5. **Decision agent** ranks by fit and excludes products with a known budget or delivery-window failure from the default plan.
+5. **Decision agent** ranks by fit and excludes products with a known budget, delivery-window, or stock-quantity failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
 6. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
 7. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
 
@@ -153,4 +153,5 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 - No Google OAuth token, payment credential, or reference-image bytes are persisted.
 - The service cannot charge a card, submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions.
 - In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
+- Orders created from a search are rehydrated from the server-side verified search result, so a modified browser payload cannot change the catalog price or quantity at checkout.
 - Live saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.

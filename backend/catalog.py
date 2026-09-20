@@ -16,6 +16,7 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "id": "fixture-chair-01",
         "name": "PosturePro Mesh Office Chair",
         "category": "Office chair",
+        "brand": "WorkNest",
         "description": "Breathable mesh back, adjustable lumbar support, and a height-adjustable seat for long work sessions.",
         "price": 10490,
         "shipping_cost": 0,
@@ -43,6 +44,7 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "id": "fixture-chair-02",
         "name": "ErgoForm High-Back Chair",
         "category": "Office chair",
+        "brand": "DeskTheory",
         "description": "High-back office chair with headrest, recline tension, and a shaped lumbar cushion.",
         "price": 11890,
         "shipping_cost": 299,
@@ -70,6 +72,7 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "id": "fixture-chair-03",
         "name": "DailySeat Classic Task Chair",
         "category": "Office chair",
+        "brand": "DailySeat",
         "description": "Compact fabric task chair with fixed lumbar contour and a lightweight frame.",
         "price": 6990,
         "shipping_cost": 0,
@@ -97,6 +100,7 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "id": "fixture-chair-04",
         "name": "Luma Executive Chair",
         "category": "Office chair",
+        "brand": "Luma Office",
         "description": "Padded executive chair with recline, adjustable arms, and stitched faux-leather upholstery.",
         "price": 15490,
         "shipping_cost": 0,
@@ -124,6 +128,7 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "id": "fixture-shirt-01",
         "name": "Linen Everyday Overshirt",
         "category": "Clothing",
+        "brand": "Linen Trail",
         "description": "Lightweight linen-cotton overshirt in a soft neutral palette for easy layering.",
         "price": 3290,
         "shipping_cost": 0,
@@ -171,4 +176,10 @@ class FixtureCatalogClient:
             candidates = [item for item in FIXTURE_PRODUCTS if item["category"] == "Office chair"]
         elif any(token in category for token in ("shirt", "fashion", "clothing", "outfit")) or "shirt" in query_tokens:
             candidates = [item for item in FIXTURE_PRODUCTS if item["category"] == "Clothing"]
+        brand = str(brief.get("brand") or "").lower().strip()
+        if brand:
+            candidates = sorted(
+                candidates,
+                key=lambda item: 0 if brand in " ".join(str(item.get(field) or "") for field in ("brand", "seller", "name")).lower() else 1,
+            )
         return {"results": [dict(item) for item in candidates[: max(1, min(num_results, 10))]]}
