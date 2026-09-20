@@ -87,6 +87,12 @@ The OAuth state/PKCE and redirect-safety contract can also be checked offline:
 npm run test:auth
 ```
 
+The permissioned location adapter can be exercised offline with mocked Maps responses; it verifies nearby-store parsing and coordinate non-persistence:
+
+```bash
+npm run test:location
+```
+
 ## Configure providers
 
 Copy the names from `.env.example` into `.env`; keep `.env` out of source control.
@@ -107,7 +113,7 @@ Set `ANAKIN_API_KEY`. The browser calls the Python API; only Python calls Anakin
 
 ### Delivery location
 
-The composer keeps the typed delivery city as the source of truth. **Use my location** requests approximate browser coordinates only after an explicit click; coordinates are validated, used for optional geocoding, and never persisted. In production, set `GOOGLE_MAPS_API_KEY` if you want Google Maps to resolve a permissioned location into a delivery city. If permission is denied or geocoding is unavailable, Artha keeps the city the shopper typed.
+The composer keeps the typed delivery city as the source of truth. **Use my location** requests approximate browser coordinates only after an explicit click; coordinates are validated, used for optional geocoding and nearby-store context, and never persisted. In production, set `GOOGLE_MAPS_API_KEY` and leave `GOOGLE_MAPS_PLACES_ENABLED=1` if you want Google Maps to resolve a permissioned location into a delivery city and return nearby store signals relevant to the category. The UI labels that context as approximate and does not treat a nearby store as proof of inventory. Set `GOOGLE_MAPS_PLACES_ENABLED=0` to keep geocoding without Places calls. If permission is denied or Maps is unavailable, Artha keeps the city the shopper typed.
 
 ### AI routing and reference images
 
@@ -144,7 +150,7 @@ KOKORO_DEVICE=auto
 ## Workflow
 
 1. **Brief agent** extracts category, quantity, preferred brand, budget, location, delivery window, must-have specifications, and visual/style cues.
-2. **Location agent** uses the typed city or an explicitly permissioned browser location, with optional Google Maps geocoding and no coordinate persistence.
+2. **Location agent** uses the typed city or an explicitly permissioned browser location, with optional Google Maps geocoding and nearby-store context; raw coordinates are never persisted.
 3. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
 4. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
 5. **Research agent** checks up to six returned live product pages in parallel through Anakin's URL scraper, fills only missing structured fields, records price mismatches, and keeps direct-page failures visibly unverified. Fixture mode uses its deterministic catalog evidence without network calls.

@@ -10,6 +10,7 @@
     "test:e2e": "python3 tests/e2e_local.py",
     "test:payments": "python3 tests/payment_adapter.py",
     "test:auth": "python3 tests/auth_contract.py",
+    "test:location": "python3 tests/location_adapter.py",
     "build": "vite build",
     "preview": "vite preview"
   },

@@ -99,6 +99,8 @@ def main() -> None:
         assert search["intent"]["location"] == "Bengaluru"
         assert search["intent"]["location_source"].startswith("browser_permission")
         assert "location_coordinates" not in search["intent"]
+        assert search["intent"]["location_context"]["status"] == "not queried in fixture mode"
+        assert search["intent"]["location_context"]["nearby_stores"] == []
         assert search["intent"]["quantity"] == 1
         assert len(search["workflow"]) == 7
         assert search["workflow"][1]["agent"] == "Location agent"

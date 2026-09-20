@@ -549,8 +549,31 @@ function BriefSummary({ intent }) {
     intent?.quantity > 1 ? `Quantity ${intent.quantity}` : null,
     intent?.brand ? `Preferred brand: ${intent.brand}` : null,
     intent?.location ? `Delivering to ${intent.location}` : null,
+    intent?.location_context?.nearby_stores?.length ? `${intent.location_context.nearby_stores.length} nearby stores checked` : null,
   ].filter(Boolean);
   return <p className="brief-summary">{fields.join(' • ')}</p>;
+}
+
+function LocationContext({ intent }) {
+  const stores = Array.isArray(intent?.location_context?.nearby_stores) ? intent.location_context.nearby_stores : [];
+  if (!stores.length) return null;
+  return (
+    <section className="location-context" aria-label="Nearby store context">
+      <div className="location-context__heading">
+        <span className="section-kicker">Location context</span>
+        <strong>{stores.length} nearby {stores.length === 1 ? 'store' : 'stores'} checked</strong>
+        <small>Approximate permissioned location; precise coordinates were discarded.</small>
+      </div>
+      <ul className="location-context__list">
+        {stores.slice(0, 3).map((store, index) => (
+          <li key={`${store.name || 'store'}-${index}`}>
+            <span>{store.name || 'Nearby store'}</span>
+            <small>{store.address || 'Address not returned'}{store.rating ? ` · ★ ${store.rating}` : ''}</small>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved }) {
@@ -1024,6 +1047,7 @@ function DiscoverView({
           searchStage={searchStage}
           hasResults={result.products.length > 0}
         />
+        <LocationContext intent={result.intent} />
         <ConversationTrail conversation={result.conversation} />
         <BudgetOpportunity
           opportunity={result.summary?.opportunity}

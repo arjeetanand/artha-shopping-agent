@@ -291,6 +291,13 @@ class SearchAgent:
                 f"Budget ₹{brief['budget']}; deliver to {brief['location']} {brief['arrive_by']}. "
                 "Prioritize official retailer product pages with price, availability, delivery and review evidence."
             )
+            nearby_stores = (brief.get("location_context") or {}).get("nearby_stores") if isinstance(brief.get("location_context"), dict) else []
+            if nearby_stores:
+                store_names = ", ".join(str(store.get("name") or "") for store in nearby_stores[:4] if isinstance(store, dict)).strip(
+                    ", "
+                )
+                if store_names:
+                    query = f"{query} Nearby store context (for availability cross-check only): {store_names}."
             if source_context:
                 query = f"{query} Reference context: {source_context}"
             response = self.anakin.search(query, num_results=10)
