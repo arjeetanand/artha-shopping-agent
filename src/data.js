@@ -23,6 +23,7 @@ export const DEFAULT_RESULT = {
     { agent: 'Brief agent', status: 'idle', detail: 'Waiting for your shopping brief' },
     { agent: 'Search agent', status: 'idle', detail: 'Waiting to query live retailer sources' },
     { agent: 'Evidence agent', status: 'idle', detail: 'Source evidence will appear after search' },
+    { agent: 'Analysis agent', status: 'idle', detail: 'Review and price signals will appear after search' },
     { agent: 'Decision agent', status: 'idle', detail: 'Ranked recommendations will appear after search' },
   ],
   source: { mode: 'idle', scrape: false },

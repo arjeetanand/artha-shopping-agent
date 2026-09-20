@@ -313,6 +313,82 @@ class ExtractionAgent:
         return products[:10], {"agent": self.name, "status": "complete", "detail": detail}
 
 
+class AnalysisAgent:
+    """Derive transparent review and price signals without filling unknowns."""
+
+    name = "Analysis agent"
+
+    @staticmethod
+    def _review_signal(product: dict[str, Any]) -> tuple[float | None, dict[str, Any]]:
+        sources = [source for source in (product.get("review_sources") or []) if isinstance(source, dict)]
+        existing = product.get("review_reliability")
+        try:
+            reliability = float(existing) if existing is not None else None
+        except (TypeError, ValueError):
+            reliability = None
+        if not sources:
+            return reliability, product.get("review_analysis") if isinstance(product.get("review_analysis"), dict) else {}
+
+        signal_text = " ".join(str(source.get("signal") or "") for source in sources).lower()
+        caution_terms = ("duplicate", "repeated", "anomaly", "limited", "small sample", "inconsistent")
+        caution_count = sum(signal_text.count(term) for term in caution_terms)
+        sample_count = sum(_money(source.get("count")) for source in sources)
+        base = reliability if reliability is not None else 0.68
+        base += min(0.08, max(0, len(sources) - 1) * 0.04)
+        base += min(0.06, sample_count / 3000)
+        base -= min(0.16, caution_count * 0.04)
+        base = max(0.35, min(0.98, base))
+        if caution_count >= 2:
+            label = "Review signal needs caution"
+        elif caution_count:
+            label = "Mostly consistent"
+        else:
+            label = "Strong signal"
+        detail = f"Compared {len(sources)} review sources ({sample_count or 'unknown'} sampled reviews); repeated-language flags are treated as caution, not proof of fake reviews."
+        return round(base, 2), {"label": label, "detail": detail, "caution_flags": caution_count}
+
+    @staticmethod
+    def _price_signal(product: dict[str, Any]) -> dict[str, Any]:
+        history = product.get("price_history") if isinstance(product.get("price_history"), dict) else {}
+        if not history:
+            return {}
+        current = _money(product.get("price"))
+        low = _money(history.get("low_90d"))
+        median = _money(history.get("median_90d"))
+        high = _money(history.get("high_90d"))
+        if not current or not median:
+            return history
+        if low and current <= low * 1.03:
+            label, score = "Near its 90-day low", 0.95
+        elif current < median:
+            label, score = "Below its 90-day median", 0.75
+        elif high and current >= high * 0.97:
+            label, score = "Near its 90-day high", 0.25
+        else:
+            label, score = "Typical 90-day price", 0.5
+        return {**history, "low_90d": low or history.get("low_90d"), "median_90d": median, "high_90d": high or history.get("high_90d"), "trend_label": history.get("trend_label") or label, "deal_score": score}
+
+    def run(self, products: list[dict[str, Any]], brief: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        review_known = 0
+        price_known = 0
+        for product in products:
+            reliability, review_analysis = self._review_signal(product)
+            if reliability is not None:
+                product["review_reliability"] = reliability
+                review_known += 1
+            if review_analysis:
+                product["review_analysis"] = review_analysis
+            price_history = self._price_signal(product)
+            if price_history:
+                product["price_history"] = price_history
+                price_known += 1
+        return products, {
+            "agent": self.name,
+            "status": "complete",
+            "detail": f"Cross-checked review consistency ({review_known} sources) and price history ({price_known} products); unknown signals remain unverified",
+        }
+
+
 class RankingAgent:
     name = "Decision agent"
 
@@ -332,7 +408,9 @@ class RankingAgent:
             delivery = product.get("delivery_days")
             budget_score = max(0, min(1, 1 - max(total_price - budget, 0) / budget)) if total_price else 0.35
             delivery_score = 0.35 if delivery is None else max(0, min(1, 1 - max(delivery - max_days, 0) / max(max_days, 1)))
-            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10)
+            deal_score = product.get("price_history", {}).get("deal_score") if isinstance(product.get("price_history"), dict) else None
+            deal_bonus = max(0, min(5, round(float(deal_score or 0) * 5)))
+            match_score = round(55 + feature_score * 20 + budget_score * 15 + delivery_score * 10 + deal_bonus)
             product["match_score"] = min(99, max(42, match_score))
             product["budget_fit"] = total_price <= budget if total_price else None
             product["delivery_fit"] = delivery <= max_days if delivery is not None else None
@@ -376,8 +454,9 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     brief, brief_event = BriefAgent().run(agent_payload)
     raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
     products, evidence_event = ExtractionAgent().run(raw_products, source_meta)
+    products, analysis_event = AnalysisAgent().run(products, brief)
     products, ranking_event = RankingAgent().run(products, brief)
-    workflow = [brief_event, search_event, evidence_event, ranking_event]
+    workflow = [brief_event, search_event, evidence_event, analysis_event, ranking_event]
     search_id = f"search-{uuid.uuid4().hex[:12]}"
     db.save_search(search_id, brief["raw_text"], brief, workflow)
     selected_products = _default_selection(products)

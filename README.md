@@ -116,9 +116,10 @@ KOKORO_DEVICE=auto
 1. **Brief agent** extracts category, budget, location, delivery window, must-haves, and visual/style cues.
 2. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
 3. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
-4. **Decision agent** ranks by fit and excludes products with a known budget or delivery-window failure from the default plan.
-5. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
-6. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
+4. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
+5. **Decision agent** ranks by fit and excludes products with a known budget or delivery-window failure from the default plan.
+6. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
+7. **Order service** persists an explicitly confirmed sandbox order and tracking timeline in local SQLite. It is disabled in production until a real merchant/payment adapter is configured.
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
 

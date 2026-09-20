@@ -385,6 +385,7 @@ function Composer({
 }
 
 function AgentStrip({ workflow, isSearching, searchStage, hasResults }) {
+  const lastStage = Math.max((workflow?.length || 5) - 1, 0);
   return (
     <section className="agent-strip" aria-label="Agent workflow">
       <div className="agent-strip__heading">
@@ -398,7 +399,7 @@ function AgentStrip({ workflow, isSearching, searchStage, hasResults }) {
       </div>
       <div className="agent-strip__steps">
         {(workflow || []).map((step, index) => {
-          const working = isSearching && index === Math.min(searchStage, 3);
+          const working = isSearching && index === Math.min(searchStage, lastStage);
           const complete = !working && step.status === 'complete';
           return (
             <div
@@ -1845,7 +1846,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isSearching) return undefined;
-    const timer = window.setInterval(() => setSearchStage((current) => Math.min(current + 1, 3)), 620);
+    const timer = window.setInterval(() => setSearchStage((current) => Math.min(current + 1, 4)), 620);
     return () => window.clearInterval(timer);
   }, [isSearching]);
 
