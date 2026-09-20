@@ -788,6 +788,7 @@ function SummaryPanel({
   selectedProducts,
   intent,
   sourceMode,
+  paymentProvider,
   voice,
   isSpeaking,
   onSpeak,
@@ -872,9 +873,9 @@ function SummaryPanel({
         <Icon name="arrow" size={17} />
       </button>
 
-      {sourceMode === 'sandbox' && selectedProducts.length ? (
+      {selectedProducts.length && paymentProvider !== 'disabled' ? (
         <button type="button" className="secondary-button summary-checkout-button" onClick={onStartCheckout}>
-          <span>Review sandbox order</span>
+          <span>{paymentProvider === 'razorpay' ? 'Pay securely' : 'Review sandbox order'}</span>
           <Icon name="arrow" size={15} />
         </button>
       ) : null}
@@ -882,7 +883,7 @@ function SummaryPanel({
       <div className="checkout-trust">
         <p className="checkout-note">
           <Icon name="shield" size={14} />
-          <span>Checkout occurs directly on official retailer sites. Artha never requests payment info.</span>
+          <span>{paymentProvider === 'razorpay' ? 'Payment is handled by Razorpay hosted checkout. Artha never sees payment credentials.' : 'Checkout occurs directly on official retailer sites. Artha never requests payment info.'}</span>
         </p>
       </div>
 
@@ -918,6 +919,7 @@ function LegendRow({ icon, title, detail }) {
 
 function DiscoverView({
   result,
+  paymentProvider,
   query,
   setQuery,
   postUrl,
@@ -1082,6 +1084,7 @@ function DiscoverView({
         selectedProducts={selectedProducts}
         intent={result.intent}
         sourceMode={result.source?.mode}
+        paymentProvider={paymentProvider}
         voice={voice}
         isSpeaking={isSpeaking}
         onSpeak={onSpeak}
@@ -2336,6 +2339,7 @@ export default function App() {
     activeView === 'discover' ? (
       <DiscoverView
         result={result}
+        paymentProvider={health.payment_provider}
         query={query}
         setQuery={setQuery}
         postUrl={postUrl}
