@@ -1,5 +1,3 @@
-export const OUTFIT_IMAGE = '/assets/editorial-outfit-triptych.png';
-
 export const DEFAULT_INTENT = {
   category: 'Fashion',
   occasion: 'Office',
@@ -15,25 +13,19 @@ export const DEFAULT_INTENT = {
   extraction_source: 'local rules',
 };
 
-export const DEFAULT_PRODUCTS = [
-  {
-    id: 'linen-overshirt', name: 'Linen blend overshirt', category: 'Top', description: 'Relaxed fit • Breathable linen blend • Sand', seller: 'Myntra', price: 3499, rating: 4.6, delivery_days: 3, delivery_label: 'Arrives Thu', stock: 12, features: ['breathable', 'linen', 'office-ready', 'neutral'], crop_index: 0, image: OUTFIT_IMAGE, url: 'https://www.myntra.com/', source_kind: 'local_catalog', source_label: 'Local development catalog', evidence: ['Local development catalog', 'Delivery is estimated'], match_score: 96, reason_tags: ['AI match', 'Local development data'],
-  },
-  {
-    id: 'cotton-trousers', name: 'Straight-fit cotton trousers', category: 'Bottom', description: 'Mid rise • 100% cotton • Beige', seller: 'AJIO', price: 2699, rating: 4.5, delivery_days: 4, delivery_label: 'Arrives Fri', stock: 18, features: ['cotton', 'straight-fit', 'office-ready', 'neutral'], crop_index: 1, image: OUTFIT_IMAGE, url: 'https://www.ajio.com/', source_kind: 'local_catalog', source_label: 'Local development catalog', evidence: ['Local development catalog', 'Delivery is estimated'], match_score: 94, reason_tags: ['AI match', 'Local development data'],
-  },
-  {
-    id: 'leather-loafers', name: 'Leather penny loafers', category: 'Shoes', description: 'Genuine leather • Classic fit • Dark brown', seller: 'Tata CLiQ', price: 4999, rating: 4.4, delivery_days: 2, delivery_label: 'Arrives Wed', stock: 7, features: ['leather', 'classic', 'office-ready', 'durable'], crop_index: 2, image: OUTFIT_IMAGE, url: 'https://www.tatacliq.com/', source_kind: 'local_catalog', source_label: 'Local development catalog', evidence: ['Local development catalog', 'Delivery is estimated'], match_score: 91, reason_tags: ['AI match', 'Local development data'],
-  },
-];
-
 export const DEFAULT_RESULT = {
-  search_id: 'local-seed', intent: DEFAULT_INTENT, products: DEFAULT_PRODUCTS, selected_product_ids: DEFAULT_PRODUCTS.map((product) => product.id), summary: { total: DEFAULT_PRODUCTS.reduce((total, product) => total + product.price, 0), item_count: DEFAULT_PRODUCTS.length, delivery_label: 'All known deliveries arrive by Fri' }, workflow: [
-    { agent: 'Brief agent', status: 'local', detail: 'Local rules prepared the starting brief' },
-    { agent: 'Search agent', status: 'local', detail: 'Local development catalog is ready until a live search runs' },
-    { agent: 'Evidence agent', status: 'local', detail: 'Local records label estimated information' },
-    { agent: 'Decision agent', status: 'complete', detail: 'Ranked by fit, budget, delivery, and source evidence' },
-  ], source: { mode: 'local', scrape: false },
+  search_id: null,
+  intent: DEFAULT_INTENT,
+  products: [],
+  selected_product_ids: [],
+  summary: { total: 0, item_count: 0, delivery_label: 'Run a live search to confirm delivery timing' },
+  workflow: [
+    { agent: 'Brief agent', status: 'idle', detail: 'Waiting for your shopping brief' },
+    { agent: 'Search agent', status: 'idle', detail: 'Waiting to query live retailer sources' },
+    { agent: 'Evidence agent', status: 'idle', detail: 'Source evidence will appear after search' },
+    { agent: 'Decision agent', status: 'idle', detail: 'Ranked recommendations will appear after search' },
+  ],
+  source: { mode: 'idle', scrape: false },
 };
 
 export const SUGGESTED_SEARCHES = [
@@ -88,4 +80,3 @@ export function formatDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
-

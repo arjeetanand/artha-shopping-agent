@@ -11,14 +11,16 @@ This is a real research and handoff flow, not a simulated payment system. Artha 
 - **Anakin** supplies live source search and optional URL extraction.
 - **Ollama** is selected by default in local development for brief extraction.
 - **Gemini** is selected by default when `APP_ENV=production`; it can analyze reference images as well as text.
-- **Browser SpeechSynthesis** is the default local voice path. **ElevenLabs** is selected by default in production.
+- **Kokoro** is the preferred local voice when the optional local voice environment is installed, with browser SpeechSynthesis as a fallback. **ElevenLabs** is selected by default in production.
 
 ## Run locally
 
 ```bash
 cp .env.example .env
 npm install
-SHOPPINGHELP_PORT=8000 npm run backend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements-kokoro.txt
+SHOPPINGHELP_PORT=8000 .venv/bin/python backend/server.py
 ```
 
 In another terminal:
@@ -28,6 +30,10 @@ SHOPPINGHELP_API_TARGET=http://127.0.0.1:8000 npm run dev
 ```
 
 Open the Vite URL printed by the frontend. The app proxies `/api` to the Python server, so API keys never reach the browser.
+
+The first Kokoro warm-up uses the cached `hexgrad/Kokoro-82M` model when
+available; if the optional dependency is omitted, the app reports the missing
+local dependency and falls back to browser speech in development.
 
 If port `8000` is already in use, choose another port consistently:
 
@@ -71,11 +77,22 @@ GEMINI_MODEL=gemini-2.5-flash
 
 `AI_PROVIDER=auto` uses Ollama for development and Gemini for production. Set `AI_PROVIDER=gemini` to use Gemini explicitly, or `AI_PROVIDER=ollama` to force local Ollama.
 
-Reference images are limited to PNG, JPEG, WebP, or GIF and 4 MB. They are sent only for the active brief-extraction request and are never written to SQLite. Local image understanding requires a vision-capable `OLLAMA_VISION_MODEL`; production Gemini handles inline image analysis. If a local text-only model cannot analyze an image, the interface says that the image is attached while typed constraints remain the basis for the recommendation.
+Reference images are limited to PNG, JPEG, WebP, or GIF and 4 MB. They are sent only for the active brief-extraction request and are never written to SQLite. Local image understanding requires a vision-capable `OLLAMA_VISION_MODEL`; production Gemini handles inline image analysis. If the selected provider cannot return a structured brief, the API reports the provider failure instead of fabricating a local/demo brief.
 
 ### Voice
 
-`VOICE_PROVIDER=auto` uses the browser's local speech engine during development and ElevenLabs in production. For production, set `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and optionally `ELEVENLABS_MODEL_ID`. The ElevenLabs key remains on the Python server; only audio bytes return to the browser.
+`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. For production, set `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and optionally `ELEVENLABS_MODEL_ID`. The ElevenLabs key remains on the Python server; only audio bytes return to the browser. Production does not silently fall back to browser speech when ElevenLabs is missing.
+
+The local Kokoro configuration is:
+
+```dotenv
+VOICE_PROVIDER=auto
+LOCAL_VOICE_PROVIDER=kokoro
+KOKORO_LANG_CODE=a
+KOKORO_VOICE=af_heart
+KOKORO_SPEED=0.98
+KOKORO_DEVICE=auto
+```
 
 ## Workflow
 
@@ -100,6 +117,7 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `GET /api/plans` | List the signed-in user's private purchase plans |
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |
 | `GET /api/voice/status` | Selected voice provider and availability |
+| `POST /api/voice/warm` | Warm the selected local Kokoro voice before playback |
 | `POST /api/voice/speak` | Produce the summary audio or local-browser speech instruction |
 
 ## Data and safety notes

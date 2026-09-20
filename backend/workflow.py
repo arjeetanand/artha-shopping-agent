@@ -3,13 +3,13 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import ipaddress
 import re
 import uuid
 from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-from .catalog import CATALOG, IMAGE_PATH
 from .clients import AnakinClient, BriefModel, parse_price
 from .db import db, now_iso
 
@@ -71,6 +71,25 @@ def _reference_image(payload: dict[str, Any]) -> dict[str, str] | None:
     }
 
 
+def _reference_url(value: Any) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    candidate = str(value).strip()
+    parsed = urlparse(candidate)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError("Reference URLs must be public http or https links")
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        raise ValueError("Reference URLs must use a public website")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address and (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved):
+        raise ValueError("Reference URLs must use a public website")
+    return candidate
+
+
 def _brief_text(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         return ", ".join(str(item).strip() for item in value if str(item).strip())
@@ -97,6 +116,11 @@ class BriefAgent:
         reference_image = _reference_image(payload)
         image_name = str(reference_image["name"] if reference_image else payload.get("image_name") or "").strip()
         llm_brief, provider = self.model.extract_brief(text, reference_image)
+        provider_status = self.model.status()
+        if not provider_status["configured"]:
+            raise RuntimeError(f"{provider.title()} brief extraction is not configured. Check its server credentials and settings.")
+        if not llm_brief:
+            raise RuntimeError(f"{provider.title()} brief extraction did not return a usable brief. Check the provider and try again.")
         fallback_budget = _parse_budget(text) or 18000
         fallback_days = _parse_days(text) or 5
         source = llm_brief or {}
@@ -146,12 +170,20 @@ class SearchAgent:
 
     def run(self, brief: dict[str, Any], post_url: str | None) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
         if not self.anakin.configured:
-            return CATALOG, {"agent": self.name, "status": "local", "detail": "Using the local development catalog"}, {"mode": "local", "scrape": False}
-        try:
-            source_context = ""
-            if post_url:
+            raise RuntimeError("Anakin live extraction is not configured. Add ANAKIN_API_KEY and restart the API.")
+        source_context = ""
+        scrape_status = "not_requested"
+        if post_url:
+            try:
                 scraped = self.anakin.scrape_inline(post_url)
                 source_context = str(scraped.get("markdown") or scraped.get("content") or scraped.get("generatedJson") or "")[:900]
+                scrape_status = "complete" if source_context else "empty"
+            except Exception:
+                # A single source page should not prevent the user from receiving
+                # a live cross-store search. The UI records that the page itself
+                # could not be used as evidence.
+                scrape_status = "unavailable"
+        try:
             query = (
                 f"Find purchasable {brief['category']} products in India for {brief['description']}. "
                 f"Budget ₹{brief['budget']}; deliver to {brief['location']} {brief['arrive_by']}. "
@@ -162,10 +194,15 @@ class SearchAgent:
             response = self.anakin.search(query, num_results=10)
             sources = response.get("results") or response.get("data", {}).get("results") or []
             if isinstance(sources, list) and sources:
-                return sources, {"agent": self.name, "status": "complete", "detail": f"Anakin returned {len(sources)} live sources"}, {"mode": "live", "scrape": bool(post_url)}
+                detail = f"Anakin returned {len(sources)} live sources"
+                if scrape_status == "complete":
+                    detail = f"Anakin extracted the reference link and returned {len(sources)} live sources"
+                elif scrape_status in {"empty", "unavailable"}:
+                    detail = f"Anakin returned {len(sources)} live sources; the reference link could not be used"
+                return sources, {"agent": self.name, "status": "complete", "detail": detail}, {"mode": "live", "scrape": scrape_status}
             raise RuntimeError("No usable live sources returned")
-        except Exception:
-            return CATALOG, {"agent": self.name, "status": "fallback", "detail": "Live extraction was unavailable; using the local development catalog"}, {"mode": "local", "scrape": bool(post_url), "fallback": True}
+        except Exception as error:
+            raise RuntimeError("Anakin live extraction did not return usable retailer sources. Check ANAKIN_API_KEY and network access.") from error
 
 
 class ExtractionAgent:
@@ -198,18 +235,19 @@ class ExtractionAgent:
             "match_reasons": ["Live retailer source", "Source linked"],
             "crop_index": index % 3,
             "url": url,
-            "image": IMAGE_PATH,
+            "image": "",
             "source_kind": "live_web",
             "source_label": "Live retailer source",
             "evidence": ["Anakin live extraction", "Confirm seller checkout details"],
         }
 
     def run(self, raw_products: list[dict[str, Any]], source_meta: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        if source_meta.get("mode") == "live":
-            products = [self._from_live(raw, index) for index, raw in enumerate(raw_products) if isinstance(raw, dict)]
-            if products:
-                return products[:10], {"agent": self.name, "status": "complete", "detail": "Normalized live source fields and retailer evidence"}
-        return [dict(product) for product in raw_products], {"agent": self.name, "status": "local", "detail": "Loaded structured fields from the local development catalog"}
+        if source_meta.get("mode") != "live":
+            raise RuntimeError("Live retailer evidence is required to build a purchase shortlist.")
+        products = [self._from_live(raw, index) for index, raw in enumerate(raw_products) if isinstance(raw, dict)]
+        if not products:
+            raise RuntimeError("Anakin returned no usable retailer fields for this brief.")
+        return products[:10], {"agent": self.name, "status": "complete", "detail": "Normalized live source fields and retailer evidence"}
 
 
 class RankingAgent:
@@ -232,7 +270,7 @@ class RankingAgent:
             product["budget_fit"] = price <= budget if price else None
             product["delivery_fit"] = delivery <= max_days if delivery is not None else None
             product["delivery_label"] = product.get("delivery_label") or (f"Arrives {_date_label(delivery)}" if delivery else "Confirm at retailer")
-            product["reason_tags"] = ["AI match", "Source linked" if product.get("source_kind") == "live_web" else "Local development data"]
+            product["reason_tags"] = ["AI match", "Source linked"]
             ranked.append(product)
         ranked.sort(key=lambda item: (-item.get("match_score", 0), item.get("price") or 10**9))
         return ranked, {"agent": self.name, "status": "complete", "detail": "Ranked by fit, budget, delivery, and source evidence"}
@@ -261,8 +299,11 @@ def _default_selection(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def run_search(payload: dict[str, Any]) -> dict[str, Any]:
-    brief, brief_event = BriefAgent().run(payload)
-    raw_products, search_event, source_meta = SearchAgent().run(brief, payload.get("post_url"))
+    post_url = _reference_url(payload.get("post_url"))
+    agent_payload = dict(payload)
+    agent_payload["post_url"] = post_url
+    brief, brief_event = BriefAgent().run(agent_payload)
+    raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
     products, evidence_event = ExtractionAgent().run(raw_products, source_meta)
     products, ranking_event = RankingAgent().run(products, brief)
     workflow = [brief_event, search_event, evidence_event, ranking_event]
@@ -294,7 +335,7 @@ def _safe_plan_item(product: dict[str, Any]) -> dict[str, Any]:
         "price": _money(product.get("price")),
         "delivery_label": str(product.get("delivery_label") or "Confirm at retailer")[:120],
         "url": url,
-        "image": str(product.get("image") or IMAGE_PATH),
+        "image": str(product.get("image") or ""),
         "crop_index": _money(product.get("crop_index")),
         "source_kind": str(product.get("source_kind") or "source"),
     }

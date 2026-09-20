@@ -1,0 +1,4 @@
+# Optional local studio voice, modeled after the pitchDeck voice path.
+# The core API intentionally remains dependency-free and can use browser speech
+# when this optional environment is not installed.
+kokoro==0.9.4

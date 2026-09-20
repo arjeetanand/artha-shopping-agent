@@ -35,10 +35,10 @@ class ApiError(Exception):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "saathi-api/1.0"
+    server_version = "artha-api/1.0"
 
     def log_message(self, format: str, *args: Any) -> None:
-        print(f"[saathi] {self.address_string()} - {format % args}")
+        print(f"[artha] {self.address_string()} - {format % args}")
 
     def _cors(self) -> None:
         origin = self.headers.get("Origin", "")
@@ -182,6 +182,9 @@ class Handler(BaseHTTPRequestHandler):
                 logout(self.headers.get("Cookie"))
                 self._send(200, {"ok": True}, {"Set-Cookie": clear_session_cookie()})
                 return
+            if path == "/api/voice/warm":
+                self._send(200, VoiceService().warm())
+                return
             if path == "/api/voice/speak":
                 voice = VoiceService()
                 if voice.provider == "browser":
@@ -199,18 +202,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(error.status, {"error": str(error)})
         except ValueError as error:
             self._send(400, {"error": str(error)})
+        except RuntimeError as error:
+            self._send(503, {"error": str(error)})
         except Exception:
             self._send(500, {"error": "Internal server error"})
 
 
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"saathi API listening on http://{HOST}:{PORT}")
+    print(f"Artha API listening on http://{HOST}:{PORT}")
     print("Google OAuth, Anakin extraction, provider routing, and voice status are ready.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping saathi API")
+        print("\nStopping Artha API")
     finally:
         server.server_close()
 

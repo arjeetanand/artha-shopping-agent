@@ -46,6 +46,10 @@ export function getVoiceStatus() {
   return request('/voice/status');
 }
 
+export function warmVoice() {
+  return request('/voice/warm', { method: 'POST', body: JSON.stringify({}) });
+}
+
 export async function speakText(text) {
   const response = await fetch(`${API_BASE}/voice/speak`, {
     method: 'POST',
@@ -58,6 +62,6 @@ export async function speakText(text) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `Voice request failed (${response.status})`);
   }
-  if (contentType.startsWith('audio/')) return { provider: 'elevenlabs', blob: await response.blob() };
+  if (contentType.startsWith('audio/')) return { provider: 'server', blob: await response.blob() };
   return response.json();
 }

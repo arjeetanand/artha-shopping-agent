@@ -1,4 +1,4 @@
-"""Small, dependency-free settings loader for local and deployed saathi runs."""
+"""Small, dependency-free settings loader for local and deployed Artha runs."""
 
 from __future__ import annotations
 

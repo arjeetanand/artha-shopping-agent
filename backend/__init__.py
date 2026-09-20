@@ -1,1 +1,1 @@
-"""Local Python API for the saathi purchase agent."""
+"""Local Python API for Artha purchase research."""

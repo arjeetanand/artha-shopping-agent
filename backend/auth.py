@@ -19,7 +19,7 @@ from .settings import is_production, setting
 GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
-SESSION_COOKIE = "saathi_session"
+SESSION_COOKIE = "artha_session"
 
 
 class AuthError(RuntimeError):

@@ -19,6 +19,7 @@ import {
   runAgentSearch,
   signOut,
   speakText,
+  warmVoice,
 } from './lib/api';
 
 const SAVED_KEY = 'artha:saved:v1';
@@ -185,13 +186,14 @@ function TopHeader({ activeView, user, onSignIn, onSignOut }) {
 
 function ProductThumb({ product, small = false }) {
   const position = `${Math.max(0, Math.min(2, Number(product.crop_index || 0))) * 50}% center`;
+  const image = String(product.image || '').trim();
   return (
     <span
-      className={`product-thumb ${small ? 'product-thumb--small' : ''}`}
+      className={`product-thumb ${small ? 'product-thumb--small' : ''} ${image ? '' : 'product-thumb--placeholder'}`}
       role="img"
       aria-label={`${product.name} thumbnail`}
       style={{
-        backgroundImage: `url(${product.image || '/assets/editorial-outfit-triptych.png'})`,
+        backgroundImage: image ? `url(${image})` : 'none',
         backgroundPosition: position,
       }}
     />
@@ -202,7 +204,7 @@ function SourceMark({ product }) {
   const live = product.source_kind === 'live_web';
   const seller = product.seller || 'Retailer';
   return (
-    <span className="source-mark" aria-label={`${live ? 'Live retailer source' : 'Local catalog'} ${seller}`}>
+    <span className="source-mark" aria-label={`${live ? 'Live retailer source' : 'Source evidence'} ${seller}`}>
       <b className="source-mark__monogram">{seller.slice(0, 2).toUpperCase()}</b>
       <span className="source-mark__name">{seller}</span>
     </span>
@@ -375,7 +377,7 @@ function Composer({
   );
 }
 
-function AgentStrip({ workflow, isSearching, searchStage }) {
+function AgentStrip({ workflow, isSearching, searchStage, hasResults }) {
   return (
     <section className="agent-strip" aria-label="Agent workflow">
       <div className="agent-strip__heading">
@@ -384,13 +386,13 @@ function AgentStrip({ workflow, isSearching, searchStage }) {
           <span>Multi-Agent Verification Pipeline</span>
         </div>
         <small className="agent-strip__status">
-          {isSearching ? 'Live agents verifying sources…' : 'Every recommendation verified with source evidence'}
+          {isSearching ? 'Live agents verifying sources…' : hasResults ? 'Every recommendation verified with source evidence' : 'Ready for a live search'}
         </small>
       </div>
       <div className="agent-strip__steps">
         {(workflow || []).map((step, index) => {
           const working = isSearching && index === Math.min(searchStage, 3);
-          const complete = !working && step.status !== 'fallback';
+          const complete = !working && step.status === 'complete';
           return (
             <div
               className={`agent-step ${working ? 'is-working' : complete ? 'is-complete' : ''}`}
@@ -617,7 +619,7 @@ function ResultsTable({ products, selectedIds, focusedId, onToggle, onFocus, onO
   );
 }
 
-function VoiceControl({ voice, isSpeaking, onSpeak }) {
+function VoiceControl({ voice, isSpeaking, onSpeak, disabled = false }) {
   return (
     <section className="voice-control" aria-label="Voice summary">
       <div className="voice-control__head">
@@ -625,7 +627,7 @@ function VoiceControl({ voice, isSpeaking, onSpeak }) {
           <Icon name="waveform" size={16} />
           <span>Audio Summary</span>
         </div>
-        <small>{voice?.label || 'Local voice'}</small>
+        <small>{voice?.ready === false ? 'Preparing local voice…' : voice?.label || 'Local voice'}</small>
       </div>
       <div className={`voice-wave ${isSpeaking ? 'is-playing' : ''}`} aria-hidden="true">
         {Array.from({ length: 22 }, (_, index) => (
@@ -642,6 +644,7 @@ function VoiceControl({ voice, isSpeaking, onSpeak }) {
         type="button"
         className={`secondary-button voice-control__button ${isSpeaking ? 'is-active' : ''}`}
         onClick={onSpeak}
+        disabled={disabled}
       >
         <Icon name={isSpeaking ? 'pause' : 'play'} size={15} />
         <span>{isSpeaking ? 'Stop listening' : 'Play audio summary'}</span>
@@ -664,6 +667,7 @@ function SummaryPanel({
 }) {
   const total = selectedProducts.reduce((sum, product) => sum + Number(product.price || 0), 0);
   const live = sourceMode === 'live';
+  const awaitingSearch = sourceMode === 'idle';
 
   return (
     <aside className="summary-panel" aria-label="Purchase plan summary">
@@ -724,7 +728,7 @@ function SummaryPanel({
         </div>
       </div>
 
-      <VoiceControl voice={voice} isSpeaking={isSpeaking} onSpeak={onSpeak} />
+      <VoiceControl voice={voice} isSpeaking={isSpeaking} onSpeak={onSpeak} disabled={!selectedProducts.length} />
 
       <button
         type="button"
@@ -746,8 +750,8 @@ function SummaryPanel({
       <div className="summary-legend">
         <LegendRow
           icon="shield"
-          title={live ? 'Live retailer verified' : 'Local development data'}
-          detail={live ? 'Click retailer links to confirm live availability.' : 'Switch to live search to query active web retailers.'}
+          title={awaitingSearch ? 'Awaiting live search' : live ? 'Live retailer verified' : 'Live source unavailable'}
+          detail={awaitingSearch ? 'Run a brief to query active web retailers.' : live ? 'Click retailer links to confirm live availability.' : 'Run the search again after the provider recovers.'}
         />
         <LegendRow
           icon="spark"
@@ -841,12 +845,17 @@ function DiscoverView({
           onPickPrompt={onPickPrompt}
         />
 
-        <AgentStrip workflow={result.workflow} isSearching={isSearching} searchStage={searchStage} />
+        <AgentStrip
+          workflow={result.workflow}
+          isSearching={isSearching}
+          searchStage={searchStage}
+          hasResults={result.products.length > 0}
+        />
 
         <section className="results-section" aria-labelledby="results-heading">
           <div className="results-toolbar">
             <div className="results-heading">
-              <h2 id="results-heading">A considered edit for you</h2>
+            <h2 id="results-heading">{result.products.length ? 'A considered edit for you' : 'Build your live shortlist'}</h2>
               <BriefSummary intent={result.intent} />
             </div>
 
@@ -882,7 +891,15 @@ function DiscoverView({
             </div>
           </div>
 
-          {viewMode === 'cards' ? (
+          {!result.products.length ? (
+            <div className="empty-state results-empty-state">
+              <span className="empty-state__icon">
+                <Icon name="search" size={24} />
+              </span>
+              <h2>Live sources will appear here.</h2>
+              <p>Describe what you want, add a reference image, or paste a public product or post URL to start a verified search.</p>
+            </div>
+          ) : viewMode === 'cards' ? (
             <div className="products-grid">
               {result.products.map((product) => (
                 <ProductCard
@@ -950,7 +967,10 @@ function DiscoverView({
 }
 
 function AuthSheet({ onClose, onSignIn }) {
+  const closeButtonRef = useRef(null);
+
   useEffect(() => {
+    closeButtonRef.current?.focus();
     const onKeyDown = (e) => {
       if (e.key === 'Escape') onClose();
     };
@@ -966,15 +986,15 @@ function AuthSheet({ onClose, onSignIn }) {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <section className="auth-sheet" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-        <button type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close sign in">
+      <section className="auth-sheet" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-copy">
+        <button ref={closeButtonRef} type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close sign in">
           <Icon name="close" size={19} />
         </button>
         <div className="auth-sheet__icon">
           <Icon name="shield" size={32} />
         </div>
         <h2 id="auth-title">Make your shortlist yours.</h2>
-        <p>Sign in to save private purchase plans, track retailer links, and sync across devices seamlessly.</p>
+        <p id="auth-copy">Sign in with Google to save private purchase plans and revisit your source-linked retailer handoffs.</p>
         <button type="button" className="google-button" onClick={onSignIn}>
           <span className="google-mark">G</span>
           <span>Continue with Google</span>
@@ -1240,7 +1260,16 @@ export default function App() {
       if (!active) return;
       if (nextHealth) setHealth(nextHealth);
       if (session?.user) setUser(session.user);
-      if (nextVoice) setVoice(nextVoice);
+      if (nextVoice) {
+        setVoice(nextVoice);
+        if (nextVoice.provider === 'kokoro') {
+          warmVoice()
+            .then((warmState) => setVoice((current) => ({ ...current, ...warmState })))
+            .catch(() => {
+              /* The first playback still reports a precise provider error if warm-up fails. */
+            });
+        }
+      }
     });
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'success') {
@@ -1311,11 +1340,7 @@ export default function App() {
             : body.products.slice(0, 3).map((product) => product.id),
         );
         setFocusedId(body.products[0]?.id || '');
-        setToast(
-          body.source?.mode === 'live'
-            ? 'Live retailer sources checked and ranked.'
-            : 'Local catalog checked and ranked.',
-        );
+        setToast('Live retailer sources checked and ranked.');
       } catch (error) {
         setToast(error.message || 'The search could not complete. Please try again.');
       } finally {
