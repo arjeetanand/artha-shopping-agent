@@ -221,6 +221,7 @@ function AccountAvatar({ user }) {
 function TopHeader({ activeView, user, onSignIn, onSignOut }) {
   return (
     <header className="top-header">
+      <span className="mobile-brand" aria-label="Artha">ARTHA</span>
       <div className="top-header__breadcrumb">
         <span className="top-header__crumb-app">Artha</span>
         <span className="top-header__separator">/</span>
@@ -970,8 +971,19 @@ function DiscoverView({
   onRemoveSelectedItem,
 }) {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
+  const resultsRef = useRef(null);
+  const lastScrolledSearchRef = useRef(null);
   const selectedProducts = result.products.filter((product) => selectedIds.includes(product.id));
   const allSelected = result.products.length > 0 && selectedIds.length === result.products.length;
+
+  useEffect(() => {
+    if (isSearching || !result.search_id || !result.products.length || lastScrolledSearchRef.current === result.search_id) return undefined;
+    lastScrolledSearchRef.current = result.search_id;
+    const frame = window.requestAnimationFrame(() => {
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isSearching, result.products.length, result.search_id]);
 
   return (
     <div className="discover-layout">
@@ -1019,7 +1031,7 @@ function DiscoverView({
           onInspect={onInspect}
         />
 
-        <section className="results-section" aria-labelledby="results-heading">
+        <section ref={resultsRef} className="results-section" aria-labelledby="results-heading">
           <div className="results-toolbar">
             <div className="results-heading">
             <h2 id="results-heading">{result.products.length ? 'A considered edit for you' : 'Build your live shortlist'}</h2>
@@ -1226,8 +1238,12 @@ function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClos
 
 function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
   if (!product) return null;
-  const reviewScore = Number(product.review_reliability);
-  const sellerScore = Number(product.seller_reliability);
+  const reviewScore = product.review_reliability === null || product.review_reliability === undefined || product.review_reliability === ''
+    ? null
+    : Number(product.review_reliability);
+  const sellerScore = product.seller_reliability === null || product.seller_reliability === undefined || product.seller_reliability === ''
+    ? null
+    : Number(product.seller_reliability);
   const reviewAnalysis = product.review_analysis || {};
   const priceHistory = product.price_history || {};
   const reviewSources = Array.isArray(product.review_sources) ? product.review_sources : [];

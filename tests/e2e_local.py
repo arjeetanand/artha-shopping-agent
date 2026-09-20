@@ -159,6 +159,25 @@ def main() -> None:
         token = database.create_session(user["id"])
         cookie = f"artha_session={token}"
         selected = search["products"][0]
+        status, unauthenticated_plan = request(
+            port,
+            "/api/plans",
+            method="POST",
+            payload={"search_id": search["search_id"], "products": [selected]},
+        )
+        assert status == 401 and "Sign in" in unauthenticated_plan["error"], unauthenticated_plan
+        status, plan_response = request(
+            port,
+            "/api/plans",
+            method="POST",
+            cookie=cookie,
+            payload={"search_id": search["search_id"], "products": [selected]},
+        )
+        assert status == 201, plan_response
+        plan = plan_response["plan"]
+        assert plan["status"] == "ready_for_checkout" and plan["total"] == 10490
+        status, plans_response = request(port, "/api/plans", cookie=cookie)
+        assert status == 200 and plans_response["plans"][0]["id"] == plan["id"], plans_response
         status, order_response = request(
             port,
             "/api/orders",
