@@ -234,7 +234,7 @@ function AccountAvatar({ user }) {
   return <span className="account-avatar account-avatar--initials">{initials(user?.name)}</span>;
 }
 
-function TopHeader({ activeView, user, onSignIn, onSignOut }) {
+function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut }) {
   return (
     <header className="top-header">
       <span className="mobile-brand" aria-label="Artha">ARTHA</span>
@@ -243,7 +243,9 @@ function TopHeader({ activeView, user, onSignIn, onSignOut }) {
         <span className="top-header__separator">/</span>
         <span className="top-header__section">{SECTION_TITLES[activeView]}</span>
       </div>
-      {user ? (
+      {isSessionLoading ? (
+        <span className="account-loading" role="status">Checking account…</span>
+      ) : user ? (
         <div className="account-cluster">
           <div className="account-identity">
             <AccountAvatar user={user} />
@@ -859,6 +861,7 @@ function SummaryPanel({
   isSpeaking,
   onSpeak,
   user,
+  isSessionLoading,
   onSavePlan,
   isSavingPlan,
   onStartCheckout,
@@ -933,9 +936,9 @@ function SummaryPanel({
         type="button"
         className="primary-button summary-button"
         onClick={onSavePlan}
-        disabled={!selectedProducts.length || isSavingPlan}
+        disabled={!selectedProducts.length || isSavingPlan || isSessionLoading}
       >
-        <span>{isSavingPlan ? 'Saving plan…' : user ? 'Save purchase plan' : 'Sign in to save plan'}</span>
+        <span>{isSavingPlan ? 'Saving plan…' : isSessionLoading ? 'Checking account…' : user ? 'Save purchase plan' : 'Sign in to save plan'}</span>
         <Icon name="arrow" size={17} />
       </button>
 
@@ -1012,6 +1015,7 @@ function DiscoverView({
   isSpeaking,
   onSpeak,
   user,
+  isSessionLoading,
   onSavePlan,
   isSavingPlan,
   onStartCheckout,
@@ -1173,6 +1177,7 @@ function DiscoverView({
         isSpeaking={isSpeaking}
         onSpeak={onSpeak}
         user={user}
+        isSessionLoading={isSessionLoading}
         onSavePlan={onSavePlan}
         isSavingPlan={isSavingPlan}
         onStartCheckout={onStartCheckout}
@@ -1193,9 +1198,9 @@ function DiscoverView({
               type="button"
               className="primary-button mobile-plan-bar__cta"
               onClick={onSavePlan}
-              disabled={isSavingPlan}
+              disabled={isSavingPlan || isSessionLoading}
             >
-              {isSavingPlan ? 'Saving…' : user ? 'Save Plan' : 'Sign in to Save'}
+              {isSavingPlan ? 'Saving…' : isSessionLoading ? 'Checking account…' : user ? 'Save Plan' : 'Sign in to Save'}
             </button>
             <button type="button" className="secondary-button mobile-plan-bar__checkout" onClick={onStartCheckout}>
               {paymentProvider === 'razorpay' ? 'Pay' : 'Order'}
@@ -1459,7 +1464,27 @@ function PlanCard({ plan }) {
   );
 }
 
-function PlansView({ user, plans, onDiscover, onSignIn }) {
+function AccountLoading() {
+  return (
+    <div className="empty-state sign-in-prompt" role="status" aria-live="polite">
+      <span className="empty-state__icon">
+        <Icon name="shield" size={26} />
+      </span>
+      <h2>Checking your account…</h2>
+      <p>Loading your private Artha workspace.</p>
+    </div>
+  );
+}
+
+function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn }) {
+  if (isSessionLoading) {
+    return (
+      <div className="page-stack">
+        <AccountLoading />
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <div className="page-stack">
@@ -1611,7 +1636,15 @@ function OrderTracker({ order }) {
   );
 }
 
-function OrdersView({ user, orders, onDiscover, onCancel, onAdvance, onRequestReturn, onRefund, onSignIn }) {
+function OrdersView({ user, isSessionLoading, orders, onDiscover, onCancel, onAdvance, onRequestReturn, onRefund, onSignIn }) {
+  if (isSessionLoading) {
+    return (
+      <div className="page-stack">
+        <AccountLoading />
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <div className="page-stack">
@@ -1997,6 +2030,7 @@ export default function App() {
   const [isUsageLoading, setIsUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState('');
   const [user, setUser] = useState(null);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [authOpen, setAuthOpen] = useState(false);
   const [authAction, setAuthAction] = useState(null);
   const [postAuthAction, setPostAuthAction] = useState(null);
@@ -2058,6 +2092,8 @@ export default function App() {
             });
         }
       }
+    }).finally(() => {
+      if (active) setIsSessionLoading(false);
     });
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'success') {
@@ -2480,6 +2516,7 @@ export default function App() {
         isSpeaking={isSpeaking}
         onSpeak={handleSpeak}
         user={user}
+        isSessionLoading={isSessionLoading}
         onSavePlan={handleSavePlan}
         isSavingPlan={isSavingPlan}
         onStartCheckout={handleStartCheckout}
@@ -2514,6 +2551,7 @@ export default function App() {
     ) : activeView === 'orders' ? (
       <OrdersView
         user={user}
+        isSessionLoading={isSessionLoading}
         orders={orders}
         onDiscover={startNewSearch}
         onCancel={handleCancelOrder}
@@ -2525,6 +2563,7 @@ export default function App() {
     ) : (
       <PlansView
         user={user}
+        isSessionLoading={isSessionLoading}
         plans={plans}
         onDiscover={startNewSearch}
         onSignIn={() => startSignIn('/plans')}
@@ -2544,6 +2583,7 @@ export default function App() {
         <TopHeader
           activeView={activeView}
           user={user}
+          isSessionLoading={isSessionLoading}
           onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
           onSignOut={handleSignOut}
         />

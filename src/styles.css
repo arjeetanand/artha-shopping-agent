@@ -444,6 +444,16 @@ button:disabled {
   border-color: var(--line-strong);
 }
 
+.account-loading {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ─── Discover View Layout ─────────────────────────────────────────────────── */
 .discover-layout {
   display: grid;
