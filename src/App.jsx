@@ -88,14 +88,30 @@ function readPendingSearch() {
   }
 }
 
-function preservePendingSearch({ query, postUrl, result, selectedIds, location }) {
+function preservePendingSearch({ query, postUrl, result, selectedIds, location, pendingAction }) {
   try {
     window.sessionStorage.setItem(
       PENDING_SEARCH_KEY,
-      JSON.stringify({ saved_at: Date.now(), query, postUrl, result, selectedIds, location }),
+      JSON.stringify({
+        saved_at: Date.now(),
+        query,
+        postUrl,
+        result,
+        selectedIds,
+        location,
+        pending_action: pendingAction || null,
+      }),
     );
   } catch {
     /* Private browsing can deny session storage; sign-in still works. */
+  }
+}
+
+function clearPendingSearch() {
+  try {
+    window.sessionStorage.removeItem(PENDING_SEARCH_KEY);
+  } catch {
+    /* Private browsing can deny session storage. */
   }
 }
 
@@ -1982,6 +1998,8 @@ export default function App() {
   const [usageError, setUsageError] = useState('');
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authAction, setAuthAction] = useState(null);
+  const [postAuthAction, setPostAuthAction] = useState(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [evidenceProduct, setEvidenceProduct] = useState(null);
@@ -2043,12 +2061,14 @@ export default function App() {
     });
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'success') {
-      setToast('You are signed in. Your purchase plans are private to this account.');
-      try {
-        window.sessionStorage.removeItem(PENDING_SEARCH_KEY);
-      } catch {
-        /* Private browsing can deny session storage. */
-      }
+      const restoringPlan = pendingSearch?.pending_action === 'save_plan';
+      if (restoringPlan) setPostAuthAction('save_plan');
+      setToast(
+        restoringPlan
+          ? 'Signed in. Restoring your purchase plan…'
+          : 'You are signed in. Your purchase plans are private to this account.',
+      );
+      if (!restoringPlan) clearPendingSearch();
     }
     if (params.get('auth_error')) {
       setToast('Google sign-in did not finish. Please try again.');
@@ -2059,7 +2079,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pendingSearch]);
 
   useEffect(() => {
     try {
@@ -2207,6 +2227,7 @@ export default function App() {
   const handleSavePlan = useCallback(async () => {
     if (!selectedProducts.length || isSavingPlan) return;
     if (!user) {
+      setAuthAction('save_plan');
       setAuthOpen(true);
       return;
     }
@@ -2214,15 +2235,30 @@ export default function App() {
     try {
       const body = await createPlan({ search_id: result.search_id, products: selectedProducts });
       setPlans((current) => [body.plan, ...current.filter((plan) => plan.id !== body.plan.id)]);
+      clearPendingSearch();
+      setAuthAction(null);
+      setPostAuthAction(null);
       setActiveView('plans');
       setToast('Purchase plan saved. Open retailer links when you are ready.');
     } catch (error) {
-      if (/sign in/i.test(error.message)) setAuthOpen(true);
-      else setToast(error.message || 'Could not save this purchase plan.');
+      setPostAuthAction(null);
+      if (/sign in/i.test(error.message)) {
+        setAuthAction('save_plan');
+        setAuthOpen(true);
+      } else {
+        clearPendingSearch();
+        setToast(error.message || 'Could not save this purchase plan.');
+      }
     } finally {
       setIsSavingPlan(false);
     }
   }, [isSavingPlan, result.search_id, selectedProducts, user]);
+
+  useEffect(() => {
+    if (user?.id && postAuthAction === 'save_plan' && selectedProducts.length && !isSavingPlan) {
+      handleSavePlan();
+    }
+  }, [handleSavePlan, isSavingPlan, postAuthAction, selectedProducts.length, user?.id]);
 
   const handleStartCheckout = useCallback(() => {
     if (!selectedProducts.length) {
@@ -2406,8 +2442,8 @@ export default function App() {
   }, []);
 
   const startSignIn = useCallback(
-    (next = '/') => {
-      preservePendingSearch({ query, postUrl, result, selectedIds, location });
+    (next = '/', pendingAction = null) => {
+      preservePendingSearch({ query, postUrl, result, selectedIds, location, pendingAction });
       beginGoogleSignIn(next);
     },
     [location, postUrl, query, result, selectedIds],
@@ -2514,7 +2550,15 @@ export default function App() {
         {view}
       </main>
       <MobileNav activeView={activeView} onNavigate={setActiveView} planCount={plans.length} />
-      {authOpen ? <AuthSheet onClose={() => setAuthOpen(false)} onSignIn={() => startSignIn('/')} /> : null}
+      {authOpen ? (
+        <AuthSheet
+          onClose={() => {
+            setAuthAction(null);
+            setAuthOpen(false);
+          }}
+          onSignIn={() => startSignIn('/', authAction)}
+        />
+      ) : null}
       {checkoutOpen ? (
         <CheckoutSheet
           products={selectedProducts}
