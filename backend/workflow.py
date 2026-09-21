@@ -168,6 +168,69 @@ def _clarification_questions(
     return questions
 
 
+def _rule_brief(
+    payload: dict[str, Any],
+    text: str,
+    reference_image: dict[str, str] | None,
+    image_name: str,
+    *,
+    extraction_source: str,
+) -> dict[str, Any]:
+    """Build a safe, deterministic brief when an LLM is unavailable or malformed."""
+    lowered = text.lower()
+    parsed_budget = _parse_budget(text)
+    parsed_days = _parse_days(text)
+    budget = parsed_budget or 18000
+    arrive_days = parsed_days or 5
+    quantity = _parse_quantity(text)
+    brand = _parse_brand(text)
+    if "chair" in lowered:
+        category, occasion = "Office chair", "Office"
+        must_have = _parse_specifications(text) or ["back support", "ergonomic"]
+    elif any(word in lowered for word in ("shirt", "outfit", "dress", "shoe", "loafers")):
+        category, occasion = "Clothing", "Everyday"
+        must_have = _parse_specifications(text) or ["breathable", "neutral palette"]
+    else:
+        category, occasion = "Shopping", "Everyday"
+        must_have = _parse_specifications(text)
+    location_match = re.search(
+        r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    location = location_match.group(1).strip(" .,\"") if location_match else payload.get("location") or "Bengaluru"
+    if str(location).lower() == "bangalore":
+        location = "Bengaluru"
+    brief = {
+        "category": category,
+        "occasion": occasion,
+        "budget": budget,
+        "quantity": quantity,
+        "brand": brand,
+        "location": location,
+        "arrive_by_days": arrive_days,
+        "arrive_by": f"within {arrive_days} days",
+        "must_have": must_have,
+        "specifications": must_have,
+        "nice_to_have": ["durable", "good value"],
+        "style": "practical and considered",
+        "description": text or "Find a considered product",
+        "raw_text": text or "Find a considered product",
+        "image_name": image_name or None,
+        "reference_image": {"name": image_name, "mime_type": reference_image["mime_type"]} if reference_image else None,
+        "post_url": payload.get("post_url") or None,
+        "extraction_source": extraction_source,
+    }
+    brief["clarifications"] = _clarification_questions(
+        text,
+        brief,
+        budget_explicit=parsed_budget is not None,
+        location_explicit=bool(location_match or payload.get("location") or payload.get("location_coordinates")),
+        delivery_explicit=parsed_days is not None,
+    )
+    return brief
+
+
 class BriefAgent:
     name = "Brief agent"
 
@@ -179,60 +242,16 @@ class BriefAgent:
         reference_image = _reference_image(payload)
         image_name = str(reference_image["name"] if reference_image else payload.get("image_name") or "").strip()
         if setting("SHOPPINGHELP_SEARCH_MODE", "live").lower() in {"fixture", "sandbox", "mock"}:
-            lowered = text.lower()
-            parsed_budget = _parse_budget(text)
-            parsed_days = _parse_days(text)
-            budget = parsed_budget or 18000
-            arrive_days = parsed_days or 5
-            quantity = _parse_quantity(text)
-            brand = _parse_brand(text)
-            if "chair" in lowered:
-                category, occasion = "Office chair", "Office"
-                must_have = _parse_specifications(text) or ["back support", "ergonomic"]
-            elif any(word in lowered for word in ("shirt", "outfit", "dress", "shoe", "loafers")):
-                category, occasion = "Clothing", "Everyday"
-                must_have = _parse_specifications(text) or ["breathable", "neutral palette"]
-            else:
-                category, occasion = "Shopping", "Everyday"
-                must_have = _parse_specifications(text)
-            location_match = re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)", text, flags=re.IGNORECASE)
-            location = location_match.group(1).strip(" .,\"") if location_match else payload.get("location") or "Bengaluru"
-            if str(location).lower() == "bangalore":
-                location = "Bengaluru"
-            brief = {
-                "category": category,
-                "occasion": occasion,
-                "budget": budget,
-                "quantity": quantity,
-                "brand": brand,
-                "location": location,
-                "arrive_by_days": arrive_days,
-                "arrive_by": f"within {arrive_days} days",
-                "must_have": must_have,
-                "specifications": must_have,
-                "nice_to_have": ["durable", "good value"],
-                "style": "practical and considered",
-                "description": text or "Find a considered product",
-                "raw_text": text or "Find a considered product",
-                "image_name": image_name or None,
-                "reference_image": {"name": image_name, "mime_type": reference_image["mime_type"]} if reference_image else None,
-                "post_url": payload.get("post_url") or None,
-                "extraction_source": "local fixture rules",
-            }
-            brief["clarifications"] = _clarification_questions(
-                text,
-                brief,
-                budget_explicit=parsed_budget is not None,
-                location_explicit=bool(location_match or payload.get("location")),
-                delivery_explicit=parsed_days is not None,
-            )
+            brief = _rule_brief(payload, text, reference_image, image_name, extraction_source="local fixture rules")
             return brief, {"agent": self.name, "status": "complete", "detail": "Local fixture rules extracted price, place, delivery, and must-haves"}
         llm_brief, provider = self.model.extract_brief(text, reference_image)
         provider_status = self.model.status()
         if not provider_status["configured"]:
-            raise RuntimeError(f"{provider.title()} brief extraction is not configured. Check its server credentials and settings.")
+            brief = _rule_brief(payload, text, reference_image, image_name, extraction_source=f"local rules fallback ({provider} unavailable)")
+            return brief, {"agent": self.name, "status": "complete", "detail": f"{provider.title()} is unavailable; local rules fallback kept the brief usable"}
         if not llm_brief:
-            raise RuntimeError(f"{provider.title()} brief extraction did not return a usable brief. Check the provider and try again.")
+            brief = _rule_brief(payload, text, reference_image, image_name, extraction_source=f"local rules fallback ({provider} returned no usable JSON)")
+            return brief, {"agent": self.name, "status": "complete", "detail": f"{provider.title()} returned no usable JSON; local rules fallback kept the brief usable"}
         fallback_budget = _parse_budget(text) or 18000
         fallback_days = _parse_days(text) or 5
         source = llm_brief or {}
