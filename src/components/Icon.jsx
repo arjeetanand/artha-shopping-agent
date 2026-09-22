@@ -12,6 +12,7 @@ const paths = {
   external: <><path d="M14 5h5v5" /><path d="m19 5-8 8" /><path d="M19 14v4.25A1.75 1.75 0 0 1 17.25 20h-9.5A1.75 1.75 0 0 1 6 18.25v-9.5A1.75 1.75 0 0 1 7.75 7H12" /></>,
   grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>,
   image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m21 15-4.5-4.5L8 19" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 10v6M12 7.5h.01" /></>,
   link: <><path d="M10 13.5a4 4 0 0 0 5.66.08l2-2a4 4 0 0 0-5.66-5.66l-1.14 1.14" /><path d="M14 10.5a4 4 0 0 0-5.66-.08l-2 2A4 4 0 0 0 8 18.08l1.14-1.14" /></>,
   list: <><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></>,
   logout: <><path d="M10 5H6.75A1.75 1.75 0 0 0 5 6.75v10.5A1.75 1.75 0 0 0 6.75 19H10" /><path d="M14 8l4 4-4 4M18 12H9" /></>,

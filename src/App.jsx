@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
+import { TalkDrawer } from './components/TalkDrawer';
 import {
   DEFAULT_INTENT,
   DEFAULT_RESULT,
@@ -120,6 +121,50 @@ function viewFromPath(pathname = '/') {
   return ({ '/saved': 'saved', '/plans': 'plans', '/orders': 'orders', '/usage': 'usage' })[path] || 'discover';
 }
 
+function useDialogFocusTrap(open, dialogRef, initialRef, onClose) {
+  const previousFocusRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => initialRef.current?.focus());
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = [...dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hidden && element.offsetParent !== null);
+      if (!focusable.length) {
+        event.preventDefault();
+        initialRef.current?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', handleKeyDown);
+      const restore = previousFocusRef.current;
+      if (restore && document.contains(restore)) restore.focus();
+      previousFocusRef.current = null;
+    };
+  }, [dialogRef, initialRef, onClose, open]);
+}
+
 function initials(name = '') {
   return (
     name
@@ -219,9 +264,10 @@ function MobileNav({ activeView, onNavigate, planCount }) {
           key={item.id}
           className={activeView === item.id ? 'is-active' : ''}
           onClick={() => onNavigate(item.id)}
+          aria-current={activeView === item.id ? 'page' : undefined}
         >
           <Icon name={item.icon} size={20} />
-          <span>{item.label}</span>
+          <span>{item.id === 'plans' ? 'Plans' : item.label}</span>
           {item.id === 'plans' && planCount > 0 ? <em>{planCount}</em> : null}
         </button>
       ))}
@@ -234,7 +280,7 @@ function AccountAvatar({ user }) {
   return <span className="account-avatar account-avatar--initials">{initials(user?.name)}</span>;
 }
 
-function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut }) {
+function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, onOpenTalk }) {
   return (
     <header className="top-header">
       <span className="mobile-brand" aria-label="Artha">ARTHA</span>
@@ -243,23 +289,29 @@ function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut }) 
         <span className="top-header__separator">/</span>
         <span className="top-header__section">{SECTION_TITLES[activeView]}</span>
       </div>
-      {isSessionLoading ? (
-        <span className="account-loading" role="status">Checking account…</span>
-      ) : user ? (
-        <div className="account-cluster">
-          <div className="account-identity">
-            <AccountAvatar user={user} />
-            <span className="account-identity__name">{user.name}</span>
-          </div>
-          <button type="button" className="quiet-action account-logout" onClick={onSignOut}>
-            <Icon name="logout" size={15} /> Sign out
-          </button>
-        </div>
-      ) : (
-        <button type="button" className="quiet-action sign-in-btn" onClick={onSignIn}>
-          <Icon name="user" size={15} /> Sign in
+      <div className="top-header__actions">
+        <button type="button" className="talk-button" onClick={onOpenTalk} aria-label="Talk to Artha">
+          <Icon name="waveform" size={16} />
+          <span>Talk to Artha</span>
         </button>
-      )}
+        {isSessionLoading ? (
+          <span className="account-loading" role="status">Checking account…</span>
+        ) : user ? (
+          <div className="account-cluster">
+            <div className="account-identity">
+              <AccountAvatar user={user} />
+              <span className="account-identity__name">{user.name}</span>
+            </div>
+            <button type="button" className="quiet-action account-logout" onClick={onSignOut}>
+              <Icon name="logout" size={15} /> Sign out
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="quiet-action sign-in-btn" onClick={onSignIn}>
+            <Icon name="user" size={15} /> Sign in
+          </button>
+        )}
+      </div>
     </header>
   );
 }
@@ -267,13 +319,15 @@ function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut }) 
 function ProductThumb({ product, small = false }) {
   const position = `${Math.max(0, Math.min(2, Number(product.crop_index || 0))) * 50}% center`;
   const image = String(product.image || '').trim();
+  const chairLike = /chair|desk|office|lumbar|ergonomic/i.test(`${product.name || ''} ${product.category || ''}`);
+  const fallback = chairLike ? '/assets/neutral-office-chair-fallback.png' : '/assets/editorial-outfit-triptych.png';
   return (
     <span
-      className={`product-thumb ${small ? 'product-thumb--small' : ''} ${image ? '' : 'product-thumb--placeholder'}`}
+      className={`product-thumb ${small ? 'product-thumb--small' : ''} ${image ? '' : 'product-thumb--fallback'}`}
       role="img"
       aria-label={`${product.name} thumbnail`}
       style={{
-        backgroundImage: image ? `url(${image})` : 'none',
+        backgroundImage: `url(${image || fallback})`,
         backgroundPosition: position,
       }}
     />
@@ -393,8 +447,10 @@ function Composer({
   onSearch,
   isSearching,
   hasResults,
+  searchError,
   onToast,
   onPickPrompt,
+  onOpenTalk,
 }) {
   const fileInputRef = useRef(null);
   const onFileChange = useCallback(
@@ -443,7 +499,10 @@ function Composer({
               <Icon name="link" size={16} />
               <span>Paste URL</span>
             </button>
-            <VoiceInputButton onTranscript={setQuery} onError={onToast} />
+            <button type="button" className="secondary-control talk-control" onClick={onOpenTalk}>
+              <Icon name="waveform" size={16} />
+              <span>Talk to Artha</span>
+            </button>
             <LocationButton location={location} onLocation={onLocation} onError={onToast} />
             <ReferenceChip reference={reference} onRemove={onRemoveReference} />
           </div>
@@ -477,6 +536,14 @@ function Composer({
         ) : null}
       </form>
 
+      {searchError ? (
+        <div className="composer-error" role="alert">
+          <Icon name="info" size={15} />
+          <span>{searchError}</span>
+          <button type="button" onClick={onSearch}>Retry</button>
+        </div>
+      ) : null}
+
       <div className="composer-suggestions">
         <span className="composer-suggestions__label">Try:</span>
         <div className="composer-suggestions__list">
@@ -497,34 +564,77 @@ function Composer({
   );
 }
 
-function AgentStrip({ workflow, isSearching, searchStage, hasResults }) {
-  const lastStage = Math.max((workflow?.length || 6) - 1, 0);
+function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCount = 0, searchError = '', onOpenTalk }) {
+  const stages = [
+    { label: 'Understand', copy: 'Reading your goals and constraints', indexes: [0] },
+    { label: 'Find', copy: 'Checking retailers and delivery signals', indexes: [1, 2] },
+    { label: 'Verify', copy: 'Comparing price, reviews, and source evidence', indexes: [3, 4, 5] },
+    { label: 'Recommend', copy: 'Ranking the best trade-offs for you', indexes: [6] },
+  ];
+  const workflowLength = Math.max(workflow?.length || 7, 1);
+  const backendWorkingIndex = Array.isArray(workflow)
+    ? workflow.findIndex((step) => step?.status === 'working')
+    : -1;
+  const workflowHasPending = Array.isArray(workflow)
+    ? workflow.some((step) => step?.status !== 'complete')
+    : true;
+  const currentWorkflowIndex = backendWorkingIndex >= 0
+    ? backendWorkingIndex
+    : workflowHasPending
+      ? Math.min(searchStage, workflowLength - 1)
+      : -1;
+  const activeIndex = isSearching
+    ? stages.findIndex((stage) => stage.indexes.includes(currentWorkflowIndex))
+    : -1;
+  const stageProgress = hasResults
+    ? 100
+    : isSearching
+      ? Math.max(8, ((Math.max(activeIndex, 0) + 1) / stages.length) * 100)
+      : 0;
+  const activeStageLabel = activeIndex >= 0 ? stages[activeIndex]?.label : 'Research';
+  const statusText = searchError
+    ? searchError
+    : isSearching
+      ? `${activeStageLabel} · Checking retailer pages for price, stock, delivery, and reviews…`
+      : hasResults
+        ? `${resultCount} source${resultCount === 1 ? '' : 's'} ranked · retailer confirmation still matters`
+        : 'Ready when you are';
   return (
-    <section className="agent-strip" aria-label="Agent workflow">
+    <section
+      className="agent-strip js-reveal"
+      aria-label="Research status"
+      style={{ '--research-progress': `${stageProgress}%` }}
+    >
       <div className="agent-strip__heading">
         <div className="agent-strip__title">
           <Icon name="shield" size={15} />
-          <span>Multi-Agent Verification Pipeline</span>
+          <span>Research status</span>
         </div>
-        <small className="agent-strip__status">
-          {isSearching ? 'Live agents verifying sources…' : hasResults ? 'Every recommendation verified with source evidence' : 'Ready for a live search'}
-        </small>
+        <div className="agent-strip__heading-actions">
+          <small className="agent-strip__status" role="status" aria-live="polite">
+            {statusText}
+          </small>
+          <button type="button" className="talk-link" onClick={onOpenTalk}>
+            <Icon name="waveform" size={14} /> Ask Artha
+          </button>
+        </div>
       </div>
       <div className="agent-strip__steps">
-        {(workflow || []).map((step, index) => {
-          const working = isSearching && index === Math.min(searchStage, lastStage);
-          const complete = !working && step.status === 'complete';
+        {stages.map((stage, index) => {
+          const working = isSearching && activeIndex === index;
+          const complete = hasResults || (isSearching && activeIndex > index);
           return (
             <div
               className={`agent-step ${working ? 'is-working' : complete ? 'is-complete' : ''}`}
-              key={`${step.agent}-${index}`}
+              style={{ '--stage-index': index }}
+              key={stage.label}
             >
               <span className="agent-step__node">
                 {working ? <span className="pulse-dot" /> : complete ? <Icon name="check" size={13} /> : index + 1}
               </span>
               <div className="agent-step__content">
-                <strong>{step.agent.replace(' agent', '')}</strong>
-                <small title={step.detail}>{working ? 'Processing…' : step.detail}</small>
+                <strong>{stage.label}</strong>
+                <small>{working ? 'Working now…' : stage.copy}</small>
               </div>
             </div>
           );
@@ -559,7 +669,8 @@ function BudgetOpportunity({ opportunity, product, onInspect }) {
   );
 }
 
-function BriefSummary({ intent }) {
+function BriefSummary({ intent, show = true }) {
+  if (!show) return null;
   const fields = [
     intent?.occasion ? `Occasion: ${intent.occasion}` : null,
     ...(intent?.must_have || []).slice(0, 2),
@@ -606,7 +717,64 @@ function ClarificationNote({ intent }) {
   );
 }
 
-function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved }) {
+function HeroVisual() {
+  const visualRef = useRef(null);
+
+  useEffect(() => {
+    const node = visualRef.current;
+    if (!node || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    const supportsPointer = window.matchMedia('(pointer: fine)').matches;
+    if (!supportsPointer) return undefined;
+    let frame = null;
+    const reset = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        node.style.setProperty('--hero-tilt-x', '0deg');
+        node.style.setProperty('--hero-tilt-y', '0deg');
+        node.style.setProperty('--hero-shift-x', '0px');
+        node.style.setProperty('--hero-shift-y', '0px');
+      });
+    };
+    const move = (event) => {
+      const rect = node.getBoundingClientRect();
+      const x = (event.clientX - rect.left) / rect.width - 0.5;
+      const y = (event.clientY - rect.top) / rect.height - 0.5;
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        node.style.setProperty('--hero-tilt-x', `${y * -4}deg`);
+        node.style.setProperty('--hero-tilt-y', `${x * 5}deg`);
+        node.style.setProperty('--hero-shift-x', `${x * 10}px`);
+        node.style.setProperty('--hero-shift-y', `${y * 10}px`);
+      });
+    };
+    node.addEventListener('pointermove', move, { passive: true });
+    node.addEventListener('pointerleave', reset, { passive: true });
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      node.removeEventListener('pointermove', move);
+      node.removeEventListener('pointerleave', reset);
+    };
+  }, []);
+
+  return (
+    <div ref={visualRef} className="hero-visual" aria-hidden="true">
+      <div className="hero-visual__frame">
+        <div className="hero-visual__image" />
+        <div className="hero-visual__wash" />
+        <span className="hero-visual__index">01 — 03</span>
+        <span className="hero-visual__caption">The everyday edit</span>
+        <span className="hero-visual__rule" />
+      </div>
+      <div className="hero-visual__ticket">
+        <strong>3</strong>
+        <span>pieces<br />worth keeping</span>
+      </div>
+      <div className="hero-visual__stamp">SOURCE<br />LINKED</div>
+    </div>
+  );
+}
+
+function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved, motionIndex = 0 }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
   const cleanDesc = sanitizeSnippet(product.description);
@@ -614,6 +782,7 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
   return (
     <article
       className={`product-card ${selected ? 'is-selected' : ''} ${focused ? 'is-focused' : ''}`}
+      style={{ '--motion-index': motionIndex }}
       onMouseEnter={() => onFocus(product.id)}
     >
       <div className="product-card__media">
@@ -704,6 +873,32 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
         </div>
       </div>
     </article>
+  );
+}
+
+function RecommendationBanner({ product, onInspect, onOpenTalk }) {
+  if (!product) return null;
+  const reasons = (product.reason_tags || []).filter(Boolean).slice(0, 3);
+  return (
+    <aside className="decision-banner" aria-label="Top recommendation">
+      <div className="decision-banner__copy">
+        <span className="decision-banner__eyebrow"><Icon name="spark" size={13} /> Best fit for your brief</span>
+        <strong>{sanitizeTitle(product.name)}</strong>
+        <p>{sanitizeSnippet(product.description)} Artha ranked it first because the trade-offs line up best with your constraints.</p>
+        <div className="decision-banner__reasons">
+          {reasons.map((reason) => <span key={reason}>{reason}</span>)}
+        </div>
+      </div>
+      <div className="decision-banner__actions">
+        <strong>{formatPrice(productTotal(product))}</strong>
+        <button type="button" className="primary-button" onClick={() => onInspect(product)}>
+          <Icon name="shield" size={14} /> Why this pick
+        </button>
+        <button type="button" className="text-button" onClick={onOpenTalk}>
+          Ask about the trade-off <Icon name="arrow" size={13} />
+        </button>
+      </div>
+    </aside>
   );
 }
 
@@ -875,12 +1070,12 @@ function SummaryPanel({
     <aside className="summary-panel" aria-label="Purchase plan summary">
       <div className="summary-panel__header">
         <div className="summary-panel__title-wrap">
-          <h2>Purchase Plan</h2>
+          <h2>Your shortlist</h2>
           <span className="item-count-badge">
             {selectedProducts.length} {selectedProducts.length === 1 ? 'item' : 'items'}
           </span>
         </div>
-        <small className="summary-panel__sub">Deliberate shortlist ready for checkout</small>
+          <small className="summary-panel__sub">Keep the options worth a closer look.</small>
       </div>
 
       <div className="summary-items">
@@ -924,10 +1119,11 @@ function SummaryPanel({
         <div className="summary-delivery">
           <Icon name="truck" size={16} />
           <div className="summary-delivery__copy">
-            <strong>{intent?.arrive_by || 'Delivery timing'}</strong>
-            <small>{intent?.location ? `Arrives in ${intent.location}` : 'Confirm on store checkout'}</small>
+            <strong>{intent?.arrive_by || 'Delivery timing to confirm'}</strong>
+            <small>{intent?.location ? `Delivering to ${intent.location}` : 'Add a delivery city for better results'}</small>
           </div>
         </div>
+        <small className="summary-calc__note">Subtotal excludes shipping, taxes, and retailer fees.</small>
       </div>
 
       <VoiceControl voice={voice} isSpeaking={isSpeaking} onSpeak={onSpeak} disabled={!selectedProducts.length} />
@@ -944,7 +1140,7 @@ function SummaryPanel({
 
       {selectedProducts.length && paymentProvider !== 'disabled' ? (
         <button type="button" className="secondary-button summary-checkout-button" onClick={onStartCheckout}>
-          <span>{paymentProvider === 'razorpay' ? 'Pay securely' : 'Review sandbox order'}</span>
+          <span>{paymentProvider === 'razorpay' ? 'Review payment' : 'Review sandbox order'}</span>
           <Icon name="arrow" size={15} />
         </button>
       ) : null}
@@ -1003,6 +1199,7 @@ function DiscoverView({
   onSearch,
   isSearching,
   searchStage,
+  searchError,
   selectedIds,
   focusedId,
   onToggle,
@@ -1021,37 +1218,73 @@ function DiscoverView({
   onStartCheckout,
   onToast,
   onPickPrompt,
+  onOpenTalk,
   onSelectAll,
   onClearSelection,
   onRemoveSelectedItem,
 }) {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
   const resultsRef = useRef(null);
+  const discoverRef = useRef(null);
   const lastScrolledSearchRef = useRef(null);
   const selectedProducts = result.products.filter((product) => selectedIds.includes(product.id));
   const allSelected = result.products.length > 0 && selectedIds.length === result.products.length;
 
   useEffect(() => {
+    const root = discoverRef.current;
+    if (!root) return undefined;
+    const items = root.querySelectorAll('.js-reveal');
+    if (!('IntersectionObserver' in window)) {
+      items.forEach((item) => item.classList.add('is-visible'));
+      return undefined;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        }
+      }),
+      { rootMargin: '0px 0px -10% 0px', threshold: 0.08 },
+    );
+    items.forEach((item) => observer.observe(item));
+    return () => observer.disconnect();
+  }, [result.products.length]);
+
+  useEffect(() => {
     if (isSearching || !result.search_id || !result.products.length || lastScrolledSearchRef.current === result.search_id) return undefined;
     lastScrolledSearchRef.current = result.search_id;
     const frame = window.requestAnimationFrame(() => {
-      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      resultsRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [isSearching, result.products.length, result.search_id]);
 
   return (
-    <div className="discover-layout">
+    <div ref={discoverRef} className="discover-layout">
       <section className="main-column">
         <div className="hero-copy">
-          <h1>
-            Find the right
-            <br />
-            things.
-          </h1>
-          <p>
-            Describe your style. Artha finds the strongest retailer options and makes comparison feel simple.
-          </p>
+          <div className="hero-copy__intro">
+            <h1 aria-label="Good buys. Better reasons.">
+              <span className="hero-word hero-word--1">Good</span>{' '}
+              <span className="hero-word hero-word--2">buys.</span>
+              <br />
+              <em>
+                <span className="hero-word hero-word--3">Better</span>
+                <br />
+                <span className="hero-word hero-word--4">reasons.</span>
+              </em>
+            </h1>
+            <p>
+              Describe your style. Artha finds the strongest retailer options and makes comparison feel simple.
+            </p>
+            <div className="hero-copy__note">
+              <span className="hero-copy__note-dot" />
+              <span>Research that leaves the final call with you.</span>
+            </div>
+          </div>
+          <HeroVisual />
         </div>
 
         <Composer
@@ -1069,8 +1302,10 @@ function DiscoverView({
           onSearch={onSearch}
           isSearching={isSearching}
           hasResults={result.products.length > 0}
+          searchError={searchError}
           onToast={onToast}
           onPickPrompt={onPickPrompt}
+          onOpenTalk={onOpenTalk}
         />
 
         <AgentStrip
@@ -1078,6 +1313,9 @@ function DiscoverView({
           isSearching={isSearching}
           searchStage={searchStage}
           hasResults={result.products.length > 0}
+          resultCount={result.products.length}
+          searchError={searchError}
+          onOpenTalk={onOpenTalk}
         />
         <LocationContext intent={result.intent} />
         <ConversationTrail conversation={result.conversation} />
@@ -1087,16 +1325,16 @@ function DiscoverView({
           onInspect={onInspect}
         />
 
-        <section ref={resultsRef} className="results-section" aria-labelledby="results-heading">
+        <section ref={resultsRef} className="results-section js-reveal" aria-labelledby="results-heading">
           <ClarificationNote intent={result.intent} />
           <div className="results-toolbar">
             <div className="results-heading">
-            <h2 id="results-heading">{result.products.length ? 'A considered edit for you' : 'Build your live shortlist'}</h2>
-              <BriefSummary intent={result.intent} />
+            <h2 id="results-heading">{result.products.length ? 'Your shortlist' : 'Build your live shortlist'}</h2>
+              <BriefSummary intent={result.intent} show={Boolean(query.trim() || result.products.length)} />
             </div>
 
             <div className="results-controls">
-              <span className="results-count-pill">{result.products.length} sources found</span>
+              <span className="results-count-pill">{result.products.length ? `${result.products.length} options` : 'No sources yet'}</span>
               <button
                 type="button"
                 className="select-all-btn"
@@ -1127,6 +1365,12 @@ function DiscoverView({
             </div>
           </div>
 
+          <RecommendationBanner
+            product={result.products[0]}
+            onInspect={onInspect}
+            onOpenTalk={onOpenTalk}
+          />
+
           {!result.products.length ? (
             <div className="empty-state results-empty-state">
               <span className="empty-state__icon">
@@ -1137,10 +1381,11 @@ function DiscoverView({
             </div>
           ) : viewMode === 'cards' ? (
             <div className="products-grid">
-              {result.products.map((product) => (
+              {result.products.map((product, index) => (
                 <ProductCard
                   key={product.id}
                   product={product}
+                  motionIndex={index}
                   selected={selectedIds.includes(product.id)}
                   focused={focusedId === product.id}
                   onToggle={onToggle}
@@ -1214,15 +1459,8 @@ function DiscoverView({
 
 function AuthSheet({ onClose, onSignIn }) {
   const closeButtonRef = useRef(null);
-
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  const dialogRef = useRef(null);
+  useDialogFocusTrap(true, dialogRef, closeButtonRef, onClose);
 
   return (
     <div
@@ -1232,7 +1470,7 @@ function AuthSheet({ onClose, onSignIn }) {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <section className="auth-sheet" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-copy">
+      <section ref={dialogRef} className="auth-sheet" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-copy">
         <button ref={closeButtonRef} type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close sign in">
           <Icon name="close" size={19} />
         </button>
@@ -1256,13 +1494,16 @@ function AuthSheet({ onClose, onSignIn }) {
 
 function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClose, onConfirm }) {
   const [confirmed, setConfirmed] = useState(false);
+  const closeButtonRef = useRef(null);
+  const dialogRef = useRef(null);
   const total = products.reduce((sum, product) => sum + productTotal(product), 0);
   const livePayment = paymentProvider === 'razorpay';
+  useDialogFocusTrap(true, dialogRef, closeButtonRef, onClose);
 
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="auth-sheet checkout-sheet" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-        <button type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close checkout">
+      <section ref={dialogRef} className="auth-sheet checkout-sheet" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <button ref={closeButtonRef} type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close checkout">
           <Icon name="close" size={19} />
         </button>
         <span className="section-kicker">{livePayment ? 'Secure hosted checkout' : 'Local sandbox checkout'}</span>
@@ -1295,6 +1536,9 @@ function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClos
 }
 
 function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
+  const closeButtonRef = useRef(null);
+  const dialogRef = useRef(null);
+  useDialogFocusTrap(Boolean(product), dialogRef, closeButtonRef, onClose);
   if (!product) return null;
   const reviewScore = product.review_reliability === null || product.review_reliability === undefined || product.review_reliability === ''
     ? null
@@ -1309,11 +1553,10 @@ function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
   const evidence = Array.isArray(product.evidence) ? product.evidence : [];
   const reviewLabel = reviewAnalysis.label || (Number.isFinite(reviewScore) ? `${Math.round(reviewScore * 100)}% reliability signal` : 'Not available');
   const historyLabel = priceHistory.trend_label || 'Price history not returned by this source';
-
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="auth-sheet evidence-sheet" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
-        <button type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close evidence">
+      <section ref={dialogRef} className="auth-sheet evidence-sheet" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
+        <button ref={closeButtonRef} type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close evidence">
           <Icon name="close" size={19} />
         </button>
         <span className="section-kicker">Evidence ledger</span>
@@ -2009,7 +2252,7 @@ function Toast({ message }) {
 export default function App() {
   const [pendingSearch] = useState(readPendingSearch);
   const [activeView, setActiveView] = useState(() => viewFromPath(window.location.pathname));
-  const [query, setQuery] = useState(() => pendingSearch?.query || DEFAULT_INTENT.raw_text);
+  const [query, setQuery] = useState(() => pendingSearch?.query || '');
   const [postUrl, setPostUrl] = useState(() => pendingSearch?.postUrl || '');
   const [location, setLocation] = useState(() => pendingSearch?.location || null);
   const [showPostUrl, setShowPostUrl] = useState(false);
@@ -2019,6 +2262,7 @@ export default function App() {
   const [focusedId, setFocusedId] = useState(() => pendingSearch?.result?.products?.[0]?.id || DEFAULT_RESULT.products[0]?.id || '');
   const [isSearching, setIsSearching] = useState(false);
   const [searchStage, setSearchStage] = useState(0);
+  const [searchError, setSearchError] = useState('');
   const [savedIds, setSavedIds] = useState(readSavedIds);
   const [plans, setPlans] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -2039,6 +2283,7 @@ export default function App() {
   const [evidenceProduct, setEvidenceProduct] = useState(null);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [talkOpen, setTalkOpen] = useState(false);
   const [toast, setToast] = useState('');
   const audioRef = useRef(null);
 
@@ -2142,13 +2387,6 @@ export default function App() {
   }, [activeView, refreshUsage]);
 
   useEffect(() => {
-    if (!isSearching) return undefined;
-    const maxStage = Math.max((result.workflow?.length || 6) - 1, 0);
-    const timer = window.setInterval(() => setSearchStage((current) => Math.min(current + 1, maxStage)), 620);
-    return () => window.clearInterval(timer);
-  }, [isSearching, result.workflow?.length]);
-
-  useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(''), 4200);
     return () => window.clearTimeout(timer);
@@ -2164,21 +2402,23 @@ export default function App() {
 
   const startNewSearch = useCallback(() => {
     setActiveView('discover');
-    setQuery(DEFAULT_INTENT.raw_text);
+    setQuery('');
     setPostUrl('');
     setLocation(null);
     setShowPostUrl(false);
     setReference(null);
     setResult(DEFAULT_RESULT);
+    setSearchError('');
     setSelectedIds([]);
     setFocusedId('');
   }, []);
 
   const handleSearchWithPayload = useCallback(
-    async (text, url, ref) => {
+    async (text, url, ref, options = {}) => {
       if ((!text?.trim() && !url?.trim() && !ref?.dataUrl) || isSearching) return;
       setIsSearching(true);
       setSearchStage(0);
+      setSearchError('');
       const shouldRefine = Boolean(result.search_id && result.products.length && text?.trim() && !url?.trim() && !ref?.dataUrl);
       try {
         const body = shouldRefine
@@ -2198,7 +2438,10 @@ export default function App() {
               if (Array.isArray(job?.workflow) && job.workflow.length) {
                 setResult((current) => ({ ...current, workflow: job.workflow }));
                 const workingIndex = job.workflow.findIndex((stage) => stage.status === 'working');
-                if (workingIndex >= 0) setSearchStage(workingIndex);
+                const nextIndex = workingIndex >= 0
+                  ? workingIndex
+                  : job.workflow.findIndex((stage) => stage.status !== 'complete');
+                if (nextIndex >= 0) setSearchStage(nextIndex);
               }
             });
         if (!body.products?.length) throw new Error('No retailer sources were found for that brief.');
@@ -2210,8 +2453,13 @@ export default function App() {
         );
         setFocusedId(body.products[0]?.id || '');
         setToast(shouldRefine ? 'Shortlist refined from the existing research.' : 'Live retailer sources checked and ranked.');
+        return body;
       } catch (error) {
-        setToast(error.message || 'The search could not complete. Please try again.');
+        const message = error.message || 'The search could not complete. Please try again.';
+        setSearchError(message);
+        setToast(message);
+        if (options.throwOnError) throw error;
+        return null;
       } finally {
         setIsSearching(false);
       }
@@ -2231,6 +2479,18 @@ export default function App() {
     (prompt) => {
       setQuery(prompt);
       handleSearchWithPayload(prompt, postUrl, reference);
+    },
+    [handleSearchWithPayload, postUrl, reference],
+  );
+
+  const handleTalkAsk = useCallback(
+    async (text) => {
+      setQuery(text);
+      const body = await handleSearchWithPayload(text, postUrl, reference, { throwOnError: true });
+      const count = body?.products?.length || 0;
+      const topPick = body?.products?.[0];
+      if (!count) return 'I could not find a strong source match yet. Try adding a budget, delivery city, or must-have.';
+      return `I found ${count} source${count === 1 ? '' : 's'} and refreshed the shortlist. ${topPick ? `${sanitizeTitle(topPick.name)} is the strongest fit right now.` : 'The refreshed options are ready below.'}`;
     },
     [handleSearchWithPayload, postUrl, reference],
   );
@@ -2504,6 +2764,7 @@ export default function App() {
         onSearch={handleSearch}
         isSearching={isSearching}
         searchStage={searchStage}
+        searchError={searchError}
         selectedIds={selectedIds}
         focusedId={focusedId}
         onToggle={toggleProduct}
@@ -2522,6 +2783,7 @@ export default function App() {
         onStartCheckout={handleStartCheckout}
         onToast={setToast}
         onPickPrompt={handlePickPrompt}
+        onOpenTalk={() => setTalkOpen(true)}
         onSelectAll={handleSelectAll}
         onClearSelection={handleClearSelection}
         onRemoveSelectedItem={handleRemoveSelectedItem}
@@ -2571,7 +2833,9 @@ export default function App() {
     );
 
   return (
-    <div className="app-shell">
+    <>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <div className="app-shell">
       <NavRail
         activeView={activeView}
         onNavigate={setActiveView}
@@ -2586,6 +2850,7 @@ export default function App() {
           isSessionLoading={isSessionLoading}
           onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
           onSignOut={handleSignOut}
+          onOpenTalk={() => setTalkOpen(true)}
         />
         {view}
       </main>
@@ -2616,7 +2881,14 @@ export default function App() {
           onOpenProduct={openProduct}
         />
       ) : null}
+      <TalkDrawer
+        open={talkOpen}
+        onClose={() => setTalkOpen(false)}
+        onAsk={handleTalkAsk}
+        onToast={setToast}
+      />
       <Toast message={toast} />
-    </div>
+      </div>
+    </>
   );
 }

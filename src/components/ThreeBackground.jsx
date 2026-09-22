@@ -43,12 +43,12 @@ export function ThreeBackground() {
     const colors = new Float32Array(PARTICLE_COUNT * 3);
     const sizes = new Float32Array(PARTICLE_COUNT);
 
-    // Color palette — cyan, violet, mint
+    // Color palette — deep tones that read on a light background
     const palette = [
-      new THREE.Color(0x63d5ff), // electric cyan
-      new THREE.Color(0x8b5cf6), // vivid violet
-      new THREE.Color(0x06ffa5), // neon mint
-      new THREE.Color(0x3b82f6), // blue
+      new THREE.Color(0x0694D6), // deep cyan
+      new THREE.Color(0x7C3AED), // indigo-violet
+      new THREE.Color(0x059669), // emerald
+      new THREE.Color(0x2563EB), // royal blue
     ];
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -71,11 +71,11 @@ export function ThreeBackground() {
     particleGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
     const particleMat = new THREE.PointsMaterial({
-      size: 0.9,
+      size: 1.1,
       vertexColors: true,
       transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
+      opacity: 0.35,
+      blending: THREE.NormalBlending,
       depthWrite: false,
       sizeAttenuation: true,
     });
@@ -118,8 +118,8 @@ export function ThreeBackground() {
     const lineMat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.12,
-      blending: THREE.AdditiveBlending,
+      opacity: 0.18,
+      blending: THREE.NormalBlending,
       depthWrite: false,
     });
 
@@ -158,8 +158,8 @@ export function ThreeBackground() {
         camera.position.y = targetCam.y;
         camera.lookAt(scene.position);
 
-        // Gentle opacity pulse on particles
-        particleMat.opacity = 0.45 + Math.sin(time * 1.2) * 0.08;
+        // Gentle opacity pulse
+        particleMat.opacity = 0.28 + Math.sin(time * 1.2) * 0.06;
       }
 
       renderer.render(scene, camera);

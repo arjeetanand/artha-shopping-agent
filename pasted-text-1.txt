@@ -1,0 +1,35 @@
+I don't want this to be a mock or demo-only system. The goal is to build a genuinely functional, end-to-end AI shopping agent using real integrations wherever possible.
+
+The agent should use a Maps/location MCP integration to obtain the user's actual location, with permission, and use that information for nearby stores, availability, delivery options, and other location-aware recommendations.
+
+For payments, integrate an appropriate payment MCP/API so that the workflow can support real online payments securely rather than simulating checkout.
+
+Product research should also be real. The system should collect and analyze product information and reviews from multiple legitimate sources rather than relying on a single marketplace or fabricated data. It should compare reviews across sources, identify suspicious or potentially fake reviews using signals such as review patterns, duplication, reviewer behavior, sentiment anomalies, and other available indicators, and estimate the reliability of the overall review data. The final recommendation should be based on the complete analysis rather than simply selecting the product with the highest rating.
+
+Because web research, price-history analysis, review analysis, comparison, and other agent workflows may take time, the user should not have to wait on a frozen screen. The web application should provide a smooth asynchronous experience. It can tell the user something like: "I'm researching the available options and analyzing reviews, prices, and sellers. This may take a little time. I'll update you when the analysis is ready."
+
+The application should also include an in-app conversational voice experience. There is no need to integrate Twilio for an actual phone call. Instead, the voice agent should operate directly inside the web application and explain the results conversationally. For example, once the research is complete, it could explain which options were found, their trade-offs, pricing, review quality, seller reliability, and why each option may or may not fit the user's requirements.
+
+The same conversation should work through both voice and text. The user should be able to respond naturally and ask follow-up questions, after which the agent can refine its analysis rather than restarting the entire workflow.
+
+The agent should also proactively identify useful opportunities. For example, instead of simply saying that a product exceeds the user's budget, it could say: "If you can increase your budget by ₹100, there is another option that appears to offer substantially better value." This recommendation should be supported by evidence such as historical pricing, current offers, specifications, seller information, and review quality.
+
+Price-history analysis should therefore be incorporated where reliable data is available. The agent should determine whether the current price is genuinely attractive compared with historical prices rather than assuming that a displayed discount represents a good deal.
+
+The overall architecture should not behave like a basic agent that sequentially performs every possible action. It should intelligently determine which tools, agents, and research steps are required for the user's particular request, execute independent tasks in parallel where appropriate, and synthesize the results before presenting a recommendation.
+
+The entire experience should be seamless from beginning to end. The UI should include a live workflow tracker showing what has already happened, what is currently happening, what remains, and which specialized agent is responsible for each task. For example:
+
+User Request → Requirement Analysis → Product Discovery → Multi-Source Research → Review Authenticity Analysis → Price-History Analysis → Seller Verification → Location/Availability Check → Product Comparison → Recommendation → User Follow-Up → Checkout/Payment
+
+The tracker should update dynamically so the user can see statuses such as queued, researching, analyzing, completed, waiting for user input, or failed/retrying. Where multiple agents are working simultaneously, the UI should make that parallel activity visible.
+
+Once the analysis is complete, the system should notify the user inside the application and present the results through the conversational interface. The voice agent can summarize the findings, while the UI provides the detailed evidence, comparisons, review analysis, price history, and sources.
+
+If the agent needs additional information before making the final recommendation, it should ask targeted follow-up questions—for example, whether the user is willing to increase their budget slightly for a significantly better option. Once the user responds, the system should continue from the existing research state rather than repeating completed work.
+
+Where practical, use mature open-source GitHub projects instead of rebuilding every component from scratch. This can include open-source projects for agent orchestration, MCP integrations, web research, review analysis, price tracking, notifications, and messaging.
+
+For SMS notifications, investigate reliable open-source or free/self-hosted alternatives rather than immediately introducing a paid Twilio dependency. SMS should primarily be used as an optional notification channel—for example, informing the user that a long-running product analysis has finished—while the primary interaction remains inside the web application.
+
+The final objective is a production-oriented AI shopping assistant that combines real-world product research, multi-source review verification, fake-review detection, price-history analysis, location-aware results, intelligent recommendations, conversational voice/text interaction, transparent multi-agent execution tracking, optional SMS notifications, and secure checkout/payment into one continuous user experience.
