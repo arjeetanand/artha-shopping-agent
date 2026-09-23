@@ -17,6 +17,7 @@ from .clients import AnakinClient, BriefModel, parse_price
 from .catalog import FixtureCatalogClient
 from .db import db, now_iso
 from .location import LocationAgent
+from .retailers import provider_status
 from .settings import setting
 
 
@@ -47,8 +48,97 @@ def _parse_budget(text: str) -> int | None:
 
 
 def _parse_days(text: str) -> int | None:
-    match = re.search(r"(?:within|in|before)\s*(\d+)\s*days?", text, flags=re.IGNORECASE)
-    return int(match.group(1)) if match else None
+    number_words = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+        "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+        "twenty": 20,
+        "thirty": 30,
+    }
+    match = re.search(r"(?:within|in|before|by)\s*(\d{1,2}|[a-z]+)\s*days?\b", text, flags=re.IGNORECASE)
+    if not match:
+        match = re.fullmatch(r"\s*(\d{1,2}|[a-z]+)\s*days?\s*", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1).lower()
+    return int(value) if value.isdigit() else number_words.get(value)
+
+
+def _parse_pincode(text: str, payload: dict[str, Any] | None = None) -> str | None:
+    for value in (
+        (payload or {}).get("pincode"),
+        (payload or {}).get("delivery_pincode"),
+    ):
+        candidate = re.sub(r"\D", "", str(value or ""))
+        if re.fullmatch(r"\d{6}", candidate):
+            return candidate
+    match = re.search(r"(?:pin(?:code)?|postal\s*code)\s*[:#-]?\s*(\d{6})\b|\b(\d{6})\b", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return next((group for group in match.groups() if group), None)
+
+
+def _parse_color(text: str) -> str | None:
+    colors = (
+        "black", "white", "red", "blue", "green", "yellow", "pink", "purple", "violet",
+        "orange", "brown", "beige", "cream", "navy", "maroon", "grey", "gray", "gold",
+        "silver", "pastel", "floral", "neutral", "multicolor", "multi-colour", "multicolor",
+    )
+    lowered = text.lower()
+    explicit = re.search(r"(?:colou?r|shade)\s*(?:is|:|should be|in)?\s*([a-z-]+)", lowered)
+    if explicit and explicit.group(1) in colors:
+        return explicit.group(1)
+    for color in colors:
+        if re.search(rf"\b{re.escape(color)}\b", lowered):
+            return color
+    return None
+
+
+def _parse_size(text: str) -> str | None:
+    lowered = text.lower()
+    if re.fullmatch(r"\s*(xxxl|xxl|xl|xs|small|medium|large|s|m|l)\s*", lowered):
+        return lowered.strip()
+    explicit = re.search(r"\bsize\s*[:=-]?\s*(xxxl|xxl|xl|xs|small|medium|large|s|m|l)\b", lowered)
+    if explicit:
+        return explicit.group(1)
+    short_answer = re.search(r"(?:^|[\s,])((?:xxxl|xxl|xl|xs|small|medium|large|s|m|l))(?=$|[\s,])", lowered)
+    if short_answer:
+        return short_answer.group(1)
+    for size in ("xxxl", "xxl", "xl", "medium", "large", "small", "xs"):
+        if re.search(rf"\b{size}\b", lowered):
+            return size
+    return None
+
+
+def _parse_fabric(text: str) -> str | None:
+    fabrics = ("cotton", "linen", "silk", "chiffon", "georgette", "rayon", "viscose", "denim", "wool", "polyester")
+    lowered = text.lower()
+    return next((fabric for fabric in fabrics if re.search(rf"\b{fabric}\b", lowered)), None)
+
+
+def _parse_occasion_or_style(text: str) -> str | None:
+    values = (
+        "casual", "party", "party wear", "office", "formal", "summer", "beach", "wedding",
+        "ethnic", "western", "bodycon", "flowy", "maxi", "midi", "mini", "everyday",
+    )
+    lowered = text.lower()
+    return next((value for value in values if re.search(rf"\b{re.escape(value)}\b", lowered)), None)
 
 
 def _parse_quantity(text: str) -> int:
@@ -156,8 +246,9 @@ def _clarification_questions(
     budget_explicit: bool = False,
     location_explicit: bool = False,
     delivery_explicit: bool = False,
+    pincode_explicit: bool = False,
 ) -> list[dict[str, str]]:
-    """Surface missing decision constraints without blocking a useful first pass."""
+    """Return the smallest set of questions needed for a trustworthy search."""
     questions: list[dict[str, str]] = []
     if not budget_explicit and _parse_budget(text) is None:
         questions.append({"key": "budget", "question": "What is the maximum you would like to spend?"})
@@ -165,7 +256,36 @@ def _clarification_questions(
         questions.append({"key": "location", "question": "Where should this be delivered?"})
     if not delivery_explicit and _parse_days(text) is None:
         questions.append({"key": "delivery", "question": "When do you need it by?"})
+    category = str(brief.get("category") or "").lower()
+    is_fashion = any(token in category for token in ("fashion", "cloth", "dress", "shirt", "shoe", "outfit"))
+    if is_fashion and not brief.get("color"):
+        questions.append({"key": "color", "question": "Which color or color family should I look for?"})
+    if is_fashion and not brief.get("size"):
+        questions.append({"key": "size", "question": "What size should I check for?"})
+    if is_fashion and location_explicit and not pincode_explicit:
+        questions.append({"key": "pincode", "question": "What delivery pincode should I use to verify the delivery promise?"})
     return questions
+
+
+def _location_match(text: str) -> re.Match[str] | None:
+    """Find a city without mistaking `in three days` for a city name."""
+    match = re.search(
+        r"(?:deliver(?:ed|y)?|ship(?:ped|ping)?)\s+(?:to|in)\s+([a-z][a-z .'-]{2,40}?)(?=\s+within\b|\s+in\s+(?:\d+|[a-z]+)\s+days?\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        candidate = match.group(1).strip(" . ,\"'")
+        if not re.fullmatch(r"(?:\d+|[a-z]+)\s+days?", candidate, flags=re.IGNORECASE):
+            return match
+    match = re.search(
+        r"\bin\s+([a-z][a-z .'-]{2,40}?)(?=\s+within\b|\s+in\s+(?:\d+|[a-z]+)\s+days?\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match and not re.fullmatch(r"(?:\d+|[a-z]+)\s+days?", match.group(1).strip(), flags=re.IGNORECASE):
+        return match
+    return None
 
 
 def _rule_brief(
@@ -180,6 +300,11 @@ def _rule_brief(
     lowered = text.lower()
     parsed_budget = _parse_budget(text)
     parsed_days = _parse_days(text)
+    parsed_pincode = _parse_pincode(text, payload)
+    parsed_color = _parse_color(text)
+    parsed_size = _parse_size(text)
+    parsed_fabric = _parse_fabric(text)
+    parsed_style = _parse_occasion_or_style(text)
     budget = parsed_budget or 18000
     arrive_days = parsed_days or 5
     quantity = _parse_quantity(text)
@@ -193,11 +318,7 @@ def _rule_brief(
     else:
         category, occasion = "Shopping", "Everyday"
         must_have = _parse_specifications(text)
-    location_match = re.search(
-        r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)",
-        text,
-        flags=re.IGNORECASE,
-    )
+    location_match = _location_match(text)
     location = location_match.group(1).strip(" .,\"") if location_match else payload.get("location") or "Bengaluru"
     if str(location).lower() == "bangalore":
         location = "Bengaluru"
@@ -207,13 +328,17 @@ def _rule_brief(
         "budget": budget,
         "quantity": quantity,
         "brand": brand,
+        "color": parsed_color,
+        "size": parsed_size,
+        "fabric": parsed_fabric,
+        "pincode": parsed_pincode,
         "location": location,
         "arrive_by_days": arrive_days,
         "arrive_by": f"within {arrive_days} days",
         "must_have": must_have,
         "specifications": must_have,
         "nice_to_have": ["durable", "good value"],
-        "style": "practical and considered",
+        "style": parsed_style or ("cool" if re.search(r"\bcool\b", lowered) else "practical and considered"),
         "description": text or "Find a considered product",
         "raw_text": text or "Find a considered product",
         "image_name": image_name or None,
@@ -227,6 +352,7 @@ def _rule_brief(
         budget_explicit=parsed_budget is not None,
         location_explicit=bool(location_match or payload.get("location") or payload.get("location_coordinates")),
         delivery_explicit=parsed_days is not None,
+        pincode_explicit=bool(parsed_pincode),
     )
     return brief
 
@@ -267,6 +393,13 @@ class BriefAgent:
         source_style = _brief_text(source.get("style"))
         source_description = _brief_text(source.get("description"))
         source_brand = _brief_text(source.get("brand"))
+        source_color = _brief_text(source.get("color")) or _parse_color(text)
+        source_size = _brief_text(source.get("size")) or _parse_size(text)
+        source_fabric = _brief_text(source.get("fabric")) or _parse_fabric(text)
+        source_pincode = _parse_pincode(text, payload) or _parse_pincode(_brief_text(source.get("pincode")))
+        source_days = _parse_days(source_arrive_by) or _parse_days(text)
+        if source_location and re.fullmatch(r"(?:\d+|[a-z]+)\s+days?", source_location, flags=re.IGNORECASE):
+            source_location = ""
         source_specs = _brief_list(source.get("specifications"), [])
         source_must_have = _brief_list(source.get("must_have"), source_specs or ["breathable", "neutral palette", "office-ready"])
         brief = {
@@ -275,13 +408,17 @@ class BriefAgent:
             "budget": source_budget or fallback_budget,
             "quantity": max(1, min(source_quantity or _parse_quantity(text), 99)),
             "brand": source_brand or _parse_brand(text),
+            "color": source_color or None,
+            "size": source_size or None,
+            "fabric": source_fabric or None,
+            "pincode": source_pincode,
             "location": source_location or payload.get("location") or "Bengaluru",
-            "arrive_by_days": _money(source_arrive_by_days) if source_arrive_by_days is not None and source_arrive_by_days != "" else fallback_days,
-            "arrive_by": source_arrive_by or f"within {fallback_days} days",
+            "arrive_by_days": _money(source_arrive_by_days) if source_arrive_by_days is not None and str(source_arrive_by_days).isdigit() else source_days or fallback_days,
+            "arrive_by": source_arrive_by or f"within {source_days or fallback_days} days",
             "must_have": source_must_have,
             "specifications": source_specs or source_must_have,
             "nice_to_have": _brief_list(source.get("nice_to_have"), ["durable", "easy to layer"]),
-            "style": source_style or "quietly considered",
+            "style": source_style or _parse_occasion_or_style(text) or ("cool" if re.search(r"\bcool\b", text, flags=re.IGNORECASE) else "quietly considered"),
             "description": source_description or text or "An office-ready neutral outfit",
             "raw_text": text or "Find an office-ready look under ₹18,000",
             "image_name": image_name or None,
@@ -293,8 +430,9 @@ class BriefAgent:
             text,
             brief,
             budget_explicit=source_budget > 0 or _parse_budget(text) is not None,
-            location_explicit=bool(source_location or payload.get("location")),
-            delivery_explicit=bool(source_arrive_by_days not in (None, "") or _parse_days(text) is not None),
+            location_explicit=bool(source_location or _location_match(text) or payload.get("location") or payload.get("location_coordinates")),
+            delivery_explicit=bool(source_arrive_by_days not in (None, "") or source_days is not None),
+            pincode_explicit=bool(source_pincode),
         )
         if llm_brief and reference_image:
             detail = f"{provider.title()} analyzed the brief and reference image"
@@ -321,7 +459,14 @@ class SearchAgent:
             return (
                 sources,
                 {"agent": self.name, "status": "complete", "detail": f"Local catalog returned {len(sources)} constraint-test sources"},
-                {"mode": "sandbox", "provider": "fixture_catalog", "scrape": "not_requested"},
+                {
+                    "mode": "sandbox",
+                    "provider": "fixture_catalog",
+                    "providers": provider_status(fixture_enabled=True),
+                    "scrape": "not_requested",
+                    "delivery_verification": "catalog_fixture",
+                    "delivery_pincode": brief.get("pincode"),
+                },
             )
         if not self.anakin.configured:
             raise RuntimeError("Anakin live extraction is not configured. Add ANAKIN_API_KEY and restart the API.")
@@ -338,11 +483,15 @@ class SearchAgent:
                 # could not be used as evidence.
                 scrape_status = "unavailable"
         try:
+            delivery_target = str(brief.get("location") or "anywhere")
+            if brief.get("pincode"):
+                delivery_target = f"{delivery_target} (pincode {brief['pincode']})"
             query = (
                 f"Find purchasable {brief['category']} products in India for {brief['description']}. "
                 f"Quantity {brief.get('quantity') or 1}; preferred brand {brief.get('brand') or 'any'}; "
-                f"must-have specifications {', '.join(brief.get('must_have') or []) or 'none'}. "
-                f"Budget ₹{brief['budget']}; deliver to {brief['location']} {brief['arrive_by']}. "
+                f"must-have specifications {', '.join(brief.get('must_have') or []) or 'none'}; "
+                f"color {brief.get('color') or 'any'}; size {brief.get('size') or 'any'}; fabric {brief.get('fabric') or 'any'}. "
+                f"Budget ₹{brief['budget']}; deliver to {delivery_target} {brief['arrive_by']}. "
                 "Prioritize official retailer product pages with price, availability, delivery and review evidence."
             )
             nearby_stores = (brief.get("location_context") or {}).get("nearby_stores") if isinstance(brief.get("location_context"), dict) else []
@@ -362,7 +511,13 @@ class SearchAgent:
                     detail = f"Anakin extracted the reference link and returned {len(sources)} live sources"
                 elif scrape_status in {"empty", "unavailable"}:
                     detail = f"Anakin returned {len(sources)} live sources; the reference link could not be used"
-                return sources, {"agent": self.name, "status": "complete", "detail": detail}, {"mode": "live", "scrape": scrape_status}
+                return sources, {"agent": self.name, "status": "complete", "detail": detail}, {
+                    "mode": "live",
+                    "scrape": scrape_status,
+                    "providers": provider_status(live_configured=True),
+                    "delivery_verification": "source_reported_only",
+                    "delivery_pincode": brief.get("pincode"),
+                }
             raise RuntimeError("No usable live sources returned")
         except Exception as error:
             raise RuntimeError("Anakin live extraction did not return usable retailer sources. Check ANAKIN_API_KEY and network access.") from error
@@ -407,6 +562,9 @@ class ExtractionAgent:
             "delivery_label": str(data.get("delivery_label") if isinstance(data, dict) and data.get("delivery_label") else "Confirm at retailer"),
             "stock": data.get("stock") if isinstance(data, dict) else None,
             "features": data.get("features") if isinstance(data, dict) and isinstance(data.get("features"), list) else [],
+            "colors": data.get("colors") if isinstance(data, dict) and isinstance(data.get("colors"), list) else [],
+            "sizes": data.get("sizes") if isinstance(data, dict) and isinstance(data.get("sizes"), list) else [],
+            "variants": data.get("variants") if isinstance(data, dict) and isinstance(data.get("variants"), list) else [],
             "match_reasons": data.get("match_reasons") if isinstance(data, dict) and isinstance(data.get("match_reasons"), list) else ["Source linked"],
             "crop_index": index % 3,
             "url": url,
@@ -608,8 +766,19 @@ class ResearchAgent:
             enriched["research_sources"] = [{"name": host, "status": "unavailable", "detail": "Direct page research could not be completed"}]
             return enriched, False
 
-        data = _scraped_mapping(scraped)
-        text = _scraped_text(scraped)
+        scraped_data = _scraped_mapping(scraped)
+        scraped_text = _scraped_text(scraped)
+        meaningful_fields = {
+            "name", "title", "price", "brand", "seller", "delivery_days", "delivery_label",
+            "stock", "rating", "features", "review_sources", "price_history", "variants",
+        }
+        if not isinstance(scraped, dict) or (not scraped_text and not meaningful_fields.intersection(scraped_data)):
+            enriched["research_status"] = "waiting"
+            enriched["research_sources"] = [{"name": host, "status": "empty", "detail": "The direct page returned no usable product evidence"}]
+            return enriched, False
+
+        data = scraped_data
+        text = scraped_text
         evidence = [str(item) for item in (enriched.get("evidence") or []) if str(item).strip()]
         fields: list[str] = []
         for field in ("brand", "seller", "delivery_days", "delivery_label", "stock", "rating", "shipping_cost", "image", "seller_reliability"):
@@ -691,6 +860,8 @@ class RankingAgent:
         max_days = brief.get("arrive_by_days") or 5
         quantity = max(1, min(_money(brief.get("quantity")) or 1, 99))
         requested_brand = str(brief.get("brand") or "").strip().lower()
+        requested_color = str(brief.get("color") or "").strip().lower()
+        requested_size = str(brief.get("size") or "").strip().lower()
         ranked: list[dict[str, Any]] = []
         for product in products:
             features = " ".join(product.get("features") or []).lower()
@@ -712,6 +883,10 @@ class RankingAgent:
             deal_bonus = max(0, min(5, round(float(deal_score or 0) * 5)))
             product_text = " ".join(str(product.get(field) or "") for field in ("brand", "seller", "name")).lower()
             brand_fit = True if not requested_brand else requested_brand in product_text
+            available_colors = [str(value).lower() for value in (product.get("colors") or []) if str(value).strip()]
+            available_sizes = [str(value).lower() for value in (product.get("sizes") or []) if str(value).strip()]
+            color_fit = None if not requested_color or not available_colors else any(requested_color in value for value in available_colors)
+            size_fit = None if not requested_size or not available_sizes else requested_size in available_sizes
             stock_value = product.get("stock")
             stock_known = stock_value is not None and str(stock_value).strip() != ""
             stock_match = re.search(r"\d+", str(stock_value)) if stock_known else None
@@ -740,7 +915,19 @@ class RankingAgent:
             ]
             if requested_brand:
                 product["reason_tags"].append("Preferred brand" if brand_fit else "Brand preference not met")
-            product["eligible"] = product["budget_fit"] is not False and product["delivery_fit"] is not False and product["stock_fit"] is not False
+            if requested_color:
+                product["reason_tags"].append("Color available" if color_fit is True else "Color not available" if color_fit is False else "Color needs confirmation")
+            if requested_size:
+                product["reason_tags"].append("Size available" if size_fit is True else "Size not available" if size_fit is False else "Size needs confirmation")
+            product["color_fit"] = color_fit
+            product["size_fit"] = size_fit
+            product["eligible"] = (
+                product["budget_fit"] is not False
+                and product["delivery_fit"] is not False
+                and product["stock_fit"] is not False
+                and color_fit is not False
+                and size_fit is not False
+            )
             ranked.append(product)
         ranked.sort(key=lambda item: (not item.get("eligible", True), -item.get("match_score", 0), item.get("line_total") or 10**9))
         return ranked, {"agent": self.name, "status": "complete", "detail": "Ranked by fit, budget, delivery, and source evidence"}
@@ -750,9 +937,14 @@ def _default_selection(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     eligible = [
         product
         for product in products
-        if product.get("budget_fit") is not False and product.get("delivery_fit") is not False
+        if product.get("eligible") is not False
+        and product.get("budget_fit") is not False
+        and product.get("delivery_fit") is not False
     ]
-    candidates = [product for product in eligible if _money(product.get("price")) > 0] or eligible or products
+    # Never auto-select a product with a known budget, delivery, stock, color,
+    # or size failure. The cards can still be shown for transparency, but the
+    # shopper must explicitly choose a trade-off.
+    candidates = [product for product in eligible if _money(product.get("price")) > 0] or eligible
     chosen: list[dict[str, Any]] = []
     seen_categories: set[str] = set()
     for product in candidates:
@@ -816,14 +1008,48 @@ def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, A
     brand = _parse_brand(follow_up)
     if brand:
         brief["brand"] = brand
-    if _parse_days(follow_up) is not None:
-        days = _parse_days(follow_up) or brief.get("arrive_by_days") or 5
+    parsed_follow_up_days = _parse_days(follow_up)
+    if parsed_follow_up_days is not None:
+        days = parsed_follow_up_days or brief.get("arrive_by_days") or 5
         brief["arrive_by_days"] = days
         brief["arrive_by"] = f"within {days} days"
-    location_match = re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to|in)\s+([a-z][a-z .'-]{2,40}?)(?:\s+within|\s+in\s+\d+\s+days|$)", follow_up, flags=re.IGNORECASE)
+    location_match = _location_match(follow_up)
     if location_match:
         location = location_match.group(1).strip(" .,\"")
         brief["location"] = "Bengaluru" if location.lower() == "bangalore" else location
+    parsed_color = _parse_color(follow_up)
+    parsed_size = _parse_size(follow_up)
+    parsed_fabric = _parse_fabric(follow_up)
+    parsed_pincode = _parse_pincode(follow_up)
+    parsed_style = _parse_occasion_or_style(follow_up)
+    if parsed_color:
+        brief["color"] = parsed_color
+    if parsed_size:
+        brief["size"] = parsed_size
+    if parsed_fabric:
+        brief["fabric"] = parsed_fabric
+    if parsed_pincode:
+        brief["pincode"] = parsed_pincode
+    if parsed_style:
+        brief["style"] = parsed_style
+    clarification_keys = {
+        str(item.get("key"))
+        for item in (brief.get("clarifications") or [])
+        if isinstance(item, dict)
+    }
+    bare_location_answered = False
+    if (
+        not location_match
+        and "location" in clarification_keys
+        and not parsed_color
+        and not parsed_size
+        and not parsed_pincode
+        and parsed_follow_up_days is None
+        and re.fullmatch(r"[a-z][a-z .'-]{2,40}", follow_up, flags=re.IGNORECASE)
+    ):
+        location = follow_up.strip(" .,\"")
+        brief["location"] = "Bengaluru" if location.lower() == "bangalore" else location
+        bare_location_answered = True
     new_specs = _parse_specifications(follow_up)
     if new_specs:
         existing_specs = _brief_list(brief.get("must_have"), [])
@@ -840,26 +1066,149 @@ def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, A
         answered = set()
         if _parse_budget(follow_up) is not None:
             answered.add("budget")
-        if re.search(r"(?:deliver(?:ed|y)?\s+to|ship\s+to)\s+[a-z]|\bin\s+[a-z]", follow_up, flags=re.IGNORECASE):
+        if location_match or bare_location_answered:
             answered.add("location")
-        if _parse_days(follow_up) is not None:
+        if parsed_follow_up_days is not None:
             answered.add("delivery")
+        if parsed_color:
+            answered.add("color")
+        if parsed_size:
+            answered.add("size")
+        if parsed_pincode:
+            answered.add("pincode")
         brief["clarifications"] = [
             item for item in (brief.get("clarifications") or []) if str(item.get("key")) not in answered
         ]
+    remaining_keys = {
+        str(item.get("key"))
+        for item in (brief.get("clarifications") or [])
+        if isinstance(item, dict)
+    }
+    is_fashion = any(token in str(brief.get("category") or "").lower() for token in ("fashion", "cloth", "dress", "shirt", "shoe", "outfit"))
+    location_confirmed = bool(location_match or bare_location_answered or "location" not in clarification_keys)
+    if is_fashion and location_confirmed and not brief.get("pincode") and "pincode" not in remaining_keys:
+        brief.setdefault("clarifications", []).append({"key": "pincode", "question": "What delivery pincode should I use to verify the delivery promise?"})
     return brief
+
+
+def _clarification_response(
+    brief: dict[str, Any],
+    workflow: list[dict[str, Any]],
+    source: dict[str, Any] | None = None,
+    *,
+    user_text: str | None = None,
+) -> dict[str, Any]:
+    """Persist and return a resumable clarification checkpoint."""
+    questions = [item for item in brief.get("clarifications") or [] if isinstance(item, dict)]
+    for index in range(2, len(workflow)):
+        agent = WORKFLOW_AGENTS[index] if index < len(WORKFLOW_AGENTS) else str(workflow[index].get("agent") or "Research agent")
+        workflow[index] = {
+            "agent": agent,
+            "status": "waiting",
+            "detail": "Waiting for the shopper to answer the clarification questions before retailer research",
+        }
+    search_id = f"search-{uuid.uuid4().hex[:12]}"
+    source_meta = copy.deepcopy(source) if isinstance(source, dict) else {}
+    source_meta.update({
+        "mode": "clarification",
+        "requires_clarification": True,
+        "clarification_keys": [str(item.get("key")) for item in questions],
+    })
+    db.save_search(search_id, brief.get("raw_text") or "", brief, workflow, products=[])
+    question_text = " ".join(str(item.get("question") or "") for item in questions).strip()
+    return {
+        "status": "needs_clarification",
+        "search_id": search_id,
+        "intent": brief,
+        "clarifications": questions,
+        "products": [],
+        "selected_product_ids": [],
+        "summary": {
+            "total": 0,
+            "item_count": 0,
+            "delivery_label": brief.get("arrive_by") or "Delivery timing to confirm",
+            "opportunity": None,
+        },
+        "workflow": workflow,
+        "source": source_meta,
+        "conversation": [
+            {"role": "user", "text": user_text or brief.get("raw_text") or ""},
+            {"role": "assistant", "text": f"Before I search, I need a few details. {question_text}"},
+        ],
+    }
 
 
 def run_refinement(payload: dict[str, Any]) -> dict[str, Any]:
     previous_intent = payload.get("intent") if isinstance(payload.get("intent"), dict) else {}
     previous_products = payload.get("products") if isinstance(payload.get("products"), list) else []
     text = str(payload.get("text") or payload.get("query") or "").strip()
-    if not previous_intent or not previous_products:
+    if not previous_intent:
         raise ValueError("A previous search is required before refining the shortlist")
     if not text:
         raise ValueError("Tell Artha what you would like to change")
     brief = _merge_refinement_intent(previous_intent, text)
     products = copy.deepcopy([product for product in previous_products if isinstance(product, dict)])
+
+    if not products and brief.get("clarifications"):
+        workflow = [
+            {
+                "agent": "Follow-up agent",
+                "status": "waiting",
+                "detail": "The follow-up was understood; more details are needed before retailer research",
+            },
+            {
+                "agent": "Location agent",
+                "status": "complete",
+                "detail": "Using the delivery location already present in the brief",
+            },
+        ]
+        return _clarification_response(brief, workflow, payload.get("source"), user_text=text)
+
+    if not products:
+        # A clarification-first search has no product set to reuse. Once the
+        # shopper answers everything, perform the normal discovery pipeline
+        # from the structured intent rather than reparsing it from scratch.
+        post_url = _reference_url(brief.get("post_url"))
+        workflow = initial_workflow()
+        workflow[0] = {"agent": "Follow-up agent", "status": "complete", "detail": "Structured answers completed the shopping brief"}
+        workflow[1] = {"agent": "Location agent", "status": "complete", "detail": "Using the delivery location confirmed in the brief"}
+        raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
+        workflow[2] = search_event
+        products, evidence_event = ExtractionAgent().run(raw_products, source_meta)
+        workflow[3] = evidence_event
+        products, research_event, source_meta = ResearchAgent().run(products, source_meta)
+        workflow[4] = research_event
+        products, analysis_event = AnalysisAgent().run(products, brief)
+        workflow[5] = analysis_event
+        products, ranking_event = RankingAgent().run(products, brief)
+        workflow[6] = ranking_event
+        search_id = f"search-{uuid.uuid4().hex[:12]}"
+        db.save_search(search_id, brief["raw_text"], brief, workflow, products=products)
+        selected_products = _default_selection(products)
+        latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 0
+        source = copy.deepcopy(payload.get("source")) if isinstance(payload.get("source"), dict) else source_meta
+        source.update(source_meta)
+        source["refined"] = True
+        return {
+            "status": "complete",
+            "search_id": search_id,
+            "intent": brief,
+            "products": products,
+            "selected_product_ids": [product["id"] for product in selected_products],
+            "summary": {
+                "total": sum(_money(product.get("line_total")) or _money(product.get("total_price")) for product in selected_products),
+                "item_count": len(selected_products),
+                "delivery_label": f"All known deliveries arrive by {_date_label(latest_delivery)}" if latest_delivery else "Confirm delivery at retailer",
+                "opportunity": _budget_opportunity(products, brief),
+            },
+            "workflow": workflow,
+            "source": source,
+            "conversation": [
+                {"role": "user", "text": text},
+                {"role": "assistant", "text": "Thanks — I have enough detail now and searched the retailer sources."},
+            ],
+        }
+
     products, analysis_event = AnalysisAgent().run(products, brief)
     products, ranking_event = RankingAgent().run(products, brief)
     search_id = f"search-{uuid.uuid4().hex[:12]}"
@@ -875,6 +1224,7 @@ def run_refinement(payload: dict[str, Any]) -> dict[str, Any]:
     source = copy.deepcopy(payload.get("source")) if isinstance(payload.get("source"), dict) else {"mode": "refined"}
     source["refined"] = True
     return {
+        "status": "complete",
         "search_id": search_id,
         "intent": brief,
         "products": products,
@@ -942,6 +1292,9 @@ def run_search(payload: dict[str, Any], progress: Callable[[list[dict[str, Any]]
     brief, location_event = LocationAgent().run(brief, payload)
     workflow[1] = location_event
     emit()
+    if brief.get("clarifications"):
+        emit()
+        return _clarification_response(brief, workflow, {"mode": "clarification"}, user_text=brief.get("raw_text"))
     set_stage(2, "working", "Searching retailer sources and reference context")
     raw_products, search_event, source_meta = SearchAgent().run(brief, post_url)
     workflow[2] = search_event
@@ -968,6 +1321,7 @@ def run_search(payload: dict[str, Any], progress: Callable[[list[dict[str, Any]]
     total = sum(_money(product.get("line_total")) or _money(product.get("total_price")) or _money(product.get("price")) for product in selected_products)
     latest_delivery = max((product.get("delivery_days") or 0) for product in selected_products) if selected_products else 5
     return {
+        "status": "complete",
         "search_id": search_id,
         "intent": brief,
         "products": products,
@@ -994,6 +1348,10 @@ def _safe_plan_item(product: dict[str, Any]) -> dict[str, Any]:
         "name": str(product.get("name") or "Retailer product")[:180],
         "seller": str(product.get("seller") or "Retailer")[:100],
         "brand": str(product.get("brand") or "")[:100],
+        "color": str(product.get("color") or "")[:60],
+        "size": str(product.get("size") or "")[:60],
+        "fabric": str(product.get("fabric") or "")[:60],
+        "pincode": str(product.get("pincode") or "")[:6],
         "quantity": quantity,
         "price": item_price,
         "shipping_cost": shipping_cost,

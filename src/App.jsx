@@ -705,14 +705,41 @@ function LocationContext({ intent }) {
   );
 }
 
-function ClarificationNote({ intent }) {
+function clarificationSuggestions(question) {
+  const key = String(question?.key || '').toLowerCase();
+  if (key === 'color') return ['Red', 'Black', 'Blue', 'Neutral'];
+  if (key === 'size') return ['S', 'M', 'L', 'XL'];
+  if (key === 'delivery') return ['Within 3 days', 'Within 5 days', 'Within 7 days'];
+  if (key === 'budget') return ['Under ₹1,000', 'Under ₹2,000', 'Under ₹5,000'];
+  if (key === 'location') return ['Bengaluru', 'Mumbai', 'Delhi'];
+  if (key === 'pincode') return [];
+  return [];
+}
+
+function ClarificationNote({ intent, onAnswer }) {
   const questions = Array.isArray(intent?.clarifications) ? intent.clarifications : [];
   if (!questions.length) return null;
   return (
     <aside className="clarification-note" aria-label="Details Artha would like to confirm">
-      <span className="section-kicker">One detail to sharpen this edit</span>
-      <strong>{questions[0].question}</strong>
-      <small>Artha used a transparent working default for this pass. Reply in the same brief to refine the shortlist without repeating research.</small>
+      <span className="section-kicker">A few details to sharpen this search</span>
+      <strong>{questions.length === 1 ? questions[0].question : `I need ${questions.length} details before I search.`}</strong>
+      <div className="clarification-note__questions">
+        {questions.map((question) => (
+          <div className="clarification-note__question" key={question.key || question.question}>
+            <span>{question.question}</span>
+            {onAnswer && clarificationSuggestions(question).length ? (
+              <div className="clarification-note__chips" aria-label={`Quick answers for ${question.question}`}>
+                {clarificationSuggestions(question).map((suggestion) => (
+                  <button type="button" key={suggestion} onClick={() => onAnswer(suggestion)}>
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <small>Artha has paused retailer research until these constraints are clear. Reply in the brief above, or use a quick answer.</small>
     </aside>
   );
 }
@@ -1219,6 +1246,7 @@ function DiscoverView({
   onToast,
   onPickPrompt,
   onOpenTalk,
+  onQuickAnswer,
   onSelectAll,
   onClearSelection,
   onRemoveSelectedItem,
@@ -1301,7 +1329,7 @@ function DiscoverView({
           onRemoveReference={onRemoveReference}
           onSearch={onSearch}
           isSearching={isSearching}
-          hasResults={result.products.length > 0}
+          hasResults={result.products.length > 0 || result.status === 'needs_clarification'}
           searchError={searchError}
           onToast={onToast}
           onPickPrompt={onPickPrompt}
@@ -1326,7 +1354,7 @@ function DiscoverView({
         />
 
         <section ref={resultsRef} className="results-section js-reveal" aria-labelledby="results-heading">
-          <ClarificationNote intent={result.intent} />
+          <ClarificationNote intent={result.intent} onAnswer={onQuickAnswer} />
           <div className="results-toolbar">
             <div className="results-heading">
             <h2 id="results-heading">{result.products.length ? 'Your shortlist' : 'Build your live shortlist'}</h2>
@@ -1376,8 +1404,8 @@ function DiscoverView({
               <span className="empty-state__icon">
                 <Icon name="search" size={24} />
               </span>
-              <h2>Live sources will appear here.</h2>
-              <p>Describe what you want, add a reference image, or paste a public product or post URL to start a verified search.</p>
+              <h2>{result.status === 'needs_clarification' ? 'Answer the questions above to start.' : 'Live sources will appear here.'}</h2>
+              <p>{result.status === 'needs_clarification' ? 'Once the constraints are clear, Artha will search and verify the relevant retailer sources.' : 'Describe what you want, add a reference image, or paste a public product or post URL to start a verified search.'}</p>
             </div>
           ) : viewMode === 'cards' ? (
             <div className="products-grid">
@@ -2419,7 +2447,13 @@ export default function App() {
       setIsSearching(true);
       setSearchStage(0);
       setSearchError('');
-      const shouldRefine = Boolean(result.search_id && result.products.length && text?.trim() && !url?.trim() && !ref?.dataUrl);
+      const shouldRefine = Boolean(
+        result.search_id
+        && text?.trim()
+        && !url?.trim()
+        && !ref?.dataUrl
+        && (result.products.length || result.status === 'needs_clarification' || result.intent?.clarifications?.length),
+      );
       try {
         const body = shouldRefine
           ? await refineAgentSearch({
@@ -2444,15 +2478,22 @@ export default function App() {
                 if (nextIndex >= 0) setSearchStage(nextIndex);
               }
             });
-        if (!body.products?.length) throw new Error('No retailer sources were found for that brief.');
+        if (!body.products?.length && body.status !== 'needs_clarification') throw new Error('No retailer sources were found for that brief.');
         setResult(body);
+        const nextProducts = Array.isArray(body.products) ? body.products : [];
         setSelectedIds(
           Array.isArray(body.selected_product_ids)
             ? body.selected_product_ids
-            : body.products.slice(0, 3).map((product) => product.id),
+            : nextProducts.slice(0, 3).map((product) => product.id),
         );
-        setFocusedId(body.products[0]?.id || '');
-        setToast(shouldRefine ? 'Shortlist refined from the existing research.' : 'Live retailer sources checked and ranked.');
+        setFocusedId(nextProducts[0]?.id || '');
+        setToast(
+          body.status === 'needs_clarification'
+            ? 'I need a few more details before searching.'
+            : shouldRefine
+              ? 'Shortlist refined from the existing research.'
+              : 'Live retailer sources checked and ranked.',
+        );
         return body;
       } catch (error) {
         const message = error.message || 'The search could not complete. Please try again.';
@@ -2487,12 +2528,26 @@ export default function App() {
     async (text) => {
       setQuery(text);
       const body = await handleSearchWithPayload(text, postUrl, reference, { throwOnError: true });
+      if (body?.status === 'needs_clarification') {
+        const questions = body.intent?.clarifications || body.clarifications || [];
+        return questions.length
+          ? `I need a little more detail first: ${questions.map((question) => question.question).join(' ')}`
+          : 'I need a little more detail before searching.';
+      }
       const count = body?.products?.length || 0;
       const topPick = body?.products?.[0];
       if (!count) return 'I could not find a strong source match yet. Try adding a budget, delivery city, or must-have.';
       return `I found ${count} source${count === 1 ? '' : 's'} and refreshed the shortlist. ${topPick ? `${sanitizeTitle(topPick.name)} is the strongest fit right now.` : 'The refreshed options are ready below.'}`;
     },
     [handleSearchWithPayload, postUrl, reference],
+  );
+
+  const handleQuickAnswer = useCallback(
+    (answer) => {
+      setQuery(answer);
+      return handleSearchWithPayload(answer, '', null, { throwOnError: false });
+    },
+    [handleSearchWithPayload],
   );
 
   const toggleProduct = useCallback((id) => {
@@ -2784,6 +2839,7 @@ export default function App() {
         onToast={setToast}
         onPickPrompt={handlePickPrompt}
         onOpenTalk={() => setTalkOpen(true)}
+        onQuickAnswer={handleQuickAnswer}
         onSelectAll={handleSelectAll}
         onClearSelection={handleClearSelection}
         onRemoveSelectedItem={handleRemoveSelectedItem}

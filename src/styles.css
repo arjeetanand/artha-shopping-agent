@@ -3416,7 +3416,52 @@ button, input, textarea { border-radius: 0 !important; }
 @media(max-width:820px){.mobile-plan-bar{background:#101010;color:#fff;border:1px solid #161616;border-radius:0;box-shadow:none}.mobile-plan-bar__count{color:#aaa}.mobile-plan-bar__total{color:var(--primary)}.mobile-plan-bar__actions{display:flex;gap:6px}.mobile-plan-bar__checkout{min-height:36px;padding:0 12px;border:1px solid #fff;border-radius:0;background:transparent;color:#fff;font-size:12px}.mobile-plan-bar__checkout:hover{background:#fff;color:#101010}}
 @media(max-width:820px){.mobile-brand{display:inline-flex;color:#101010;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.1em}}
 
-/* ─── Artha 2.0: decision-first commerce workspace ──────────────────────────── */
+/* Conversational clarification checkpoint */
+.clarification-note__questions {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.clarification-note__question {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-secondary, #555);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.clarification-note__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarification-note__chips button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(238, 90, 59, 0.28);
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--primary, #ee5a3b);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.clarification-note__chips button:hover {
+  border-color: var(--primary, #ee5a3b);
+  background: var(--primary, #ee5a3b);
+  color: #fff;
+}
+
+/* ─── Artha 2.0 cascade — SUPPRESSED (superseded by "Editorial motion refresh" below) ─────
+   This green/teal theme override is kept for reference but commented out.
+   The canonical coral/cobalt/paper identity lives in the Editorial motion refresh layer.
+   ─────────────────────────────────────────────────────────────────────────────────────── */
+/*
+   === Artha 2.0: decision-first commerce workspace ===
 :root {
   --bg-app: #ffffff;
   --surface: #ffffff;
@@ -3674,6 +3719,8 @@ button:disabled { cursor: not-allowed; }
   .decision-banner__actions .primary-button { width: 100%; }
 }
 
+*/ /* end Artha 2.0 suppressed cascade */
+
 /* ────────────────────────────────────────────────────────────────────────────
    Editorial motion refresh
    Inspired by the reference gallery's pinned filters, oversized type, and
@@ -3910,6 +3957,72 @@ body::before {
   border-color: var(--ink);
   background: var(--surface-subtle);
   color: var(--ink);
+}
+
+/* ── Rescued structural display rules (previously only in suppressed Artha 2.0 block) ── */
+
+/* Talk button — structural (display/alignment not covered by legacy CSS) */
+.talk-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-width: 1px;
+  border-style: solid;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease,
+              transform var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+
+/* Talk link — inline CTA in agent strip */
+.talk-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+}
+
+.talk-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Top header structural */
+.top-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top-header__breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Agent strip heading actions row */
+.agent-strip__heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Summary calc footnote */
+.summary-calc__note {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .main-content {
@@ -4662,15 +4775,110 @@ body::before {
   box-shadow: none;
 }
 
+/* ── Decision Banner — complete structural definition ── */
 .decision-banner {
-  border-color: rgba(238, 90, 59, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 18px;
+  padding: 20px 22px;
+  border: 1px solid rgba(238, 90, 59, 0.25);
   border-radius: 16px;
   background: var(--primary-light);
 }
 
-.decision-banner__eyebrow,
+.decision-banner__copy {
+  min-width: 0;
+}
+
+.decision-banner__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.decision-banner__copy > strong {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decision-banner__copy p {
+  max-width: 650px;
+  margin: 6px 0 0;
+  color: var(--ink-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.decision-banner__reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.decision-banner__reasons span {
+  padding: 5px 9px;
+  border: 1px solid rgba(238, 90, 59, 0.2);
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--primary);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.decision-banner__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 .decision-banner__actions > strong {
   color: var(--primary);
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+
+.decision-banner__actions .primary-button {
+  min-height: 38px;
+  padding-inline: 14px;
+  box-shadow: none;
+  font-size: 11px;
+}
+
+.decision-banner__actions .text-button {
+  font-size: 10px;
+}
+
+@media (max-width: 820px) {
+  .decision-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .decision-banner__actions {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .decision-banner__actions .primary-button {
+    width: 100%;
+  }
 }
 
 .location-context,
@@ -4919,6 +5127,12 @@ body::before {
 
   .summary-panel {
     display: none;
+  }
+
+  .mobile-plan-bar {
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
   }
 
   .page-stack {

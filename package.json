@@ -12,6 +12,7 @@
     "test:payments": "python3 tests/payment_adapter.py",
     "test:auth": "python3 tests/auth_contract.py",
     "test:location": "python3 tests/location_adapter.py",
+    "test:agentic": "python3 tests/qa_agentic_flow.py && python3 tests/retailer_contracts.py",
     "build": "vite build",
     "preview": "vite preview"
   },

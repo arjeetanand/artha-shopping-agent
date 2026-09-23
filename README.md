@@ -149,21 +149,24 @@ KOKORO_DEVICE=auto
 
 ## Workflow
 
-1. **Brief agent** extracts category, quantity, preferred brand, budget, location, delivery window, must-have specifications, and visual/style cues.
-2. **Location agent** uses the typed city or an explicitly permissioned browser location, with optional Google Maps geocoding and nearby-store context; raw coordinates are never persisted.
-3. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context.
-4. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, and price information as needing retailer confirmation.
-5. **Research agent** checks up to six returned live product pages in parallel through Anakin's URL scraper, fills only missing structured fields, records price mismatches, and keeps direct-page failures visibly unverified. Fixture mode uses its deterministic catalog evidence without network calls.
-6. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
-7. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, and evidence, and excludes products with a known constraint failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
-8. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
-9. **Order service** persists an explicitly confirmed sandbox order or a Razorpay-signature-verified payment record. Production delivery, cancellation, return, and refund updates remain disabled until a merchant adapter/webhook is configured.
+1. **Brief agent** extracts category, quantity, preferred brand, budget, location/pincode, delivery window, color, size, fabric, must-have specifications, and visual/style cues. Written durations such as “three days” are normalized safely.
+2. **Clarification checkpoint** pauses before retailer discovery when a decision-critical constraint is missing or ambiguous. The response carries structured questions and can be resumed through the follow-up endpoint without losing the brief.
+3. **Location agent** uses the typed city/pincode or an explicitly permissioned browser location, with optional Google Maps geocoding and nearby-store context; raw coordinates are never persisted.
+4. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context. Provider-neutral retailer and delivery contracts live in `backend/retailers.py`; dedicated marketplace adapters can be added without changing ranking or UI code.
+5. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, variant, and price information as needing retailer confirmation.
+6. **Research agent** checks up to six returned live product pages in parallel through Anakin's URL scraper, fills only missing structured fields, records price mismatches, and keeps empty or failed direct-page checks visibly unverified. Fixture mode uses its deterministic catalog evidence without network calls.
+7. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
+8. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, color, size, and evidence, and excludes products with a known constraint failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
+9. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
+10. **Order service** persists an explicitly confirmed sandbox order or a Razorpay-signature-verified payment record. Production delivery, cancellation, return, and refund updates remain disabled until a merchant adapter/webhook is configured.
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
 
 When a product just outside the budget still satisfies delivery and stock constraints, the result includes a clearly labeled **Worth a small stretch** opportunity. It never changes the selected plan automatically; the user can inspect that product's evidence before deciding.
 
 Live searches can be started asynchronously with `POST /api/agent/search/jobs` and polled at `GET /api/agent/search/jobs/:job_id`. The job returns queued, working, complete, waiting, or failed stage snapshots while Anakin and parallel direct-page checks run, so the UI can keep the workflow visible instead of holding a blank request open.
+
+When required details are missing, the search response uses `status: "needs_clarification"`, returns `intent.clarifications`, and contains no retailer shortlist. Send the user's answer to `POST /api/agent/refine` with the returned intent, products, and source. If the checkpoint has no products yet, Artha starts discovery after the answers resolve the questions; otherwise it re-ranks the completed research set without repeating discovery.
 
 The known item subtotal deliberately excludes shipping, tax, and any retailer-specific fees that the live source does not verify. The user must confirm those values at checkout.
 
