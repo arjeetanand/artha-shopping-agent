@@ -20,8 +20,14 @@ from .workflow import initial_workflow, run_search
 
 _executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="artha-research")
 _lock = threading.Lock()
+_capacity = threading.BoundedSemaphore(32)
 _jobs: dict[str, dict[str, Any]] = {}
+_search_clients: dict[str, tuple[float, int]] = {}
 _RETENTION_SECONDS = 60 * 60
+_MAX_RETAINED_JOBS = 128
+_SEARCH_REQUESTS_PER_MINUTE = 20
+_MAX_TRACKED_SEARCH_CLIENTS = 4096
+_last_client_cleanup = 0.0
 
 
 def _cleanup_locked() -> None:
@@ -29,6 +35,28 @@ def _cleanup_locked() -> None:
     expired = [job_id for job_id, job in _jobs.items() if float(job.get("updated_at", 0)) < cutoff]
     for job_id in expired:
         _jobs.pop(job_id, None)
+
+
+def allow_search_request(client_ip: str) -> bool:
+    global _last_client_cleanup
+    now = time.monotonic()
+    with _lock:
+        if now - _last_client_cleanup >= 60:
+            _search_clients_copy = [ip for ip, (started, _) in _search_clients.items() if now - started >= 60]
+            for ip in _search_clients_copy:
+                _search_clients.pop(ip, None)
+            _last_client_cleanup = now
+        entry = _search_clients.get(client_ip)
+        if entry is None or now - entry[0] >= 60:
+            if entry is None and len(_search_clients) >= _MAX_TRACKED_SEARCH_CLIENTS:
+                # ponytail: in-process peer-IP limits; use a shared limiter behind trusted proxy identity when scaling out.
+                return False
+            _search_clients[client_ip] = (now, 1)
+            return True
+        if entry[1] >= _SEARCH_REQUESTS_PER_MINUTE:
+            return False
+        _search_clients[client_ip] = (entry[0], entry[1] + 1)
+        return True
 
 
 def _snapshot_locked(job_id: str) -> dict[str, Any] | None:
@@ -53,8 +81,8 @@ def _run(job_id: str, payload: dict[str, Any]) -> None:
             job["workflow"] = copy.deepcopy(workflow)
             job["updated_at"] = time.time()
 
-    progress(initial_workflow())
     try:
+        progress(initial_workflow())
         result = run_search(payload, progress=progress)
     except Exception as error:
         with _lock:
@@ -63,29 +91,54 @@ def _run(job_id: str, payload: dict[str, Any]) -> None:
                 job["status"] = "failed"
                 job["error"] = str(error)
                 job["updated_at"] = time.time()
-        return
-    with _lock:
-        job = _jobs.get(job_id)
-        if job:
-            job["status"] = "complete"
-            job["workflow"] = copy.deepcopy(result.get("workflow") or [])
-            job["result"] = result
-            job["updated_at"] = time.time()
+    else:
+        with _lock:
+            job = _jobs.get(job_id)
+            if job:
+                job["status"] = "complete"
+                job["workflow"] = copy.deepcopy(result.get("workflow") or [])
+                job["result"] = result
+                job["updated_at"] = time.time()
+    finally:
+        _capacity.release()
 
 
 def submit_search(payload: dict[str, Any]) -> dict[str, Any]:
+    if not _capacity.acquire(blocking=False):
+        raise RuntimeError("Research queue is full; try again shortly.")
     job_id = f"job-{uuid.uuid4().hex}"
-    with _lock:
-        _cleanup_locked()
-        _jobs[job_id] = {
-            "status": "queued",
-            "workflow": initial_workflow(),
-            "created_at": time.time(),
-            "updated_at": time.time(),
-        }
-    _executor.submit(_run, job_id, copy.deepcopy(payload))
-    with _lock:
-        return _snapshot_locked(job_id) or {"job_id": job_id, "status": "queued", "workflow": initial_workflow()}
+    submitted = False
+    try:
+        queued_payload = copy.deepcopy(payload)
+        with _lock:
+            _cleanup_locked()
+            while len(_jobs) >= _MAX_RETAINED_JOBS:
+                terminal = [
+                    (float(job.get("updated_at", 0)), old_id)
+                    for old_id, job in _jobs.items()
+                    if job.get("status") in {"complete", "failed"}
+                ]
+                if not terminal:
+                    raise RuntimeError("Research queue is full; try again shortly.")
+                _, oldest_job_id = min(terminal)
+                _jobs.pop(oldest_job_id, None)
+            now = time.time()
+            _jobs[job_id] = {
+                "status": "queued",
+                "workflow": initial_workflow(),
+                "created_at": now,
+                "updated_at": now,
+            }
+        _executor.submit(_run, job_id, queued_payload)
+        submitted = True
+        with _lock:
+            return _snapshot_locked(job_id) or {"job_id": job_id, "status": "queued", "workflow": initial_workflow()}
+    except Exception:
+        if not submitted:
+            with _lock:
+                _jobs.pop(job_id, None)
+            _capacity.release()
+        raise
 
 
 def get_search_job(job_id: str) -> dict[str, Any] | None:

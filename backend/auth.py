@@ -9,7 +9,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.cookies import SimpleCookie
+from http.cookies import CookieError, SimpleCookie
 from typing import Any
 
 from .db import db
@@ -41,8 +41,55 @@ def google_configured() -> bool:
 
 
 def _safe_next(value: str | None) -> str:
-    value = (value or "/").strip()
+    value = value or "/"
+    if any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F for char in value):
+        raise AuthError("The sign-in return path is invalid.")
+    value = value.strip()
     return value if value.startswith("/") and not value.startswith("//") else "/"
+
+
+def _valid_oauth_state(state: str) -> bool:
+    return len(state) == 43 and all(char.isascii() and (char.isalnum() or char in "-_") for char in state)
+
+
+def _oauth_state_cookie_settings(state: str) -> tuple[str, str, bool]:
+    if not _valid_oauth_state(state):
+        raise ValueError("Invalid OAuth state")
+    force_secure = setting("SHOPPINGHELP_COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
+    secure = is_production() or force_secure
+    prefix = "__Host-" if secure else ""
+    path = "/" if secure else "/api/auth/google/callback"
+    return f"{prefix}artha_oauth_state_{state}", path, secure
+
+
+def oauth_state_cookie(state: str) -> str:
+    name, path, secure = _oauth_state_cookie_settings(state)
+    parts = [f"{name}={state}", f"Path={path}", "HttpOnly", "SameSite=Lax", "Max-Age=600"]
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+def clear_oauth_state_cookie(state: str) -> str | None:
+    if not _valid_oauth_state(state):
+        return None
+    name, path, secure = _oauth_state_cookie_settings(state)
+    parts = [f"{name}=", f"Path={path}", "HttpOnly", "SameSite=Lax", "Max-Age=0"]
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+def google_oauth_state_matches(cookie_header: str | None, state: str) -> bool:
+    if not cookie_header or not _valid_oauth_state(state):
+        return False
+    cookie = SimpleCookie()
+    try:
+        cookie.load(cookie_header)
+    except (CookieError, ValueError, TypeError):
+        return False
+    morsel = cookie.get(_oauth_state_cookie_settings(state)[0])
+    return bool(morsel and secrets.compare_digest(morsel.value, state))
 
 
 def _verifier() -> str:
@@ -99,9 +146,11 @@ def _get_userinfo(access_token: str) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
-def complete_google_auth(code: str, state: str) -> tuple[dict[str, Any], str, str]:
+def complete_google_auth(code: str, state: str, cookie_header: str | None) -> tuple[dict[str, Any], str, str]:
     if not code or not state:
         raise AuthError("Google did not return a complete authorization response.")
+    if not google_oauth_state_matches(cookie_header, state):
+        raise AuthError("Your sign-in request could not be validated. Please start Google sign-in again.")
     oauth_state = db.consume_oauth_state(state)
     if not oauth_state:
         raise AuthError("Your sign-in request expired. Please start Google sign-in again.")

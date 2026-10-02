@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,7 +14,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from backend.auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
+    from backend.auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from backend.clients import AnakinClient, BriefModel
     from backend.db import db
     from backend.settings import is_production
@@ -20,9 +23,9 @@ if __package__ in {None, ""}:
     from backend.workflow import create_purchase_plan, run_refinement, run_search
     from backend.orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
     from backend.payments import PaymentError, create_payment_order, payment_status, verify_payment
-    from backend.jobs import get_search_job, submit_search
+    from backend.jobs import allow_search_request, get_search_job, submit_search
 else:
-    from .auth import AuthError, app_redirect_url, begin_google_auth, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, session_cookie
+    from .auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from .clients import AnakinClient, BriefModel
     from .db import db
     from .settings import is_production
@@ -31,11 +34,15 @@ else:
     from .workflow import create_purchase_plan, run_refinement, run_search
     from .orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
     from .payments import PaymentError, create_payment_order, payment_status, verify_payment
-    from .jobs import get_search_job, submit_search
+    from .jobs import allow_search_request, get_search_job, submit_search
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SHOPPINGHELP_PORT", "8000"))
+_MAX_BODY_BYTES = 8_000_000
+_BODY_READ_TIMEOUT_SECONDS = 15
+# ponytail: per-process search-handler cap; use shared admission if the API scales to multiple workers.
+_SEARCH_REQUEST_CAPACITY = threading.BoundedSemaphore(8)
 
 
 class ApiError(Exception):
@@ -80,21 +87,48 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _redirect(self, location: str, cookie: str | None = None) -> None:
+    def _redirect(self, location: str, cookie: str | None = None, extra_cookies: tuple[str, ...] = ()) -> None:
+        if any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F for char in location):
+            raise ApiError("Invalid redirect target")
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", location)
         self.send_header("Cache-Control", "no-store")
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
+        for value in (cookie, *extra_cookies):
+            if value:
+                self.send_header("Set-Cookie", value)
         self._cors()
         self.end_headers()
 
     def _read_json(self) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length > 8_000_000:
+            if length < 0:
+                raise ApiError("Invalid Content-Length")
+            if length > _MAX_BODY_BYTES:
                 raise ApiError("Request is too large", 413)
-            raw = self.rfile.read(length) if length else b"{}"
+            if length:
+                deadline = time.monotonic() + _BODY_READ_TIMEOUT_SECONDS
+                previous_timeout = self.connection.gettimeout()
+                chunks = []
+                remaining = length
+                try:
+                    while remaining:
+                        timeout = deadline - time.monotonic()
+                        if timeout <= 0:
+                            raise ApiError("Request body timed out", 408)
+                        self.connection.settimeout(timeout)
+                        chunk = self.rfile.read1(min(64_000, remaining))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        remaining -= len(chunk)
+                except (TimeoutError, socket.timeout) as error:
+                    raise ApiError("Request body timed out", 408) from error
+                finally:
+                    self.connection.settimeout(previous_timeout)
+                raw = b"".join(chunks)
+            else:
+                raw = b"{}"
             value = json.loads(raw.decode("utf-8"))
             if not isinstance(value, dict):
                 raise ApiError("JSON body must be an object")
@@ -161,16 +195,30 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, job)
                 return
             if path == "/api/auth/google/start":
-                self._redirect(begin_google_auth((query.get("next") or ["/"])[0], self._app_origin()))
+                authorize_url = begin_google_auth((query.get("next") or ["/"])[0], self._app_origin())
+                state = (parse_qs(urlparse(authorize_url).query).get("state") or [""])[0]
+                if not state:
+                    raise AuthError("Google sign-in could not be started.", 500)
+                self._redirect(authorize_url, oauth_state_cookie(state))
                 return
             if path == "/api/auth/google/callback":
+                state = (query.get("state") or [""])[0]
                 if query.get("error"):
-                    self._redirect(f"{app_redirect_url('/')}?{urlencode({'auth_error': 'google_cancelled'})}")
+                    clear_cookie = clear_oauth_state_cookie(state)
+                    self._redirect(
+                        f"{app_redirect_url('/')}?{urlencode({'auth_error': 'google_cancelled'})}",
+                        extra_cookies=(clear_cookie,) if clear_cookie else (),
+                    )
                     return
-                user, token, next_path = complete_google_auth((query.get("code") or [""])[0], (query.get("state") or [""])[0])
+                user, token, next_path = complete_google_auth((query.get("code") or [""])[0], state, self.headers.get("Cookie"))
                 destination = next_path if next_path.startswith(("http://", "https://")) else app_redirect_url(next_path)
                 separator = "&" if "?" in destination else "?"
-                self._redirect(f"{destination}{separator}{urlencode({'auth': 'success'})}", session_cookie(token))
+                clear_cookie = clear_oauth_state_cookie(state)
+                self._redirect(
+                    f"{destination}{separator}{urlencode({'auth': 'success'})}",
+                    session_cookie(token),
+                    (clear_cookie,) if clear_cookie else (),
+                )
                 return
             if path == "/api/usage":
                 if is_production():
@@ -224,7 +272,12 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError("Not found", 404)
         except AuthError as error:
             if path == "/api/auth/google/callback":
-                self._redirect(f"{app_redirect_url('/')}?{urlencode({'auth_error': 'google_failed'})}")
+                state = (query.get("state") or [""])[0]
+                clear_cookie = clear_oauth_state_cookie(state)
+                self._redirect(
+                    f"{app_redirect_url('/')}?{urlencode({'auth_error': 'google_failed'})}",
+                    extra_cookies=(clear_cookie,) if clear_cookie else (),
+                )
                 return
             self._send(error.status, {"error": str(error)})
         except ApiError as error:
@@ -238,7 +291,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
+        search_request_admitted = False
         try:
+            if path in {"/api/agent/search/jobs", "/api/agent/search", "/api/agent/refine"}:
+                if not allow_search_request(self.client_address[0]):
+                    raise ApiError("Too many research requests; try again shortly.", 429)
+                if not _SEARCH_REQUEST_CAPACITY.acquire(blocking=False):
+                    raise ApiError("Research service is busy; try again shortly.", 503)
+                search_request_admitted = True
             payload = self._read_json()
             if path == "/api/agent/search/jobs":
                 self._send(202, submit_search(payload))
@@ -325,6 +385,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(503, {"error": str(error)})
         except Exception:
             self._send(500, {"error": "Internal server error"})
+        finally:
+            if search_request_admitted:
+                _SEARCH_REQUEST_CAPACITY.release()
 
 
 def main() -> None:
