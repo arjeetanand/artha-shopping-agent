@@ -234,6 +234,31 @@ class SecurityBoundaryContracts(unittest.TestCase):
                 self.assertFalse(voice_limits.reserve_global_voice_call(Database(database_path), now=current_hour))
                 self.assertTrue(voice_limits.reserve_global_voice_call(database, now=current_hour.replace(hour=13)))
 
+    def test_legacy_voice_budget_is_carried_into_rolling_limit(self) -> None:
+        from datetime import datetime, timezone
+
+        from backend import voice_limits
+        from backend.db import Database
+
+        with tempfile.TemporaryDirectory(prefix="artha-voice-budget-upgrade-", dir="/private/tmp") as directory:
+            database = Database(Path(directory) / "voice-budget.sqlite3")
+            current_time = datetime(2026, 10, 3, 12, 59, tzinfo=timezone.utc)
+            previous_bucket = current_time.replace(hour=11, minute=0).isoformat(timespec="seconds")
+            current_bucket = current_time.replace(minute=0).isoformat(timespec="seconds")
+            with database._connect() as connection:
+                connection.execute(
+                    "CREATE TABLE voice_call_budget (window_start TEXT PRIMARY KEY, request_count INTEGER NOT NULL)"
+                )
+                connection.executemany(
+                    "INSERT INTO voice_call_budget VALUES (?, ?)",
+                    [(previous_bucket, 1), (current_bucket, 1)],
+                )
+            with patch.object(voice_limits, "_MAX_GLOBAL_VOICE_CALLS_PER_HOUR", 2):
+                self.assertFalse(voice_limits.reserve_global_voice_call(database, now=current_time))
+                # The previous fixed-hour bucket expires at the next boundary;
+                # the current bucket remains in the rolling window.
+                self.assertTrue(voice_limits.reserve_global_voice_call(database, now=current_time.replace(hour=13, minute=0)))
+
     def test_search_storage_expires_caps_and_preserves_plan_references(self) -> None:
         from backend import db as db_module
         from backend.db import Database, now_iso
@@ -279,6 +304,116 @@ class SecurityBoundaryContracts(unittest.TestCase):
                     database.save_search("oversized", "x" * 40, {}, [])
                 with database._connect() as connection:
                     self.assertEqual(connection.execute("SELECT COUNT(*) FROM searches").fetchone()[0], 0)
+
+    def test_price_observation_storage_is_expiring_and_bounded(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from backend import db as db_module
+        from backend.db import Database
+
+        with tempfile.TemporaryDirectory(prefix="artha-price-retention-", dir="/private/tmp") as directory:
+            database = Database(Path(directory) / "prices.sqlite3")
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            stale_at = (now - timedelta(days=2)).isoformat(timespec="seconds")
+            with database._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO price_observations
+                    (product_key, product_id, source_url, seller, price, currency, source_status, observed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("stale", "stale", "https://store.example/stale", "Store", 100, "INR", "direct_page", stale_at),
+                )
+
+            def offer(product_key: str, product_id: str, minutes_ago: int, price: int) -> dict[str, object]:
+                return {
+                    "product_key": product_key,
+                    "product_id": product_id,
+                    "source_url": f"https://store.example/{product_id}",
+                    "seller": "Store",
+                    "price": price,
+                    "currency": "INR",
+                    "source_status": "direct_page",
+                    "observed_at": (now - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds"),
+                }
+
+            with (
+                patch.object(db_module, "_PRICE_OBSERVATION_RETENTION_DAYS", 1),
+                patch.object(db_module, "_MAX_PRICE_OBSERVATION_ROWS", 10),
+                patch.object(db_module, "_MAX_PRICE_OBSERVATIONS_PER_PRODUCT", 2),
+            ):
+                database.record_price_observations([
+                    offer("popular", "old", 3, 100),
+                    offer("popular", "middle", 2, 90),
+                    offer("popular", "new", 1, 80),
+                    offer("another", "other", 0, 70),
+                    offer("x" * 2100, "too-long", 0, 50),
+                ])
+                with database._connect() as connection:
+                    rows = connection.execute("SELECT product_key, product_id FROM price_observations").fetchall()
+                self.assertEqual({(row["product_key"], row["product_id"]) for row in rows}, {
+                    ("popular", "middle"), ("popular", "new"), ("another", "other"),
+                })
+                self.assertEqual([row["price"] for row in database.price_observations("popular")], [90, 80])
+                self.assertEqual(database.price_observations("stale"), [])
+
+                with patch.object(db_module, "_MAX_PRICE_OBSERVATION_ROWS", 2):
+                    database.record_price_observations([
+                        offer("fresh-a", "a", 0, 60),
+                        offer("fresh-b", "b", 0, 50),
+                    ])
+                with database._connect() as connection:
+                    self.assertEqual(connection.execute("SELECT COUNT(*) FROM price_observations").fetchone()[0], 2)
+                self.assertEqual(database.price_observations("fresh-a")[0]["price"], 60)
+                self.assertEqual(database.price_observations("fresh-b")[0]["price"], 50)
+
+    def test_usage_event_ledger_is_expiring_and_bounded(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from backend import db as db_module
+        from backend.db import Database
+
+        with tempfile.TemporaryDirectory(prefix="artha-usage-retention-", dir="/private/tmp") as directory:
+            database = Database(Path(directory) / "usage.sqlite3")
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            with database._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO usage_events
+                    (id, runtime, provider, operation, model, input_tokens, output_tokens, total_tokens,
+                     cached_tokens, input_characters, output_bytes, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("usage-stale", "local", "provider", "search", None, None, None, None, None, 0, None,
+                     "success", (now - timedelta(days=2)).isoformat(timespec="seconds")),
+                )
+
+            def event(event_id: str, minutes_ago: int) -> dict[str, object]:
+                return {
+                    "id": event_id,
+                    "runtime": "local",
+                    "provider": "provider",
+                    "operation": "search",
+                    "model": "search",
+                    "input_tokens": None,
+                    "output_tokens": None,
+                    "total_tokens": None,
+                    "cached_tokens": None,
+                    "input_characters": 10,
+                    "output_bytes": None,
+                    "status": "success",
+                    "created_at": (now - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds"),
+                }
+
+            with (
+                patch.object(db_module, "_USAGE_EVENT_RETENTION_DAYS", 1),
+                patch.object(db_module, "_MAX_USAGE_EVENT_ROWS", 2),
+            ):
+                for item in (event("usage-a", 3), event("usage-b", 2), event("usage-c", 1)):
+                    database.record_usage_event(item)
+                with database._connect() as connection:
+                    rows = connection.execute("SELECT id FROM usage_events ORDER BY created_at, id").fetchall()
+                self.assertEqual([row["id"] for row in rows], ["usage-b", "usage-c"])
 
     def test_total_header_deadline_and_connection_cap(self) -> None:
         from backend import server

@@ -19,6 +19,12 @@ DB_PATH = Path(os.environ.get("SHOPPINGHELP_DB_PATH", ROOT / "shoppinghelp.sqlit
 _SEARCH_RETENTION_DAYS = 7
 _MAX_SEARCH_ROWS = 256
 _MAX_SEARCH_RECORD_BYTES = 256 * 1024
+_PRICE_OBSERVATION_RETENTION_DAYS = 90
+_MAX_PRICE_OBSERVATION_ROWS = 10_000
+_MAX_PRICE_OBSERVATIONS_PER_PRODUCT = 256
+_MAX_PRICE_OBSERVATIONS_PER_BATCH = 256
+_USAGE_EVENT_RETENTION_DAYS = 365
+_MAX_USAGE_EVENT_ROWS = 100_000
 
 
 def now_iso() -> str:
@@ -187,6 +193,8 @@ class Database:
             if "server_verified" not in search_columns:
                 connection.execute("ALTER TABLE searches ADD COLUMN server_verified INTEGER NOT NULL DEFAULT 0")
             self._prune_searches(connection, _MAX_SEARCH_ROWS)
+            self._prune_price_observations(connection, _MAX_PRICE_OBSERVATION_ROWS)
+            self._prune_usage_events(connection, _MAX_USAGE_EVENT_ROWS)
 
     def _prune_searches(self, connection: sqlite3.Connection, max_rows: int) -> None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")
@@ -252,6 +260,63 @@ class Database:
                 ),
             )
 
+    def _prune_price_observations(self, connection: sqlite3.Connection, max_rows: int) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=_PRICE_OBSERVATION_RETENTION_DAYS)).isoformat(timespec="seconds")
+        connection.execute(
+            """
+            DELETE FROM price_observations
+            WHERE observed_at < ?
+               OR length(CAST(product_key AS BLOB)) > 2048
+               OR length(CAST(product_id AS BLOB)) > 256
+               OR length(CAST(source_url AS BLOB)) > 2048
+               OR length(CAST(seller AS BLOB)) > 256
+               OR length(CAST(currency AS BLOB)) > 8
+               OR length(CAST(source_status AS BLOB)) > 64
+               OR length(CAST(observed_at AS BLOB)) > 40
+            """,
+            (cutoff,),
+        )
+        connection.execute(
+            """
+            DELETE FROM price_observations
+            WHERE id IN (
+                SELECT id FROM price_observations
+                ORDER BY observed_at DESC, id DESC
+                LIMIT -1 OFFSET ?
+            )
+            """,
+            (max_rows,),
+        )
+        connection.execute(
+            """
+            DELETE FROM price_observations
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY product_key ORDER BY observed_at DESC, id DESC
+                    ) AS product_rank
+                    FROM price_observations
+                ) WHERE product_rank > ?
+            )
+            """,
+            (_MAX_PRICE_OBSERVATIONS_PER_PRODUCT,),
+        )
+
+    def _prune_usage_events(self, connection: sqlite3.Connection, max_rows: int) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=_USAGE_EVENT_RETENTION_DAYS)).isoformat(timespec="seconds")
+        connection.execute("DELETE FROM usage_events WHERE created_at < ?", (cutoff,))
+        connection.execute(
+            """
+            DELETE FROM usage_events
+            WHERE id IN (
+                SELECT id FROM usage_events
+                ORDER BY created_at DESC, id DESC
+                LIMIT -1 OFFSET ?
+            )
+            """,
+            (max_rows,),
+        )
+
     def get_search(self, search_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -293,28 +358,59 @@ class Database:
         return products if isinstance(products, list) else []
 
     def record_price_observations(self, observations: list[dict[str, Any]]) -> None:
+        bounded: list[dict[str, Any]] = []
+        for observation in observations[:_MAX_PRICE_OBSERVATIONS_PER_BATCH]:
+            if not isinstance(observation, dict):
+                continue
+            values = {
+                field: str(observation.get(field) or "")
+                for field in ("product_key", "product_id", "source_url", "seller", "currency", "source_status", "observed_at")
+            }
+            field_limits = {"product_key": 2048, "product_id": 256, "source_url": 2048, "seller": 256,
+                            "currency": 8, "source_status": 64, "observed_at": 40}
+            if any(len(values[field].encode("utf-8")) > limit for field, limit in field_limits.items()):
+                continue
+            price = observation.get("price")
+            if not values["product_key"] or not values["source_url"] or isinstance(price, bool) or not isinstance(price, int) or not 0 < price <= 2**63 - 1:
+                continue
+            bounded.append({**values, "price": price})
+        if not bounded:
+            return
+        bounded.sort(key=lambda row: (row["observed_at"], row["product_key"], row["source_url"]))
+        bounded = bounded[-_MAX_PRICE_OBSERVATION_ROWS:]
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._prune_price_observations(connection, _MAX_PRICE_OBSERVATION_ROWS)
+            current_count = int(connection.execute("SELECT COUNT(*) FROM price_observations").fetchone()[0])
+            excess = current_count + len(bounded) - _MAX_PRICE_OBSERVATION_ROWS
+            if excess > 0:
+                connection.execute(
+                    "DELETE FROM price_observations WHERE id IN (SELECT id FROM price_observations ORDER BY observed_at ASC, id ASC LIMIT ?)",
+                    (excess,),
+                )
             connection.executemany(
                 """
                 INSERT INTO price_observations
                 (product_key, product_id, source_url, seller, price, currency, source_status, observed_at)
                 VALUES (:product_key, :product_id, :source_url, :seller, :price, :currency, :source_status, :observed_at)
                 """,
-                observations,
+                bounded,
             )
+            self._prune_price_observations(connection, _MAX_PRICE_OBSERVATION_ROWS)
 
     def price_observations(self, product_key: str) -> list[dict[str, Any]]:
         if not product_key:
             return []
         with self._connect() as connection:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=_PRICE_OBSERVATION_RETENTION_DAYS)).isoformat(timespec="seconds")
             rows = connection.execute(
                 """
                 SELECT product_id, source_url, seller, price, currency, source_status, observed_at
-                FROM price_observations WHERE product_key = ? ORDER BY observed_at, id
+                FROM price_observations WHERE product_key = ? AND observed_at >= ? ORDER BY observed_at DESC, id DESC LIMIT ?
                 """,
-                (product_key,),
+                (product_key, cutoff, _MAX_PRICE_OBSERVATIONS_PER_PRODUCT),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [dict(row) for row in reversed(rows)]
 
     def upsert_google_user(self, *, google_sub: str, email: str, name: str, picture: str) -> dict[str, Any]:
         timestamp = now_iso()
@@ -547,6 +643,13 @@ class Database:
 
     def record_usage_event(self, event: dict[str, Any]) -> None:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._prune_usage_events(connection, _MAX_USAGE_EVENT_ROWS)
+            count = int(connection.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0])
+            if count >= _MAX_USAGE_EVENT_ROWS:
+                connection.execute(
+                    "DELETE FROM usage_events WHERE id = (SELECT id FROM usage_events ORDER BY created_at ASC, id ASC LIMIT 1)"
+                )
             connection.execute(
                 """
                 INSERT INTO usage_events (
