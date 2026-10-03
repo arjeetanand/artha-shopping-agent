@@ -6,6 +6,7 @@ import socket
 import sys
 import threading
 import time
+from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,6 +25,7 @@ if __package__ in {None, ""}:
     from backend.orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
     from backend.payments import PaymentError, create_payment_order, payment_status, verify_payment
     from backend.jobs import allow_search_request, get_search_job, submit_search
+    from backend.voice_limits import reserve_global_voice_call
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from .clients import AnakinClient, BriefModel
@@ -35,14 +37,90 @@ else:
     from .orders import OrderError, advance_order, cancel_order, complete_refund, create_order, get_order, list_orders, request_return
     from .payments import PaymentError, create_payment_order, payment_status, verify_payment
     from .jobs import allow_search_request, get_search_job, submit_search
+    from .voice_limits import reserve_global_voice_call
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SHOPPINGHELP_PORT", "8000"))
 _MAX_BODY_BYTES = 8_000_000
 _BODY_READ_TIMEOUT_SECONDS = 15
+_HEADER_READ_TIMEOUT_SECONDS = 10
+_SOCKET_IDLE_TIMEOUT_SECONDS = 5
+_MAX_ACTIVE_CONNECTIONS = 64
 # ponytail: per-process search-handler cap; use shared admission if the API scales to multiple workers.
 _SEARCH_REQUEST_CAPACITY = threading.BoundedSemaphore(8)
+_VOICE_REQUESTS_PER_MINUTE = 5
+_MAX_TRACKED_VOICE_CLIENTS = 4096
+_VOICE_CAPACITY = threading.BoundedSemaphore(2)
+_voice_admission_lock = threading.Lock()
+_voice_requests_by_client: dict[str, deque[float]] = {}
+_last_voice_client_cleanup = 0.0
+
+
+def _admit_paid_voice_request(client_ip: str) -> int | None:
+    """Reserve per-IP, global-hourly, and in-flight capacity for paid voice."""
+    global _last_voice_client_cleanup
+    now = time.monotonic()
+    with _voice_admission_lock:
+        if now - _last_voice_client_cleanup >= 60:
+            for ip, requests in list(_voice_requests_by_client.items()):
+                while requests and now - requests[0] >= 60:
+                    requests.popleft()
+                if not requests:
+                    _voice_requests_by_client.pop(ip, None)
+            _last_voice_client_cleanup = now
+
+        requests = _voice_requests_by_client.get(client_ip)
+        if requests is not None:
+            while requests and now - requests[0] >= 60:
+                requests.popleft()
+            if not requests:
+                _voice_requests_by_client.pop(client_ip, None)
+                requests = None
+        if requests is None and len(_voice_requests_by_client) >= _MAX_TRACKED_VOICE_CLIENTS:
+            return 429
+        if requests is not None and len(requests) >= _VOICE_REQUESTS_PER_MINUTE:
+            return 429
+        if not _VOICE_CAPACITY.acquire(blocking=False):
+            return 503
+
+        try:
+            if not reserve_global_voice_call():
+                _VOICE_CAPACITY.release()
+                return 429
+        except Exception:
+            _VOICE_CAPACITY.release()
+            raise
+
+        if requests is None:
+            requests = deque()
+            _voice_requests_by_client[client_ip] = requests
+        requests.append(now)
+        return None
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Keep accepted handler threads bounded even when clients stall."""
+
+    def __init__(self, server_address: Any, RequestHandlerClass: type[BaseHTTPRequestHandler], bind_and_activate: bool = True):
+        super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+        self._connection_slots = threading.BoundedSemaphore(_MAX_ACTIVE_CONNECTIONS)
+
+    def process_request(self, request: socket.socket, client_address: Any) -> None:
+        if not self._connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_slots.release()
+            raise
+
+    def process_request_thread(self, request: socket.socket, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_slots.release()
 
 
 class ApiError(Exception):
@@ -53,6 +131,51 @@ class ApiError(Exception):
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "artha-api/1.0"
+
+    def setup(self) -> None:
+        self.timeout = _SOCKET_IDLE_TIMEOUT_SECONDS
+        super().setup()
+
+    def _expire_header_read(self) -> None:
+        self.close_connection = True
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def handle_one_request(self) -> None:
+        """Apply a total deadline across the request line and all headers."""
+        header_timer = threading.Timer(_HEADER_READ_TIMEOUT_SECONDS, self._expire_header_read)
+        header_timer.daemon = True
+        header_timer.start()
+        try:
+            self.raw_requestline = self.rfile.readline(65537)
+            if len(self.raw_requestline) > 65536:
+                header_timer.cancel()
+                self.requestline = ""
+                self.request_version = ""
+                self.command = ""
+                self.send_error(HTTPStatus.REQUEST_URI_TOO_LONG)
+                return
+            if not self.raw_requestline:
+                header_timer.cancel()
+                self.close_connection = True
+                return
+            if not self.parse_request():
+                header_timer.cancel()
+                return
+            header_timer.cancel()
+            method_name = "do_" + self.command
+            if not hasattr(self, method_name):
+                self.send_error(HTTPStatus.NOT_IMPLEMENTED, f"Unsupported method ({self.command!r})")
+                return
+            getattr(self, method_name)()
+            self.wfile.flush()
+        except (TimeoutError, OSError):
+            self.close_connection = True
+            return
+        finally:
+            header_timer.cancel()
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[artha] {self.address_string()} - {format % args}")
@@ -292,6 +415,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
         search_request_admitted = False
+        voice_request_admitted = False
         try:
             if path in {"/api/agent/search/jobs", "/api/agent/search", "/api/agent/refine"}:
                 if not allow_search_request(self.client_address[0]):
@@ -365,6 +489,12 @@ class Handler(BaseHTTPRequestHandler):
                 if voice.provider == "browser":
                     self._send(200, {"provider": "browser", "text": str(payload.get("text") or "")[:1800]})
                     return
+                if voice.provider == "elevenlabs":
+                    admission_error = _admit_paid_voice_request(self.client_address[0])
+                    if admission_error:
+                        message = "Voice service is busy; try again shortly." if admission_error == 503 else "Voice request limit reached; try again later."
+                        raise ApiError(message, admission_error)
+                    voice_request_admitted = True
                 audio, content_type = voice.speak(str(payload.get("text") or ""))
                 self._send_bytes(200, audio, content_type)
                 return
@@ -388,11 +518,13 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             if search_request_admitted:
                 _SEARCH_REQUEST_CAPACITY.release()
+            if voice_request_admitted:
+                _VOICE_CAPACITY.release()
 
 
 def main() -> None:
     try:
-        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        server = BoundedThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as err:
         if err.errno == 48:
             print(f"[artha] ❌ Error: Port {PORT} is already in use by another process.", file=sys.stderr)

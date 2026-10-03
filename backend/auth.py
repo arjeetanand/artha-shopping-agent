@@ -220,15 +220,16 @@ def logout(cookie_header: str | None) -> None:
 
 def session_cookie(session_token: str) -> str:
     parts = [f"{SESSION_COOKIE}={session_token}", "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=604800"]
-    force_secure = setting("SHOPPINGHELP_COOKIE_SECURE", "")
-    if is_production() if not force_secure else force_secure.lower() in {"1", "true", "yes"}:
+    secure_override = setting("SHOPPINGHELP_COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
+    if is_production() or secure_override:
         parts.append("Secure")
     return "; ".join(parts)
 
 
 def clear_session_cookie() -> str:
     parts = [f"{SESSION_COOKIE}=", "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"]
-    if is_production():
+    secure_override = setting("SHOPPINGHELP_COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
+    if is_production() or secure_override:
         parts.append("Secure")
     return "; ".join(parts)
 

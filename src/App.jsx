@@ -26,11 +26,9 @@ import {
   getVoiceStatus,
   requestReturn,
   refineAgentSearch,
-  createPaymentOrder,
   runAgentSearchAsync,
   signOut,
   speakText,
-  verifyPayment,
   warmVoice,
 } from './lib/api';
 
@@ -47,20 +45,34 @@ const NAV_ITEMS = [
   { id: 'usage', label: 'Usage', icon: 'chart' },
 ];
 const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans', orders: 'Orders & tracking', usage: 'Usage & runtime' };
-let razorpayLoader;
 
-function loadRazorpayCheckout() {
-  if (window.Razorpay) return Promise.resolve(window.Razorpay);
-  if (razorpayLoader) return razorpayLoader;
-  razorpayLoader = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.onload = () => (window.Razorpay ? resolve(window.Razorpay) : reject(new Error('Razorpay Checkout did not load.')));
-    script.onerror = () => reject(new Error('Razorpay Checkout could not load. Check the network and try again.'));
-    document.head.appendChild(script);
-  });
-  return razorpayLoader;
+function missionFromIntent(intent) {
+  const mission = intent?.mission || {};
+  return {
+    occasion: mission.occasion || intent?.occasion || '',
+    budget: mission.budget || intent?.budget || '',
+    arrive_by_date: mission.arrive_by_date || '',
+    pincode: mission.pincode || intent?.pincode || '',
+    size: mission.size || intent?.size || '',
+    color: mission.color || intent?.color || '',
+    style: mission.style || intent?.style || '',
+  };
+}
+
+function retailerUrl(value) {
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function observedTime(value) {
+  const date = new Date(value);
+  return value && !Number.isNaN(date.getTime())
+    ? date.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : 'Time not available';
 }
 
 function readSavedIds() {
@@ -435,6 +447,8 @@ function ReferenceChip({ reference, onRemove }) {
 function Composer({
   query,
   setQuery,
+  mission,
+  onMissionChange,
   postUrl,
   setPostUrl,
   showPostUrl,
@@ -469,6 +483,7 @@ function Composer({
   );
 
   const canSearch = Boolean(query.trim() || postUrl.trim() || reference?.dataUrl);
+  const setMissionField = (field, value) => onMissionChange({ ...mission, [field]: value });
 
   return (
     <div className="composer-container">
@@ -483,6 +498,25 @@ function Composer({
           placeholder={hasResults ? 'Ask a follow-up (e.g., show me options under ₹11,000 or make the delivery window tighter)…' : 'Describe what you want (e.g., Office-ready neutral look under ₹15,000, breathable linen shirts, leather loafers)…'}
           rows={2}
         />
+        <fieldset className="mission-brief">
+            <legend>{hasResults ? 'Adjust your mission, then refine' : 'Mission brief'}</legend>
+            <label>
+              <span>Occasion</span>
+              <input value={mission.occasion} onChange={(event) => setMissionField('occasion', event.target.value)} placeholder="Wedding, work, dinner…" />
+            </label>
+            <label>
+              <span>Budget</span>
+              <input value={mission.budget} onChange={(event) => setMissionField('budget', event.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="₹4,000" />
+            </label>
+            <label>
+              <span>Arrive by</span>
+              <input value={mission.arrive_by_date} onChange={(event) => setMissionField('arrive_by_date', event.target.value)} type="date" min={new Date().toISOString().slice(0, 10)} />
+            </label>
+            <label>
+              <span>Pincode</span>
+              <input value={mission.pincode} onChange={(event) => setMissionField('pincode', event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="560001" />
+            </label>
+          </fieldset>
         <div className="composer__footer">
           <div className="composer__inputs">
             <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange} />
@@ -564,46 +598,49 @@ function Composer({
   );
 }
 
-function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCount = 0, searchError = '', onOpenTalk }) {
+function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCount = 0, resultStatus = '', searchError = '', onOpenTalk }) {
   const stages = [
-    { label: 'Understand', copy: 'Reading your goals and constraints', indexes: [0] },
-    { label: 'Find', copy: 'Checking retailers and delivery signals', indexes: [1, 2] },
-    { label: 'Verify', copy: 'Comparing price, reviews, and source evidence', indexes: [3, 4, 5] },
-    { label: 'Recommend', copy: 'Ranking the best trade-offs for you', indexes: [6] },
+    { label: 'Lock mission', copy: 'Reading the deadline and hard constraints', indexes: [0, 1] },
+    { label: 'Inspect sources', copy: 'Finding retailer and delivery evidence', indexes: [2, 3] },
+    { label: 'Check claims', copy: 'Checking price, stock, and variants', indexes: [4, 5] },
+    { label: 'Make decision', copy: 'Applying the evidence gate', indexes: [6] },
   ];
   const workflowLength = Math.max(workflow?.length || 7, 1);
-  const backendWorkingIndex = Array.isArray(workflow)
+  const activeAgents = Array.isArray(workflow) ? workflow.filter((step) => step?.status === 'working') : [];
+  const completedAgents = Array.isArray(workflow) ? workflow.filter((step) => step?.status === 'complete').length : 0;
+  const activeStageIndexes = isSearching
+    ? stages.flatMap((stage, index) => stage.indexes.some((stepIndex) => workflow?.[stepIndex]?.status === 'working') ? [index] : [])
+    : [];
+  const currentWorkflowIndex = activeAgents.length
     ? workflow.findIndex((step) => step?.status === 'working')
-    : -1;
-  const workflowHasPending = Array.isArray(workflow)
-    ? workflow.some((step) => step?.status !== 'complete')
-    : true;
-  const currentWorkflowIndex = backendWorkingIndex >= 0
-    ? backendWorkingIndex
-    : workflowHasPending
-      ? Math.min(searchStage, workflowLength - 1)
-      : -1;
+    : Math.min(searchStage, workflowLength - 1);
   const activeIndex = isSearching
-    ? stages.findIndex((stage) => stage.indexes.includes(currentWorkflowIndex))
+    ? activeStageIndexes[0] ?? stages.findIndex((stage) => stage.indexes.includes(currentWorkflowIndex))
     : -1;
-  const stageProgress = hasResults
-    ? 100
-    : isSearching
-      ? Math.max(8, ((Math.max(activeIndex, 0) + 1) / stages.length) * 100)
-      : 0;
+  const progressIndex = activeStageIndexes.length ? Math.max(...activeStageIndexes) : activeIndex;
+  const completedStages = stages.filter((stage) => stage.indexes.every((index) => workflow?.[index]?.status === 'complete')).length;
+  const finishedEmpty = resultStatus === 'complete' && !hasResults;
+  const hasWaitingCheck = hasResults && workflow?.some((step) => step?.status === 'waiting');
+  const stageProgress = isSearching
+    ? Math.max(8, ((Math.max(progressIndex, 0) + 1) / stages.length) * 100)
+    : hasResults || finishedEmpty ? (completedStages / stages.length) * 100 : 0;
   const activeStageLabel = activeIndex >= 0 ? stages[activeIndex]?.label : 'Research';
   const statusText = searchError
     ? searchError
     : isSearching
-      ? `${activeStageLabel} · Checking retailer pages for price, stock, delivery, and reviews…`
+      ? activeAgents.length > 1
+        ? `${activeAgents.slice(0, 2).map((step) => step.agent || 'Shopping agent').join(' + ')}${activeAgents.length > 2 ? ` + ${activeAgents.length - 2} more` : ''} working in parallel`
+        : activeAgents[0]
+          ? `${activeAgents[0].agent || 'Shopping agent'} · ${activeAgents[0].detail || 'Working now'}`
+          : `${activeStageLabel} · Checking retailer pages for price, stock, delivery, and reviews…`
       : hasResults
-        ? `${resultCount} source${resultCount === 1 ? '' : 's'} ranked · retailer confirmation still matters`
-        : 'Ready when you are';
+        ? `Decision ready · ${resultCount} product ${resultCount === 1 ? 'option' : 'options'}${hasWaitingCheck ? ' · some checks still need retailer confirmation' : ''}`
+        : finishedEmpty ? 'Research finished · no purchasable product pages found' : resultStatus === 'needs_clarification' ? 'One more detail needed before retailer research' : 'Ready when you are';
   return (
     <section
       className="agent-strip js-reveal"
       aria-label="Research status"
-      style={{ '--research-progress': `${stageProgress}%` }}
+      style={{ '--research-progress': stageProgress / 100 }}
     >
       <div className="agent-strip__heading">
         <div className="agent-strip__title">
@@ -621,25 +658,54 @@ function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCoun
       </div>
       <div className="agent-strip__steps">
         {stages.map((stage, index) => {
-          const working = isSearching && activeIndex === index;
-          const complete = hasResults || (isSearching && activeIndex > index);
+          const working = isSearching && (activeStageIndexes.length ? activeStageIndexes.includes(index) : activeIndex === index);
+          const complete = stage.indexes.every((stepIndex) => workflow?.[stepIndex]?.status === 'complete');
+          const unverified = !isSearching && (hasResults || finishedEmpty) && !complete;
           return (
             <div
-              className={`agent-step ${working ? 'is-working' : complete ? 'is-complete' : ''}`}
+              className={`agent-step ${working ? 'is-working' : complete ? 'is-complete' : unverified ? 'is-unverified' : ''}`}
               style={{ '--stage-index': index }}
               key={stage.label}
             >
               <span className="agent-step__node">
-                {working ? <span className="pulse-dot" /> : complete ? <Icon name="check" size={13} /> : index + 1}
+                {working ? <span className="pulse-dot" /> : complete ? <Icon name="check" size={13} /> : unverified ? <Icon name="info" size={13} /> : index + 1}
               </span>
               <div className="agent-step__content">
                 <strong>{stage.label}</strong>
-                <small>{working ? 'Working now…' : stage.copy}</small>
+                <small>{working ? 'Working now…' : unverified ? 'Needs retailer confirmation' : stage.copy}</small>
               </div>
             </div>
           );
         })}
       </div>
+      {workflow?.length ? (
+        <details className="agent-activity">
+          <summary>
+            <span>Agent activity</span>
+            <small>{completedAgents} of {workflow.length} specialists complete{activeAgents.length ? ` · ${activeAgents.length} working` : ''}</small>
+            <Icon name="chevron" size={16} />
+          </summary>
+          <ol className="agent-activity__list">
+            {workflow.map((step, index) => {
+              const agent = step?.agent || `Specialist ${index + 1}`;
+              const status = step?.status || 'queued';
+              const statusLabel = ({ complete: 'Complete', working: 'Working', retrying: 'Retrying', waiting: 'Waiting', blocked: 'Blocked', failed: 'Failed', idle: 'Not started', queued: 'Queued' })[status] || status;
+              return (
+                <li className={`agent-activity__row is-${status}`} style={{ '--stage-index': index }} key={`${agent}-${index}`}>
+                  <span className="agent-activity__marker" aria-hidden="true">
+                    {status === 'complete' ? <Icon name="check" size={13} /> : status === 'waiting' || status === 'failed' ? <Icon name="info" size={13} /> : null}
+                  </span>
+                  <div className="agent-activity__copy">
+                    <strong>{agent}</strong>
+                    <small>{step?.detail || statusLabel}</small>
+                  </div>
+                  <span className="agent-activity__status">{statusLabel}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </details>
+      ) : null}
     </section>
   );
 }
@@ -671,10 +737,15 @@ function BudgetOpportunity({ opportunity, product, onInspect }) {
 
 function BriefSummary({ intent, show = true }) {
   if (!show) return null;
+  const mission = intent?.mission || {};
   const fields = [
-    intent?.occasion ? `Occasion: ${intent.occasion}` : null,
+    (mission.occasion || intent?.occasion) ? `Occasion: ${mission.occasion || intent.occasion}` : null,
     ...(intent?.must_have || []).slice(0, 2),
-    intent?.budget ? `Budget ₹${Number(intent.budget).toLocaleString('en-IN')}` : null,
+    (mission.budget || intent?.budget) ? `Budget ${formatPrice(mission.budget || intent.budget)}` : null,
+    (mission.arrive_by_date || intent?.arrive_by) ? `Arrival: ${mission.arrive_by_date || intent.arrive_by}` : null,
+    (mission.pincode || intent?.pincode) ? `Pincode ${mission.pincode || intent.pincode}` : null,
+    (mission.color || intent?.color) ? `Colour: ${mission.color || intent.color}` : null,
+    (mission.size || intent?.size) ? `Size: ${mission.size || intent.size}` : null,
     intent?.quantity > 1 ? `Quantity ${intent.quantity}` : null,
     intent?.brand ? `Preferred brand: ${intent.brand}` : null,
     intent?.location ? `Delivering to ${intent.location}` : null,
@@ -716,7 +787,7 @@ function clarificationSuggestions(question) {
   return [];
 }
 
-function ClarificationNote({ intent, onAnswer }) {
+function ClarificationNote({ intent, onAnswer, onEdit }) {
   const questions = Array.isArray(intent?.clarifications) ? intent.clarifications : [];
   if (!questions.length) return null;
   return (
@@ -740,6 +811,7 @@ function ClarificationNote({ intent, onAnswer }) {
         ))}
       </div>
       <small>Artha has paused retailer research until these constraints are clear. Reply in the brief above, or use a quick answer.</small>
+      <button type="button" className="quiet-action clarification-note__edit" onClick={onEdit}>Edit shopping brief <Icon name="arrow" size={14} /></button>
     </aside>
   );
 }
@@ -801,10 +873,86 @@ function HeroVisual() {
   );
 }
 
+function PriceDesk({ product, compact = false }) {
+  const offers = (Array.isArray(product.current_offers) ? product.current_offers : [])
+    .filter((offer) => Number.isFinite(Number(offer.price)) && Number(offer.price) > 0)
+    .sort((a, b) => Number(a.price) - Number(b.price));
+  const history = product.price_history || {};
+  const observations = (Array.isArray(history.observations) ? history.observations : [])
+    .filter((item) => Number.isFinite(Number(item.price)) && Number(item.price) > 0)
+    .slice(-5);
+  const hasHistory = observations.length > 0 && history.status !== 'unknown';
+  const isDemo = history.status === 'fixture';
+
+  return (
+    <section className={`price-desk ${compact ? 'price-desk--compact' : ''}`} aria-label={`Price comparison and history for ${sanitizeTitle(product.name)}`}>
+      <div className="price-desk__heading">
+        <div>
+          <span className="section-kicker">The price desk</span>
+          <h3>{compact ? 'Offers & observed history' : offers.length > 1 ? 'A better price, with the proof.' : offers.length ? 'One checked price, with context.' : 'Price evidence is still open.'}</h3>
+          <p>{sanitizeTitle(product.name)}</p>
+        </div>
+        {offers.length ? (
+          <div className="price-desk__low">
+            <span>{offers.length === 1 ? 'Only directly checked offer' : `Lowest of ${offers.length} checked offers`}</span>
+            <strong>{formatPrice(offers[0].price)}</strong>
+          </div>
+        ) : null}
+      </div>
+      <div className="price-desk__grid">
+        <div className="price-desk__column">
+          <div className="price-desk__label"><span>Matching retailer offers</span><span>{offers.length ? `${offers.length} checked` : 'Pending'}</span></div>
+          {offers.length ? (
+            <ol className="price-desk__offers">
+              {offers.map((offer, index) => (
+                <li key={`${offer.source_url || offer.seller}-${index}`} className={index === 0 ? 'is-lowest' : ''}>
+                  <div>
+                    <strong>{offer.seller || 'Retailer'}</strong>
+                    <small>{offer.source_status === 'direct_page_price_changed' ? 'Search price changed · ' : index === 0 && offers.length > 1 ? 'Lowest observed · ' : ''}{observedTime(offer.observed_at)}</small>
+                  </div>
+                  <div className="price-desk__offer-end">
+                    <b>{formatPrice(offer.price)}</b>
+                    {retailerUrl(offer.source_url) ? <a href={retailerUrl(offer.source_url)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${offer.seller || 'retailer'} offer in a new tab`}><Icon name="external" size={15} /></a> : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="price-desk__empty">No directly verified matching store offers yet. Confirm the current price at the retailer.</p>
+          )}
+          <small className="price-desk__caveat">{product.same_product_match === 'gtin' ? 'Matched by product GTIN and variant.' : product.same_product_match === 'brand_and_exact_title' ? 'Matched by brand, exact title, colour, and size.' : 'Only this retailer page could be safely matched.'} Shipping, taxes, and available sizes may change the checkout total.</small>
+        </div>
+        <div className="price-desk__column">
+          <div className="price-desk__label"><span>Recorded price history</span><span>{isDemo ? 'Demo' : hasHistory ? `${history.observation_count || observations.length} recorded prices` : 'Unknown'}</span></div>
+          {hasHistory ? (
+            <>
+              <p className="price-desk__trend">{isDemo ? 'Sample data for demonstration' : history.status === 'first_observation' ? 'First price recorded; a trend needs more checks.' : history.trend_label || 'Observed prices across recorded checks.'}</p>
+              <ol className="price-desk__timeline">
+                {observations.map((item, index) => (
+                  <li key={`${item.observed_at || 'unknown'}-${item.source_url || item.seller}-${index}`}>
+                    <span className="price-desk__timeline-dot" aria-hidden="true" />
+                    <span>{item.seller || 'Retailer'}<small>{observedTime(item.observed_at)}</small></span>
+                    <b>{formatPrice(item.price)}</b>
+                  </li>
+                ))}
+              </ol>
+              {history.observed_low ? <small className="price-desk__caveat">Lowest recorded: {formatPrice(history.observed_low)}. History covers Artha's observations only.</small> : null}
+            </>
+          ) : (
+            <p className="price-desk__empty">No recorded price history yet. Artha will show a trend after later verified checks of this product.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved, motionIndex = 0 }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
   const cleanDesc = sanitizeSnippet(product.description);
+  const sizes = Array.isArray(product.sizes) ? product.sizes : [];
+  const colors = Array.isArray(product.colors) ? product.colors : [];
 
   return (
     <article
@@ -848,11 +996,20 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
               )}
             </span>
           </div>
+          {live && !product.lowest_current_offer ? <small className="product-card__price-signal is-unverified">Price not directly verified · confirm at retailer</small> : null}
           {product.quantity > 1 ? <small className="product-card__quantity-note">{product.quantity} units · {formatPrice(product.unit_total || product.total_price)} each</small> : null}
           <div className="product-card__delivery">
             <Icon name="truck" size={14} />
             <span>{product.delivery_label || 'Confirm at store'}</span>
           </div>
+          {sizes.length || colors.length ? (
+            <small className="product-card__variant">
+              {sizes.length ? `Sizes: ${sizes.slice(0, 4).join(', ')}` : ''}
+              {sizes.length && colors.length ? ' · ' : ''}
+              {colors.length ? `Colours: ${colors.slice(0, 3).join(', ')}` : ''}
+            </small>
+          ) : null}
+          {product.lowest_current_offer ? <small className="product-card__price-signal">{product.current_offers?.length > 1 ? 'Lowest checked matching offer' : 'Directly checked price'} {formatPrice(product.lowest_current_offer.price)} · {product.current_offers?.length || 1} {product.current_offers?.length === 1 ? 'store' : 'stores'}</small> : null}
           <small className={`constraint-note ${product.eligible === false ? 'is-invalid' : ''}`}>{(product.reason_tags || []).join(' · ')}</small>
         </div>
 
@@ -929,6 +1086,55 @@ function RecommendationBanner({ product, onInspect, onOpenTalk }) {
   );
 }
 
+function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenTalk }) {
+  if (!decision) return <RecommendationBanner product={products[0]} onInspect={onInspect} onOpenTalk={onOpenTalk} />;
+  const product = products.find((item) => item.id === decision.recommended_product_id);
+  const fallback = products.find((item) => item.id === decision.fallback_product_id);
+  const isNoFit = decision.status === 'no_safe_fit';
+  const isBuyNow = decision.status === 'buy_now';
+  const title = isNoFit ? 'No safe fit' : isBuyNow ? 'Buy now' : 'Verify before buying';
+  const action = isBuyNow ? 'Open recommended retailer' : 'Open retailer & verify';
+  const reasons = [...(decision.reasons || []), ...(decision.blocking_risks || [])].filter(Boolean);
+  const lowerOffer = product?.lowest_current_offer;
+  const cheaperElsewhere = lowerOffer && lowerOffer.price < Number(product.price)
+    && retailerUrl(lowerOffer.source_url) !== retailerUrl(product.url);
+
+  return (
+    <aside className={`decision-banner mission-decision mission-decision--${decision.status}`} aria-label="Artha decision">
+      <div className="decision-banner__copy">
+        <span className="decision-banner__eyebrow"><Icon name={isNoFit ? 'info' : isBuyNow ? 'checkCircle' : 'shield'} size={13} /> Artha decision</span>
+        <strong>{title}{product ? ` · ${sanitizeTitle(product.name)}` : ''}</strong>
+        <p>{isNoFit ? decision.mission_change || 'Try changing one hard constraint and search again.' : isBuyNow ? 'Every hard constraint is supported by the checked retailer evidence.' : 'One or more purchase facts still need confirmation on the retailer page.'}</p>
+        {decision.checked_at ? <small className="mission-decision__time">Decision updated {observedTime(decision.checked_at)}</small> : null}
+        <div className="decision-banner__reasons">
+          {reasons.map((reason) => <span key={reason}>{reason}</span>)}
+        </div>
+        {cheaperElsewhere ? (
+          <p className="mission-decision__fallback">
+            Lower checked item price: {formatPrice(lowerOffer.price)} at {lowerOffer.seller}. Confirm its size, stock, delivery, and checkout total before switching.{' '}
+            <a href={retailerUrl(lowerOffer.source_url)} target="_blank" rel="noopener noreferrer">Check lower offer <Icon name="external" size={12} /></a>
+          </p>
+        ) : null}
+        {fallback ? (
+          <p className="mission-decision__fallback">
+            Fallback: <button type="button" onClick={() => onOpenProduct(fallback)}>{sanitizeTitle(fallback.name)} <Icon name="external" size={12} /></button>
+          </p>
+        ) : null}
+      </div>
+      <div className="decision-banner__actions">
+        {product ? <strong>{formatPrice(productTotal(product))}</strong> : null}
+        {product ? (
+          <button type="button" className="primary-button" onClick={() => onOpenProduct(product)} disabled={!product.url}>
+            <Icon name="external" size={14} /> {action}
+          </button>
+        ) : null}
+        {product ? <button type="button" className="text-button" onClick={() => onInspect(product)}>What Artha checked <Icon name="shield" size={13} /></button> : null}
+        <button type="button" className="text-button" onClick={onOpenTalk}>{isNoFit ? 'Adjust this mission' : 'Talk through the decision'} <Icon name="arrow" size={13} /></button>
+      </div>
+    </aside>
+  );
+}
+
 function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
@@ -980,7 +1186,7 @@ function ProductRow({ product, selected, focused, onToggle, onFocus, onOpenProdu
       </td>
       <td className="col-price">
         <strong className="price-val">{formatPrice(productTotal(product))}</strong>
-        <small className="price-sub">{product.quantity > 1 ? `${product.quantity} units · ${product.rating ? `★ ${product.rating}` : live ? 'Live price' : 'Estimated'}` : product.rating ? `★ ${product.rating}` : live ? 'Live price' : 'Estimated'}</small>
+        <small className="price-sub">{product.quantity > 1 ? `${product.quantity} units · ` : ''}{product.lowest_current_offer ? 'Directly checked' : live ? 'Source-listed · verify' : 'Estimated'}</small>
       </td>
       <td className="col-delivery">
         <div className="delivery-val">
@@ -1088,6 +1294,7 @@ function SummaryPanel({
   isSavingPlan,
   onStartCheckout,
   onRemoveItem,
+  showCheckout,
 }) {
   const total = selectedProducts.reduce((sum, product) => sum + productTotal(product), 0);
   const live = sourceMode === 'live';
@@ -1150,7 +1357,7 @@ function SummaryPanel({
             <small>{intent?.location ? `Delivering to ${intent.location}` : 'Add a delivery city for better results'}</small>
           </div>
         </div>
-        <small className="summary-calc__note">Subtotal excludes shipping, taxes, and retailer fees.</small>
+        <small className="summary-calc__note">Known item prices and any confirmed shipping. Confirm the final total at the retailer.</small>
       </div>
 
       <VoiceControl voice={voice} isSpeaking={isSpeaking} onSpeak={onSpeak} disabled={!selectedProducts.length} />
@@ -1165,9 +1372,9 @@ function SummaryPanel({
         <Icon name="arrow" size={17} />
       </button>
 
-      {selectedProducts.length && paymentProvider !== 'disabled' ? (
+      {showCheckout && selectedProducts.length && paymentProvider === 'sandbox' ? (
         <button type="button" className="secondary-button summary-checkout-button" onClick={onStartCheckout}>
-          <span>{paymentProvider === 'razorpay' ? 'Review payment' : 'Review sandbox order'}</span>
+          <span>Review sandbox order</span>
           <Icon name="arrow" size={15} />
         </button>
       ) : null}
@@ -1175,15 +1382,15 @@ function SummaryPanel({
       <div className="checkout-trust">
         <p className="checkout-note">
           <Icon name="shield" size={14} />
-          <span>{paymentProvider === 'razorpay' ? 'Payment is handled by Razorpay hosted checkout. Artha never sees payment credentials.' : 'Checkout occurs directly on official retailer sites. Artha never requests payment info.'}</span>
+          <span>Checkout occurs on linked retailer sites. Artha never requests payment info.</span>
         </p>
       </div>
 
       <div className="summary-legend">
         <LegendRow
           icon="shield"
-          title={awaitingSearch ? 'Awaiting live search' : live ? 'Live retailer verified' : 'Live source unavailable'}
-          detail={awaitingSearch ? 'Run a brief to query active web retailers.' : live ? 'Click retailer links to confirm live availability.' : 'Run the search again after the provider recovers.'}
+          title={awaitingSearch ? 'Awaiting live search' : live ? 'Retailer sources found' : 'Live source unavailable'}
+          detail={awaitingSearch ? 'Run a brief to query active web retailers.' : live ? 'Open retailer links to confirm current price, stock, and delivery.' : 'Run the search again after the provider recovers.'}
         />
         <LegendRow
           icon="spark"
@@ -1214,6 +1421,8 @@ function DiscoverView({
   paymentProvider,
   query,
   setQuery,
+  mission,
+  onMissionChange,
   postUrl,
   setPostUrl,
   showPostUrl,
@@ -1256,6 +1465,8 @@ function DiscoverView({
   const discoverRef = useRef(null);
   const lastScrolledSearchRef = useRef(null);
   const selectedProducts = result.products.filter((product) => selectedIds.includes(product.id));
+  const priceProduct = result.products.find((product) => product.id === result.intent?.decision?.recommended_product_id) || result.products[0];
+  const zeroResult = result.status === 'complete' && !result.products.length;
   const allSelected = result.products.length > 0 && selectedIds.length === result.products.length;
 
   useEffect(() => {
@@ -1280,14 +1491,14 @@ function DiscoverView({
   }, [result.products.length]);
 
   useEffect(() => {
-    if (isSearching || !result.search_id || !result.products.length || lastScrolledSearchRef.current === result.search_id) return undefined;
+    if (isSearching || !result.search_id || (!result.products.length && result.status !== 'needs_clarification') || lastScrolledSearchRef.current === result.search_id) return undefined;
     lastScrolledSearchRef.current = result.search_id;
     const frame = window.requestAnimationFrame(() => {
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       resultsRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [isSearching, result.products.length, result.search_id]);
+  }, [isSearching, result.products.length, result.search_id, result.status]);
 
   return (
     <div ref={discoverRef} className="discover-layout">
@@ -1318,6 +1529,8 @@ function DiscoverView({
         <Composer
           query={query}
           setQuery={setQuery}
+          mission={mission}
+          onMissionChange={onMissionChange}
           postUrl={postUrl}
           setPostUrl={setPostUrl}
           showPostUrl={showPostUrl}
@@ -1329,7 +1542,7 @@ function DiscoverView({
           onRemoveReference={onRemoveReference}
           onSearch={onSearch}
           isSearching={isSearching}
-          hasResults={result.products.length > 0 || result.status === 'needs_clarification'}
+          hasResults={result.products.length > 0}
           searchError={searchError}
           onToast={onToast}
           onPickPrompt={onPickPrompt}
@@ -1342,6 +1555,7 @@ function DiscoverView({
           searchStage={searchStage}
           hasResults={result.products.length > 0}
           resultCount={result.products.length}
+          resultStatus={result.status}
           searchError={searchError}
           onOpenTalk={onOpenTalk}
         />
@@ -1354,89 +1568,72 @@ function DiscoverView({
         />
 
         <section ref={resultsRef} className="results-section js-reveal" aria-labelledby="results-heading">
-          <ClarificationNote intent={result.intent} onAnswer={onQuickAnswer} />
+          <ClarificationNote intent={result.status === 'needs_clarification' ? result.intent : null} onAnswer={onQuickAnswer} onEdit={() => document.getElementById('shopping-brief')?.focus()} />
           <div className="results-toolbar">
             <div className="results-heading">
-            <h2 id="results-heading">{result.products.length ? 'Your shortlist' : 'Build your live shortlist'}</h2>
+              <h2 id="results-heading">{result.products.length ? 'Your mission decision' : result.status === 'needs_clarification' ? 'Complete the brief to search' : zeroResult ? 'No product match yet' : 'Build your live shortlist'}</h2>
               <BriefSummary intent={result.intent} show={Boolean(query.trim() || result.products.length)} />
-            </div>
-
-            <div className="results-controls">
-              <span className="results-count-pill">{result.products.length ? `${result.products.length} options` : 'No sources yet'}</span>
-              <button
-                type="button"
-                className="select-all-btn"
-                onClick={allSelected ? onClearSelection : onSelectAll}
-              >
-                {allSelected ? 'Deselect all' : 'Select all'}
-              </button>
-              <div className="view-mode-toggle" role="group" aria-label="View layout">
-                <button
-                  type="button"
-                  className={viewMode === 'cards' ? 'is-active' : ''}
-                  onClick={() => setViewMode('cards')}
-                  aria-label="Grid card view"
-                  title="Card view"
-                >
-                  <Icon name="grid" size={16} />
-                </button>
-                <button
-                  type="button"
-                  className={viewMode === 'table' ? 'is-active' : ''}
-                  onClick={() => setViewMode('table')}
-                  aria-label="Detailed comparison table"
-                  title="Table view"
-                >
-                  <Icon name="list" size={16} />
-                </button>
-              </div>
             </div>
           </div>
 
-          <RecommendationBanner
-            product={result.products[0]}
+          <MissionDecision
+            decision={result.intent?.decision}
+            products={result.products}
             onInspect={onInspect}
+            onOpenProduct={onOpenProduct}
             onOpenTalk={onOpenTalk}
           />
+
+          {priceProduct ? <PriceDesk product={priceProduct} /> : null}
 
           {!result.products.length ? (
             <div className="empty-state results-empty-state">
               <span className="empty-state__icon">
                 <Icon name="search" size={24} />
               </span>
-              <h2>{result.status === 'needs_clarification' ? 'Answer the questions above to start.' : 'Live sources will appear here.'}</h2>
-              <p>{result.status === 'needs_clarification' ? 'Once the constraints are clear, Artha will search and verify the relevant retailer sources.' : 'Describe what you want, add a reference image, or paste a public product or post URL to start a verified search.'}</p>
-            </div>
-          ) : viewMode === 'cards' ? (
-            <div className="products-grid">
-              {result.products.map((product, index) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  motionIndex={index}
-                  selected={selectedIds.includes(product.id)}
-                  focused={focusedId === product.id}
-                  onToggle={onToggle}
-                  onFocus={onFocus}
-                  onOpenProduct={onOpenProduct}
-                  onInspect={onInspect}
-                  onSave={onSave}
-                  saved={savedIds.includes(product.id)}
-                />
-              ))}
+              <h2>{result.status === 'needs_clarification' ? 'Answer the questions above to start.' : zeroResult ? 'No purchasable product page found.' : 'Live sources will appear here.'}</h2>
+              <p>{result.status === 'needs_clarification' ? 'Once the constraints are clear, Artha will search and verify the relevant retailer sources.' : zeroResult ? 'Artha excluded articles and category pages. Try a more specific product name, another retailer, or a wider budget and search again.' : 'Describe what you want, add a reference image, or paste a public product or post URL to start a verified search.'}</p>
+              {zeroResult ? <button type="button" className="secondary-button" onClick={() => document.getElementById('shopping-brief')?.focus()}>Edit brief and retry <Icon name="arrow" size={15} /></button> : null}
             </div>
           ) : (
-            <ResultsTable
-              products={result.products}
-              selectedIds={selectedIds}
-              focusedId={focusedId}
-              onToggle={onToggle}
-              onFocus={onFocus}
-              onOpenProduct={onOpenProduct}
-              onInspect={onInspect}
-              onSave={onSave}
-              savedIds={savedIds}
-            />
+            <section className="source-explorer" aria-label="Retailer product shortlist">
+              <div className="source-explorer__heading">
+                <div><span className="section-kicker">The shortlist</span><h3>{result.products.length} product {result.products.length === 1 ? 'option' : 'options'} to compare</h3></div>
+                <span>Source links and trade-offs on every card</span>
+              </div>
+              <div className="source-explorer__content">
+                <div className="results-controls">
+                  <button type="button" className="select-all-btn" onClick={allSelected ? onClearSelection : onSelectAll}>
+                    {allSelected ? 'Deselect all' : 'Select all'}
+                  </button>
+                  <div className="view-mode-toggle" role="group" aria-label="View layout">
+                    <button type="button" className={viewMode === 'cards' ? 'is-active' : ''} onClick={() => setViewMode('cards')} aria-label="Grid card view" title="Card view"><Icon name="grid" size={16} /></button>
+                    <button type="button" className={viewMode === 'table' ? 'is-active' : ''} onClick={() => setViewMode('table')} aria-label="Detailed comparison table" title="Table view"><Icon name="list" size={16} /></button>
+                  </div>
+                </div>
+                {viewMode === 'cards' ? (
+                  <div className="products-grid">
+                    {result.products.map((product, index) => (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        motionIndex={index}
+                        selected={selectedIds.includes(product.id)}
+                        focused={focusedId === product.id}
+                        onToggle={onToggle}
+                        onFocus={onFocus}
+                        onOpenProduct={onOpenProduct}
+                        onInspect={onInspect}
+                        onSave={onSave}
+                        saved={savedIds.includes(product.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <ResultsTable products={result.products} selectedIds={selectedIds} focusedId={focusedId} onToggle={onToggle} onFocus={onFocus} onOpenProduct={onOpenProduct} onInspect={onInspect} onSave={onSave} savedIds={savedIds} />
+                )}
+              </div>
+            </section>
           )}
         </section>
       </section>
@@ -1455,6 +1652,7 @@ function DiscoverView({
         isSavingPlan={isSavingPlan}
         onStartCheckout={onStartCheckout}
         onRemoveItem={onRemoveSelectedItem}
+        showCheckout={!result.intent?.mission}
       />
 
       {/* Floating mobile action bar */}
@@ -1463,7 +1661,7 @@ function DiscoverView({
           <div className="mobile-plan-bar__info">
             <span className="mobile-plan-bar__count">{selectedProducts.length} items in plan</span>
             <strong className="mobile-plan-bar__total">
-              ₹{selectedProducts.reduce((sum, p) => sum + productTotal(p), 0).toLocaleString('en-IN')}
+              {formatPrice(selectedProducts.reduce((sum, p) => sum + productTotal(p), 0))}
             </strong>
           </div>
           <div className="mobile-plan-bar__actions">
@@ -1475,9 +1673,11 @@ function DiscoverView({
             >
               {isSavingPlan ? 'Saving…' : isSessionLoading ? 'Checking account…' : user ? 'Save Plan' : 'Sign in to Save'}
             </button>
-            <button type="button" className="secondary-button mobile-plan-bar__checkout" onClick={onStartCheckout}>
-              {paymentProvider === 'razorpay' ? 'Pay' : 'Order'}
-            </button>
+            {!result.intent?.mission && paymentProvider === 'sandbox' ? (
+              <button type="button" className="secondary-button mobile-plan-bar__checkout" onClick={onStartCheckout}>
+                Sandbox order
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -1520,12 +1720,11 @@ function AuthSheet({ onClose, onSignIn }) {
   );
 }
 
-function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClose, onConfirm }) {
+function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
   const [confirmed, setConfirmed] = useState(false);
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
   const total = products.reduce((sum, product) => sum + productTotal(product), 0);
-  const livePayment = paymentProvider === 'razorpay';
   useDialogFocusTrap(true, dialogRef, closeButtonRef, onClose);
 
   return (
@@ -1534,12 +1733,10 @@ function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClos
         <button ref={closeButtonRef} type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close checkout">
           <Icon name="close" size={19} />
         </button>
-        <span className="section-kicker">{livePayment ? 'Secure hosted checkout' : 'Local sandbox checkout'}</span>
-        <h2 id="checkout-title">{livePayment ? 'Ready to pay securely?' : 'Ready to place this order?'}</h2>
+        <span className="section-kicker">Local sandbox checkout</span>
+        <h2 id="checkout-title">Ready to place this order?</h2>
         <p>
-          {livePayment
-            ? `Razorpay will securely handle payment for ${products.length} selected ${products.length === 1 ? 'item' : 'items'}. Artha records the order only after the signed payment callback is verified.`
-            : `Artha will record a purchase order for ${products.length} selected ${products.length === 1 ? 'item' : 'items'} and start its tracking timeline. No card details are collected in this development checkout.`}
+          Artha will record a sandbox order for {products.length} selected {products.length === 1 ? 'item' : 'items'} and start its local tracking timeline. No payment is collected.
         </p>
         <div className="checkout-sheet__facts">
           <span>Total</span>
@@ -1554,10 +1751,10 @@ function CheckoutSheet({ products, intent, paymentProvider, isSubmitting, onClos
           <span>I reviewed the items, total, and delivery estimate.</span>
         </label>
         <button type="button" className="primary-button" disabled={!confirmed || isSubmitting} onClick={onConfirm}>
-          {isSubmitting ? (livePayment ? 'Opening secure checkout…' : 'Creating order…') : livePayment ? 'Continue to payment' : 'Confirm order'}
+          {isSubmitting ? 'Creating order…' : 'Confirm sandbox order'}
           <Icon name="arrow" size={16} />
         </button>
-        <small className="checkout-sheet__notice">{livePayment ? 'Razorpay handles card and UPI details. Artha never sees payment credentials.' : 'Development order only. Live payment requires a configured production gateway.'}</small>
+        <small className="checkout-sheet__notice">Development order only. Complete a real purchase on the retailer site.</small>
       </section>
     </div>
   );
@@ -1568,50 +1765,46 @@ function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
   const dialogRef = useRef(null);
   useDialogFocusTrap(Boolean(product), dialogRef, closeButtonRef, onClose);
   if (!product) return null;
-  const reviewScore = product.review_reliability === null || product.review_reliability === undefined || product.review_reliability === ''
-    ? null
-    : Number(product.review_reliability);
-  const sellerScore = product.seller_reliability === null || product.seller_reliability === undefined || product.seller_reliability === ''
-    ? null
-    : Number(product.seller_reliability);
   const reviewAnalysis = product.review_analysis || {};
   const priceHistory = product.price_history || {};
   const reviewSources = Array.isArray(product.review_sources) ? product.review_sources : [];
   const researchSources = Array.isArray(product.research_sources) ? product.research_sources : [];
   const evidence = Array.isArray(product.evidence) ? product.evidence : [];
-  const reviewLabel = reviewAnalysis.label || (Number.isFinite(reviewScore) ? `${Math.round(reviewScore * 100)}% reliability signal` : 'Not available');
-  const historyLabel = priceHistory.trend_label || 'Price history not returned by this source';
+  const sampleReviews = product.source_kind === 'sandbox_catalog';
+  const reviewLabel = sampleReviews ? 'Demo data' : reviewSources.length ? `${reviewSources.length} sources listed` : 'Not verified';
+  const sellerLabel = product.seller ? 'Name listed; verify at retailer' : 'Not independently verified';
+  const historyLabel = priceHistory.status === 'fixture' ? 'Demo history' : priceHistory.observed_low ? `From ${formatPrice(priceHistory.observed_low)}` : 'Not recorded yet';
+  const directlyChecked = product.research_status === 'complete' && ['matched', 'direct'].includes(product.price_verification);
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section ref={dialogRef} className="auth-sheet evidence-sheet" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
         <button ref={closeButtonRef} type="button" className="icon-button auth-sheet__close" onClick={onClose} aria-label="Close evidence">
           <Icon name="close" size={19} />
         </button>
-        <span className="section-kicker">Evidence ledger</span>
-        <h2 id="evidence-title">Why this made the edit.</h2>
+        <span className="section-kicker">{directlyChecked ? 'What Artha checked' : 'What still needs checking'}</span>
+        <h2 id="evidence-title">{directlyChecked ? 'Evidence behind this decision.' : 'Research with open questions.'}</h2>
         <p className="evidence-sheet__product">{sanitizeTitle(product.name)} · {product.seller || 'Retailer'}</p>
 
         <div className="evidence-sheet__facts">
-          <div><span>Total today</span><strong>{formatPrice(productTotal(product))}</strong></div>
+          <div><span>Source-listed total</span><strong>{formatPrice(productTotal(product))}</strong></div>
           <div><span>Delivery</span><strong>{product.delivery_label || 'Confirm at retailer'}</strong></div>
-          <div><span>Review signal</span><strong>{reviewLabel}</strong></div>
-          <div><span>Seller signal</span><strong>{Number.isFinite(sellerScore) ? `${Math.round(sellerScore * 100)}%` : 'Not verified'}</strong></div>
+          <div><span>Review evidence</span><strong>{reviewLabel}</strong></div>
+          <div><span>Seller evidence</span><strong>{sellerLabel}</strong></div>
           <div><span>Price history</span><strong>{historyLabel}</strong></div>
         </div>
 
         <div className="evidence-sheet__section">
           <div className="evidence-sheet__section-head">
-            <span className="section-kicker">Review cross-check</span>
-            {Number.isFinite(reviewScore) ? <strong>{Math.round(reviewScore * 100)}%</strong> : null}
+            <span className="section-kicker">Review evidence</span>
           </div>
-          <p>{product.review_summary || 'Review data needs retailer confirmation.'}</p>
-          {reviewAnalysis.detail ? <small>{reviewAnalysis.detail}</small> : null}
+          <p>{sampleReviews ? 'Sample review notes for demonstration only.' : product.review_summary || 'Review data needs retailer confirmation.'}</p>
+          <small>{sampleReviews ? 'Demo content; it does not represent live reviews.' : reviewAnalysis.detail || 'Source counts and ratings do not establish review authenticity.'}</small>
           {reviewSources.length ? (
             <ul className="evidence-sheet__list">
               {reviewSources.map((source, index) => (
                 <li key={`${source.name || 'source'}-${index}`}>
                   <span>{source.name || 'Review source'}</span>
-                  <small>{source.count ? `${source.count} reviews` : 'Sample size unknown'}{source.rating ? ` · ★ ${source.rating}` : ''} · {source.signal || 'Signal requires confirmation'}</small>
+                  <small>{source.count ? `${source.count} reviews` : 'Sample size unknown'}{source.rating ? ` · ★ ${source.rating}` : ''}{source.signal ? ` · reported note: ${source.signal}` : ''}</small>
                 </li>
               ))}
             </ul>
@@ -1620,17 +1813,7 @@ function ProductEvidenceSheet({ product, onClose, onOpenProduct }) {
           )}
         </div>
 
-        <div className="evidence-sheet__section">
-          <div className="evidence-sheet__section-head">
-            <span className="section-kicker">Price context</span>
-            {priceHistory.median_90d ? <strong>90 days</strong> : null}
-          </div>
-          <div className="evidence-sheet__price-row">
-            <span>Low</span><b>{priceHistory.low_90d ? formatPrice(priceHistory.low_90d) : '—'}</b>
-            <span>Median</span><b>{priceHistory.median_90d ? formatPrice(priceHistory.median_90d) : '—'}</b>
-            <span>High</span><b>{priceHistory.high_90d ? formatPrice(priceHistory.high_90d) : '—'}</b>
-          </div>
-        </div>
+        <PriceDesk product={product} compact />
 
         <div className="evidence-sheet__section">
           <div className="evidence-sheet__section-head">
@@ -2281,6 +2464,7 @@ export default function App() {
   const [pendingSearch] = useState(readPendingSearch);
   const [activeView, setActiveView] = useState(() => viewFromPath(window.location.pathname));
   const [query, setQuery] = useState(() => pendingSearch?.query || '');
+  const [mission, setMission] = useState(() => pendingSearch?.result ? missionFromIntent(pendingSearch.result.intent) : missionFromIntent({}));
   const [postUrl, setPostUrl] = useState(() => pendingSearch?.postUrl || '');
   const [location, setLocation] = useState(() => pendingSearch?.location || null);
   const [showPostUrl, setShowPostUrl] = useState(false);
@@ -2294,7 +2478,7 @@ export default function App() {
   const [savedIds, setSavedIds] = useState(readSavedIds);
   const [plans, setPlans] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' }, payment_provider: 'sandbox', payment_configured: true });
+  const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' }, payment_provider: 'disabled', payment_configured: false });
   const [voice, setVoice] = useState({ provider: 'browser', label: 'Local browser voice' });
   const [usage, setUsage] = useState(null);
   const [usageWindow, setUsageWindow] = useState(30);
@@ -2431,6 +2615,7 @@ export default function App() {
   const startNewSearch = useCallback(() => {
     setActiveView('discover');
     setQuery('');
+    setMission(missionFromIntent({}));
     setPostUrl('');
     setLocation(null);
     setShowPostUrl(false);
@@ -2443,11 +2628,17 @@ export default function App() {
 
   const handleSearchWithPayload = useCallback(
     async (text, url, ref, options = {}) => {
-      if ((!text?.trim() && !url?.trim() && !ref?.dataUrl) || isSearching) return;
+      if (isSearching) {
+        if (options.throwOnError) throw new Error('The current research is still running. Ask again when it finishes.');
+        return null;
+      }
+      if (!text?.trim() && !url?.trim() && !ref?.dataUrl) return null;
       setIsSearching(true);
       setSearchStage(0);
       setSearchError('');
       const shouldRefine = Boolean(
+        !options.forceNew
+        &&
         result.search_id
         && text?.trim()
         && !url?.trim()
@@ -2457,10 +2648,9 @@ export default function App() {
       try {
         const body = shouldRefine
           ? await refineAgentSearch({
+              search_id: result.search_id,
               text: text.trim(),
-              intent: result.intent,
-              products: result.products,
-              source: result.source,
+              mission,
             })
           : await runAgentSearchAsync({
               text: text?.trim() || 'Find products that match this reference.',
@@ -2468,6 +2658,7 @@ export default function App() {
               image_name: ref?.name || null,
               reference_image: referencePayload(ref),
               location_coordinates: location,
+              mission,
             }, (job) => {
               if (Array.isArray(job?.workflow) && job.workflow.length) {
                 setResult((current) => ({ ...current, workflow: job.workflow }));
@@ -2478,8 +2669,9 @@ export default function App() {
                 if (nextIndex >= 0) setSearchStage(nextIndex);
               }
             });
-        if (!body.products?.length && body.status !== 'needs_clarification') throw new Error('No retailer sources were found for that brief.');
+        if (!Array.isArray(body.products) || (!body.products.length && !['complete', 'needs_clarification'].includes(body.status))) throw new Error('The search did not return a usable result. Please try again.');
         setResult(body);
+        setMission(missionFromIntent(body.intent));
         const nextProducts = Array.isArray(body.products) ? body.products : [];
         setSelectedIds(
           Array.isArray(body.selected_product_ids)
@@ -2490,9 +2682,13 @@ export default function App() {
         setToast(
           body.status === 'needs_clarification'
             ? 'I need a few more details before searching.'
-            : shouldRefine
-              ? 'Shortlist refined from the existing research.'
-              : 'Live retailer sources checked and ranked.',
+            : !body.products.length
+              ? 'No purchasable product pages found. Adjust the brief and try again.'
+              : shouldRefine
+                ? 'Shortlist refined from the existing research.'
+                : body.source?.research?.completed === 0
+                  ? 'Retailer options found, but no direct product page was confirmed.'
+                  : 'Retailer options checked and ranked.',
         );
         return body;
       } catch (error) {
@@ -2505,7 +2701,7 @@ export default function App() {
         setIsSearching(false);
       }
     },
-    [isSearching, location, result],
+    [isSearching, location, mission, result],
   );
 
   const handleSearch = useCallback(
@@ -2519,27 +2715,79 @@ export default function App() {
   const handlePickPrompt = useCallback(
     (prompt) => {
       setQuery(prompt);
-      handleSearchWithPayload(prompt, postUrl, reference);
+      handleSearchWithPayload(prompt, postUrl, reference, { forceNew: true });
     },
     [handleSearchWithPayload, postUrl, reference],
   );
 
   const handleTalkAsk = useCallback(
     async (text) => {
-      setQuery(text);
-      const body = await handleSearchWithPayload(text, postUrl, reference, { throwOnError: true });
+      const spoken = String(text || '').trim();
+      const question = /^(why|what|which|where|how|is|are|can|could|do|does|tell me)\b/i.test(spoken);
+      const products = result.products || [];
+      const decision = result.intent?.decision;
+      const currentPick = products.find((product) => product.id === decision?.recommended_product_id) || products[0];
+      if (/\b(where|track|status)\b.*\b(delivery|order|package)\b/i.test(spoken)) {
+        if (!user) return 'Sign in, then open Orders and tracking to check a saved order. A shortlist is not a placed retailer order.';
+        let latest;
+        try {
+          const body = await getOrders();
+          setOrders(body.orders || []);
+          latest = body.orders?.[0];
+        } catch {
+          return 'I could not load your saved orders right now. Open Orders and tracking to try again.';
+        }
+        return latest
+          ? latest.payment_provider === 'sandbox'
+            ? `Your latest sandbox order is ${String(latest.status || 'unknown').replace(/_/g, ' ')}. Open Orders and tracking for its local timeline.`
+            : `Your historical payment record is ${String(latest.payment_status || 'unknown').replace(/_/g, ' ')}. Artha cannot confirm retailer dispatch or delivery; contact the payment merchant for fulfillment status.`
+          : 'No saved order is on this account yet. A shortlist is research, not a placed retailer order.';
+      }
+      if (products.length && question && /\b(why|rank|ranked|ranking)\b/i.test(spoken)) {
+        const reasons = [...(decision?.reasons || []), ...(currentPick?.reason_tags || [])].filter(Boolean).slice(0, 3);
+        return `${sanitizeTitle(currentPick.name)} leads the checked shortlist. ${reasons.join('. ') || 'Open its evidence card for the details.'}${decision?.blocking_risks?.length ? ` Verify ${decision.blocking_risks.join(', ')} before buying.` : ''}`;
+      }
+      if (products.length && question && /\b(price|cheapest|lowest|cost|deal|history)\b/i.test(spoken)) {
+        const compared = /\b(cheapest|lowest)\b/i.test(spoken)
+          ? [...products].filter((product) => product.lowest_current_offer).sort((a, b) => a.lowest_current_offer.price - b.lowest_current_offer.price)[0]
+          : currentPick;
+        const offer = compared?.lowest_current_offer;
+        const history = compared?.price_history || {};
+        const current = offer
+          ? `${compared.current_offers?.length > 1 ? 'The lowest directly checked matching offer' : 'The only directly checked offer'} for ${sanitizeTitle(compared.name)} is ${formatPrice(offer.price)} at ${offer.seller}.`
+          : 'No directly checked matching store offer is available yet.';
+        const past = history.status === 'observed' || history.status === 'first_observation'
+          ? ` Recorded prices range from ${formatPrice(history.observed_low)} to ${formatPrice(history.observed_high)} across ${history.observation_count} recorded prices.`
+          : ' Recorded live price history is not available yet.';
+        return `${current}${past} Confirm the final total at the retailer.`;
+      }
+      if (products.length && question && /\b(fast|sooner|arrive|delivery time)\b/i.test(spoken)) {
+        const timed = products.filter((product) => Number.isFinite(Number(product.delivery_days)) && product.delivery_days !== null && product.delivery_days !== undefined);
+        if (!timed.length) return 'None of the checked retailers supplied a confirmed arrival time yet. Check delivery on the retailer page.';
+        const fastest = [...timed].sort((a, b) => Number(a.delivery_days) - Number(b.delivery_days))[0];
+        setFocusedId(fastest.id);
+        return `${sanitizeTitle(fastest.name)} has the quickest stated delivery among checked results: ${fastest.delivery_label || `${fastest.delivery_days} days`}. Verify the promise for your pincode at the retailer.`;
+      }
+      const explicitNew = /^(?:start |do )?(?:a )?new search\b/i.test(spoken);
+      const forceNew = explicitNew || /^(?:find|search for|shop for|look for|i (?:want|need|am looking for))\b/i.test(spoken);
+      const brief = explicitNew ? spoken.replace(/^(?:start |do )?(?:a )?new search\b[: ,]*/i, '').trim() : spoken;
+      if (!brief) return 'Tell me what product you want to search for.';
+      setQuery(brief);
+      const body = await handleSearchWithPayload(brief, forceNew ? '' : postUrl, forceNew ? null : reference, { throwOnError: true, forceNew });
       if (body?.status === 'needs_clarification') {
         const questions = body.intent?.clarifications || body.clarifications || [];
         return questions.length
           ? `I need a little more detail first: ${questions.map((question) => question.question).join(' ')}`
           : 'I need a little more detail before searching.';
       }
-      const count = body?.products?.length || 0;
-      const topPick = body?.products?.[0];
-      if (!count) return 'I could not find a strong source match yet. Try adding a budget, delivery city, or must-have.';
-      return `I found ${count} source${count === 1 ? '' : 's'} and refreshed the shortlist. ${topPick ? `${sanitizeTitle(topPick.name)} is the strongest fit right now.` : 'The refreshed options are ready below.'}`;
+      const nextDecision = body?.intent?.decision;
+      const pick = body?.products?.find((product) => product.id === nextDecision?.recommended_product_id);
+      if (nextDecision?.status === 'no_safe_fit') return `No safe fit clears this mission yet. ${nextDecision.mission_change || 'Try adjusting one hard constraint.'}`;
+      if (nextDecision?.status === 'verify_before_buy') return `${sanitizeTitle(pick?.name)} is the current recommendation. Before buying, verify: ${(nextDecision.blocking_risks || []).join(', ')}.`;
+      if (nextDecision?.status === 'buy_now') return `${sanitizeTitle(pick?.name)} now clears the mission. The retailer handoff is ready below.`;
+      return 'I updated the mission using the completed research.';
     },
-    [handleSearchWithPayload, postUrl, reference],
+    [handleSearchWithPayload, postUrl, reference, result, user],
   );
 
   const handleQuickAnswer = useCallback(
@@ -2620,18 +2868,16 @@ export default function App() {
       setAuthOpen(true);
       return;
     }
-    if (health.payment_configured === false) {
-      setToast('Checkout is not configured on this deployment yet. No order was created.');
+    if (!health.payment_configured || health.payment_provider !== 'sandbox') {
+      setToast('Open the retailer link to complete a real purchase. Artha cannot collect payment for retailer orders.');
       return;
     }
     setCheckoutOpen(true);
-  }, [health.payment_configured, selectedProducts.length, user]);
+  }, [health.payment_configured, health.payment_provider, selectedProducts.length, user]);
 
   const handleConfirmOrder = useCallback(async () => {
     if (!selectedProducts.length || !user || isCreatingOrder) return;
     setIsCreatingOrder(true);
-    const hostedPayment = health.payment_provider === 'razorpay';
-    let checkoutOpened = false;
     const purchasePayload = {
       confirmed: true,
       search_id: result.search_id,
@@ -2640,41 +2886,6 @@ export default function App() {
       location: result.intent?.location,
     };
     try {
-      if (hostedPayment) {
-        const paymentBody = await createPaymentOrder(purchasePayload);
-        const Razorpay = await loadRazorpayCheckout();
-        const checkout = new Razorpay({
-          key: paymentBody.payment.key_id,
-          amount: paymentBody.payment.amount,
-          currency: paymentBody.payment.currency,
-          name: paymentBody.payment.name,
-          description: paymentBody.payment.description,
-          order_id: paymentBody.payment.order_id,
-          prefill: paymentBody.payment.prefill,
-          theme: { color: '#ef3d78' },
-          handler: async (response) => {
-            try {
-              const verified = await verifyPayment(response);
-              setOrders((current) => [verified.order, ...current.filter((order) => order.id !== verified.order.id)]);
-              setCheckoutOpen(false);
-              setActiveView('orders');
-              setToast(`Payment verified. Order ${verified.order.id} is confirmed.`);
-            } catch (error) {
-              setToast(error.message || 'Payment verification failed. No order was recorded.');
-            } finally {
-              setIsCreatingOrder(false);
-            }
-          },
-          modal: { ondismiss: () => { setIsCreatingOrder(false); setToast('Payment was cancelled. No order was recorded.'); } },
-        });
-        checkout.on('payment.failed', () => {
-          setIsCreatingOrder(false);
-          setToast('Payment failed. No order was recorded.');
-        });
-        checkout.open();
-        checkoutOpened = true;
-        return;
-      }
       const body = await createOrder(purchasePayload);
       setOrders((current) => [body.order, ...current.filter((order) => order.id !== body.order.id)]);
       setCheckoutOpen(false);
@@ -2683,9 +2894,9 @@ export default function App() {
     } catch (error) {
       setToast(error.message || 'The order could not be created.');
     } finally {
-      if (!checkoutOpened) setIsCreatingOrder(false);
+      setIsCreatingOrder(false);
     }
-  }, [health.payment_provider, isCreatingOrder, result.intent, result.search_id, selectedProducts, user]);
+  }, [isCreatingOrder, result.intent, result.search_id, selectedProducts, user]);
 
   const handleCancelOrder = useCallback(async (orderId) => {
     try {
@@ -2804,9 +3015,11 @@ export default function App() {
     activeView === 'discover' ? (
       <DiscoverView
         result={result}
-        paymentProvider={health.payment_provider}
+        paymentProvider={health.payment_configured && health.payment_provider === 'sandbox' ? 'sandbox' : 'disabled'}
         query={query}
         setQuery={setQuery}
+        mission={mission}
+        onMissionChange={setMission}
         postUrl={postUrl}
         setPostUrl={setPostUrl}
         showPostUrl={showPostUrl}
@@ -2924,7 +3137,6 @@ export default function App() {
         <CheckoutSheet
           products={selectedProducts}
           intent={result.intent}
-          paymentProvider={health.payment_provider}
           isSubmitting={isCreatingOrder}
           onClose={() => setCheckoutOpen(false)}
           onConfirm={handleConfirmOrder}
@@ -2942,6 +3154,7 @@ export default function App() {
         onClose={() => setTalkOpen(false)}
         onAsk={handleTalkAsk}
         onToast={setToast}
+        workflow={result.workflow}
       />
       <Toast message={toast} />
       </div>

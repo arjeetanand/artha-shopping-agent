@@ -2,7 +2,7 @@
 
 Artha turns a natural-language shopping brief, reference image, or product/post URL into a source-linked purchase plan. It extracts the constraints, searches live retailer sources through Anakin, normalizes the evidence, applies budget and delivery constraints, and lets a signed-in user save private retailer handoffs.
 
-This is a real research and handoff flow with a clearly separated local sandbox and an opt-in production payment adapter. Artha never collects payment credentials in its own UI, sends an order to a retailer, or claims retailer fulfillment without an adapter. With Razorpay configured, payment is completed in Razorpay's hosted checkout; saved retailer plans still require the user to open each retailer link unless a merchant adapter is configured.
+This is a research and retailer handoff flow with a clearly labeled local order sandbox. Artha does not submit retailer orders or collect live payments. Even if Razorpay credentials are present, new in-app charges stay disabled until retailer fulfillment is connected; shoppers complete real purchases at the retailer.
 
 ## What runs where
 
@@ -87,6 +87,8 @@ The OAuth state/PKCE and redirect-safety contract can also be checked offline:
 npm run test:auth
 ```
 
+The browser voice-call loop can be checked with `npm run test:voice` after installing Playwright Chromium. To use an existing Chrome binary, set `SHOPPINGHELP_CHROME_PATH` to its executable path.
+
 The permissioned location adapter can be exercised offline with mocked Maps responses; it verifies nearby-store parsing and coordinate non-persistence:
 
 ```bash
@@ -126,11 +128,13 @@ GEMINI_MODEL=gemini-2.5-flash
 
 `AI_PROVIDER=auto` uses Ollama for development and Gemini for production. Set `AI_PROVIDER=gemini` to use Gemini explicitly, or `AI_PROVIDER=ollama` to force local Ollama.
 
-Reference images are limited to PNG, JPEG, WebP, or GIF and 4 MB. They are sent only for the active brief-extraction request and are never written to SQLite. Local image understanding requires a vision-capable `OLLAMA_VISION_MODEL`; production Gemini handles inline image analysis. If the selected provider cannot return a structured brief, the API reports the provider failure instead of fabricating a local/demo brief.
+Reference images are limited to PNG, JPEG, WebP, or GIF and 4 MB. They are sent only for the active brief-extraction request and are never written to SQLite. Local image understanding requires a vision-capable `OLLAMA_VISION_MODEL`; production Gemini handles inline image analysis. If a model returns no usable structured brief, Artha labels its typed-rule fallback; it does not substitute fixture products for live research.
 
 ### Voice
 
-`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. For production, set `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and optionally `ELEVENLABS_MODEL_ID`. The ElevenLabs key remains on the Python server; only audio bytes return to the browser. Production does not silently fall back to browser speech when ElevenLabs is missing.
+`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. For production, set `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and optionally `ELEVENLABS_MODEL_ID`. The ElevenLabs key remains on the Python server; only audio bytes return to the browser. If server voice fails, the call visibly switches to browser speech while keeping the answer in the transcript.
+
+The **Start call** control in Talk to Artha uses the browser's SpeechRecognition microphone permission, submits each spoken turn to the same research and refinement flow as typed requests, reads the answer through the configured voice service, and listens for the next turn. Browsers without SpeechRecognition retain typed chat. The call transcript remains visible and **End call** stops listening and playback.
 
 The local Kokoro configuration is:
 
@@ -145,7 +149,7 @@ KOKORO_DEVICE=auto
 
 ### Payments
 
-`PAYMENT_PROVIDER=sandbox` is the safe local default. For a real INR checkout, set `PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID`, and `RAZORPAY_KEY_SECRET` on the Python server only. Artha creates the Razorpay order server-side, loads the hosted Standard Checkout in the browser, and verifies Razorpay's signed callback before it records an Artha order. It never accepts a card number or secret in the React app. A verified payment still does not claim retailer fulfillment; that requires a separate merchant adapter.
+`PAYMENT_PROVIDER=sandbox` enables the clearly labeled development tracker without charging anyone. Production checkout is a retailer handoff. `/api/payments/order` returns 503, including when Razorpay credentials are present, because Artha has no retailer fulfillment integration. `/api/payments/verify` remains available only to settle historical attempts that were initiated before this gate.
 
 ## Workflow
 
@@ -154,21 +158,27 @@ KOKORO_DEVICE=auto
 3. **Location agent** uses the typed city/pincode or an explicitly permissioned browser location, with optional Google Maps geocoding and nearby-store context; raw coordinates are never persisted.
 4. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context. Provider-neutral retailer and delivery contracts live in `backend/retailers.py`; dedicated marketplace adapters can be added without changing ranking or UI code.
 5. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, variant, and price information as needing retailer confirmation.
-6. **Research agent** checks up to six returned live product pages in parallel through Anakin's URL scraper, fills only missing structured fields, records price mismatches, and keeps empty or failed direct-page checks visibly unverified. Fixture mode uses its deterministic catalog evidence without network calls.
+6. **Research agent** checks up to six discovery pages, then up to four exact-item pages from other retailer sites when product identity is strong enough. It uses direct-page details ahead of search snippets, records price mismatches, and keeps empty or failed checks visibly unverified. Fixture mode uses deterministic catalog evidence without network calls.
 7. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
-8. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, color, size, and evidence, and excludes products with a known constraint failure from the default plan. It calculates line totals for requested quantities instead of ranking on unit price alone.
+8. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, color, size, and evidence, then applies an evidence gate. It returns `buy_now`, `verify_before_buy`, or `no_safe_fit`; unknown or conflicting price, delivery, stock, color, or size can never produce `buy_now`.
 9. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
-10. **Order service** persists an explicitly confirmed sandbox order or a Razorpay-signature-verified payment record. Production delivery, cancellation, return, and refund updates remain disabled until a merchant adapter/webhook is configured.
+10. **Order service** persists explicitly confirmed sandbox orders for local testing. Production purchases happen on retailer sites; historical signed payment attempts can still be reconciled, but new charges are blocked.
 
 Each result also carries an evidence ledger when the source provides it: review-source samples and consistency signals, current-vs-history price context, seller/stock/delivery evidence, and explicit unknowns when those fields are unavailable. Select the shield action on a result to inspect that ledger before saving or checkout.
+
+The price desk groups directly checked live pages across stores by a valid Product JSON-LD GTIN and matching known variant, or by brand, exact title, color, and size; otherwise each retailer URL has its own history. After finding a verified item with that strong identity, Artha makes one bounded search for the same item at other retailers. It shows the lowest price among matching offers checked in that search and stores timestamped INR observations in SQLite. Historical lows and trends reflect Artha's observations only. Fixture history is labeled demo data. Store prices can omit shipping, tax, variant availability, and delivery, so the recommended retailer may differ from the lowest item-price offer.
 
 When a product just outside the budget still satisfies delivery and stock constraints, the result includes a clearly labeled **Worth a small stretch** opportunity. It never changes the selected plan automatically; the user can inspect that product's evidence before deciding.
 
 Live searches can be started asynchronously with `POST /api/agent/search/jobs` and polled at `GET /api/agent/search/jobs/:job_id`. The job returns queued, working, complete, waiting, or failed stage snapshots while Anakin and parallel direct-page checks run, so the UI can keep the workflow visible instead of holding a blank request open.
 
-When required details are missing, the search response uses `status: "needs_clarification"`, returns `intent.clarifications`, and contains no retailer shortlist. Send the user's answer to `POST /api/agent/refine` with the returned intent, products, and source. If the checkpoint has no products yet, Artha starts discovery after the answers resolve the questions; otherwise it re-ranks the completed research set without repeating discovery.
+When required details are missing, the search response uses `status: "needs_clarification"`, returns `intent.clarifications`, and contains no retailer shortlist. Send the user's answer to `POST /api/agent/refine` with the prior `search_id`, answer text, and edited mission. Artha loads the saved research on the server, starts discovery when the checkpoint has no products, and reuses completed evidence for soft follow-ups.
 
-The known item subtotal deliberately excludes shipping, tax, and any retailer-specific fees that the live source does not verify. The user must confirm those values at checkout.
+Refinement also accepts the edited `mission` object, so budget, deadline, pincode, size, color, occasion, and style changes reach the server. Changed delivery location, pincode, or requested color/size triggers fresh retailer research; other hard changes trigger it when the previous shortlist no longer fits.
+
+`POST /api/agent/search` and `POST /api/agent/search/jobs` also accept an optional `mission` object: `{ occasion, arrive_by_date, budget, pincode, size, color, style }`. `arrive_by_date` is a date-only `YYYY-MM-DD` India deadline; the server derives its delivery window. The response stores the resolved fields at `intent.mission` and adds `intent.decision` with the decision status, recommended and optional fallback product IDs, reasons, blocking risks, and `checked_at`.
+
+The displayed total includes shipping only when a direct retailer page confirms it. Unknown shipping, tax, and retailer-specific fees must be confirmed at retailer checkout.
 
 ## API surface
 
@@ -182,14 +192,14 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 | `POST /api/agent/search` | Run the seven-stage brief → location → search → evidence → research → analysis → decision workflow |
 | `POST /api/agent/search/jobs` | Start the same research workflow asynchronously and return a job id |
 | `GET /api/agent/search/jobs/:job_id` | Poll workflow stage progress and read the completed result |
-| `POST /api/agent/refine` | Apply a follow-up preference to an existing research set without repeating retailer discovery |
+| `POST /api/agent/refine` | Apply a follow-up to a server-saved search; repeat discovery when delivery evidence or hard constraints require it |
 | `GET /api/plans` | List the signed-in user's private purchase plans |
 | `POST /api/plans` | Save a source-linked purchase plan after user selection |
 | `GET /api/orders` | List the signed-in user's confirmed orders and tracking timelines |
 | `GET /api/orders/:id` | Read one user-scoped order |
 | `POST /api/orders` | Create an explicitly confirmed sandbox order or verified provider order |
-| `POST /api/payments/order` | Create a server-side Razorpay payment order for a verified search or saved plan |
-| `POST /api/payments/verify` | Verify the Razorpay callback signature and record the paid Artha order |
+| `POST /api/payments/order` | Reject new in-app charges until retailer fulfillment is connected |
+| `POST /api/payments/verify` | Verify and reconcile a historical Razorpay attempt |
 | `POST /api/orders/:id/cancel` | Cancel a cancellable sandbox order |
 | `POST /api/orders/:id/advance` | Advance a sandbox order through delivery statuses for local tracker testing |
 | `POST /api/orders/:id/return` | Record a sandbox return request after delivery |
@@ -206,7 +216,7 @@ The known item subtotal deliberately excludes shipping, tax, and any retailer-sp
 - No Google OAuth token, payment credential, or reference-image bytes are persisted.
 - The service cannot submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions. Razorpay payment authorization is separate from retailer fulfillment.
 - In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
-- Razorpay is opt-in and server-only: the browser receives only the public key and hosted-checkout order metadata. The backend verifies `order_id|payment_id` with the secret before persisting a paid state; failed or replayed attempts do not create an order.
+- New Razorpay payment orders are blocked. Historical attempts are verified server-side with the signed `order_id|payment_id` callback; failed or replayed attempts do not create an order.
 - Orders created from a search are rehydrated from the server-side verified search result, so a modified browser payload cannot change the catalog price or quantity at checkout.
 - The development tracker can advance through delivery, return, and refund states for QA; production status changes must come from merchant webhooks or a supported order API.
 - Live saved plans are therefore intentionally named **Ready for retailer checkout**, not paid orders or delivery tracking.

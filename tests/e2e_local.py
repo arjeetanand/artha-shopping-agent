@@ -127,10 +127,8 @@ def main() -> None:
             "/api/agent/refine",
             method="POST",
             payload={
+                "search_id": sparse["search_id"],
                 "text": "under ₹12,000 delivered to Bangalore within 5 days",
-                "intent": sparse["intent"],
-                "products": sparse["products"],
-                "source": sparse["source"],
             },
         )
         assert status == 200, sparse_refined
@@ -160,10 +158,8 @@ def main() -> None:
             "/api/agent/refine",
             method="POST",
             payload={
+                "search_id": search["search_id"],
                 "text": "Actually show me options under ₹16,000 with reclining support",
-                "intent": search["intent"],
-                "products": search["products"],
-                "source": search["source"],
             },
         )
         assert status == 200, refined
@@ -171,6 +167,11 @@ def main() -> None:
         assert refined["intent"]["budget"] == 16000
         assert "reclining" in refined["intent"]["must_have"]
         assert refined["workflow"][0]["agent"] == "Follow-up agent"
+        status, forged = request(
+            port, "/api/agent/refine", method="POST",
+            payload={"search_id": "search-forged", "text": "Use this", "intent": search["intent"], "products": search["products"]},
+        )
+        assert status == 400 and "search" in forged["error"].lower(), forged
 
         # Seed a real server-side session without invoking Google during local QA.
         os.environ.update(env)
@@ -198,7 +199,7 @@ def main() -> None:
             "/api/plans",
             method="POST",
             cookie=cookie,
-            payload={"search_id": search["search_id"], "products": [selected]},
+            payload={"search_id": search["search_id"], "products": [{"id": selected["id"], "price": 1, "url": "https://evil.example"}]},
         )
         assert status == 201, plan_response
         plan = plan_response["plan"]

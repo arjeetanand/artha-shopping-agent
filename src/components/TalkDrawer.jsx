@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Icon } from './Icon';
+import { speakText } from '../lib/api';
 
 const SUGGESTIONS = [
   'Why did you rank these first?',
@@ -384,6 +385,14 @@ const DRAWER_STYLES = `
   .talk-drawer__call-card p { margin: 4px 0 0; color: #6a7a73; font-size: 10px; line-height: 1.4; }
   .talk-drawer__call-card button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: #1d7657; color: #fff; font-size: 10px; font-weight: 800; }
   .talk-drawer__call-card button:hover:not(:disabled) { background: #155b43; }
+  .talk-drawer__call-card--active { background: #173d30; border-color: #173d30; }
+  .talk-drawer__call-card--active strong { color: #fff; }
+  .talk-drawer__call-card--active p { color: #c8e4d4; }
+  .talk-drawer__call-card--active button { background: #fff; color: #173d30; }
+  .talk-drawer__call-card--active button:hover:not(:disabled) { background: #dcf4e5; }
+  .talk-drawer__call-orb { width: 13px; height: 13px; flex: 0 0 auto; border-radius: 50%; background: #9fe4be; box-shadow: 0 0 0 5px rgba(159, 228, 190, .16); }
+  .talk-drawer__call-orb--listening { animation: talk-call-pulse 1.4s ease-in-out infinite; }
+  @keyframes talk-call-pulse { 50% { box-shadow: 0 0 0 11px rgba(159, 228, 190, 0); } }
   .talk-drawer__avatar { background: #1d7657; box-shadow: 0 4px 12px rgba(29, 118, 87, .2); }
   .talk-drawer__bubble { border-color: #d9e6de; color: #33453e; box-shadow: 0 2px 8px rgba(24, 65, 46, .05); }
   .talk-drawer__message-row--user .talk-drawer__bubble { border-color: #1d7657; background: #1d7657; box-shadow: 0 5px 14px rgba(29, 118, 87, .18); }
@@ -401,6 +410,7 @@ const DRAWER_STYLES = `
   .talk-drawer__send { background: #173d30; }
   .talk-drawer__send:hover:not(:disabled) { background: #1d7657; }
   .talk-drawer__hint { color: #8b9c94; }
+  @media (prefers-reduced-motion: reduce) { .talk-drawer__call-orb--listening { animation: none; } }
   @media (max-width: 520px) { .talk-drawer__call-card { align-items: flex-start; flex-direction: column; } .talk-drawer__call-card button { width: 100%; justify-content: center; } }
 `;
 
@@ -425,6 +435,8 @@ function getReplyText(reply) {
 
 function useDrawerFocusTrap(open, dialogRef, initialRef, onClose) {
   const previousFocusRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -433,7 +445,7 @@ function useDrawerFocusTrap(open, dialogRef, initialRef, onClose) {
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -460,10 +472,10 @@ function useDrawerFocusTrap(open, dialogRef, initialRef, onClose) {
       if (restore && document.contains(restore)) restore.focus();
       previousFocusRef.current = null;
     };
-  }, [dialogRef, initialRef, onClose, open]);
+  }, [dialogRef, initialRef, open]);
 }
 
-export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }) {
+export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initialPrompt = '' }) {
   const titleId = useId();
   const descriptionId = useId();
   const inputId = useId();
@@ -473,7 +485,13 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
   const messagesRef = useRef(null);
   const recognitionRef = useRef(null);
   const speechRef = useRef(null);
-  const mediaStreamRef = useRef(null);
+  const audioRef = useRef(null);
+  const playbackRef = useRef(0);
+  const callActiveRef = useRef(false);
+  const thinkingRef = useRef(false);
+  const submitPromptRef = useRef(null);
+  const startListeningRef = useRef(null);
+  const restartTimerRef = useRef(null);
   const mountedRef = useRef(true);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState(() => [
@@ -481,83 +499,122 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
   ]);
   const [isListening, setIsListening] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [callActive, setCallActive] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState(null);
   const [micState, setMicState] = useState('idle');
+  const workingStage = workflow.find((stage) => stage.status === 'working');
 
   const notify = useCallback((message) => {
     if (typeof onToast === 'function' && message) onToast(message);
   }, [onToast]);
 
   const stopSpeaking = useCallback(() => {
+    playbackRef.current += 1;
     if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      URL.revokeObjectURL(audioRef.current.src);
+      audioRef.current = null;
+    }
     speechRef.current = null;
     setSpeakingMessageId(null);
   }, []);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    if (restartTimerRef.current) window.clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = null;
+    const recognition = recognitionRef.current;
     recognitionRef.current = null;
-    mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
+    recognition?.abort();
     setIsListening(false);
+    setMicState('idle');
   }, []);
 
-  const requestMicrophone = useCallback(async () => {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return true;
-    if (mediaStreamRef.current) return true;
-    setMicState('requesting');
-    try {
-      mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setMicState('granted');
-      return true;
-    } catch {
-      setMicState('denied');
-      notify('Microphone access was not granted. You can still type your question.');
-      return false;
-    }
-  }, [notify]);
-
-  const closeDrawer = useCallback(() => {
+  const endCall = useCallback(() => {
+    callActiveRef.current = false;
+    setCallActive(false);
     stopListening();
     stopSpeaking();
+  }, [stopListening, stopSpeaking]);
+
+  const closeDrawer = useCallback(() => {
+    endCall();
     onClose?.();
-  }, [onClose, stopListening, stopSpeaking]);
+  }, [endCall, onClose]);
 
-  const speakMessage = useCallback((message) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
-      notify('Browser speech playback is unavailable.');
-      return;
-    }
-
+  const speakMessage = useCallback(async (message) => {
     stopSpeaking();
-    const utterance = new window.SpeechSynthesisUtterance(message.text);
-    speechRef.current = utterance;
-    utterance.onstart = () => {
-      if (mountedRef.current) setSpeakingMessageId(message.id);
-    };
-    utterance.onend = () => {
-      if (mountedRef.current && speechRef.current === utterance) {
-        speechRef.current = null;
-        setSpeakingMessageId(null);
+    const run = playbackRef.current;
+    setSpeakingMessageId(message.id);
+    let browserAttempted = false;
+    const finish = () => {
+      if (!mountedRef.current || run !== playbackRef.current) return;
+      speechRef.current = null;
+      if (audioRef.current) {
+        URL.revokeObjectURL(audioRef.current.src);
+        audioRef.current = null;
+      }
+      setSpeakingMessageId(null);
+      if (callActiveRef.current) {
+        restartTimerRef.current = window.setTimeout(() => startListeningRef.current?.(true), 350);
       }
     };
-    utterance.onerror = () => {
-      if (mountedRef.current && speechRef.current === utterance) {
-        speechRef.current = null;
-        setSpeakingMessageId(null);
+    const browserSpeak = () => {
+      browserAttempted = true;
+      if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
+        throw new Error('Voice playback is unavailable in this browser.');
       }
+      const utterance = new window.SpeechSynthesisUtterance(message.text);
+      utterance.lang = 'en-IN';
+      speechRef.current = utterance;
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      window.speechSynthesis.speak(utterance);
     };
-    window.speechSynthesis.speak(utterance);
+    try {
+      const response = await speakText(message.text);
+      if (!mountedRef.current || run !== playbackRef.current) return;
+      if (response.blob) {
+        const audio = new Audio(URL.createObjectURL(response.blob));
+        audioRef.current = audio;
+        audio.onended = finish;
+        audio.onerror = finish;
+        await audio.play();
+        return;
+      }
+      browserSpeak();
+    } catch (error) {
+      if (!mountedRef.current || run !== playbackRef.current) return;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        URL.revokeObjectURL(audioRef.current.src);
+        audioRef.current = null;
+      }
+      if (!browserAttempted) {
+        try {
+          browserSpeak();
+          notify('Server voice is unavailable. Using your browser voice for this answer.');
+          return;
+        } catch {
+          /* The transcript still shows the answer when browser speech is unavailable. */
+        }
+      }
+      notify(error?.message || 'Voice playback could not start. The answer is visible in the chat.');
+      finish();
+    }
   }, [notify, stopSpeaking]);
 
   const submitPrompt = useCallback(async (prompt) => {
     const text = String(prompt || '').trim();
-    if (!text || isThinking) return;
+    if (!text || thinkingRef.current) return;
 
     stopListening();
+    stopSpeaking();
+    const playbackRun = playbackRef.current;
     setInput('');
     const userMessage = createMessage('user', text);
     setMessages((current) => [...current, userMessage]);
+    thinkingRef.current = true;
     setIsThinking(true);
 
     try {
@@ -568,66 +625,108 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
       );
       if (!mountedRef.current) return;
       setMessages((current) => [...current, assistantMessage]);
-      speakMessage(assistantMessage);
+      if (playbackRun === playbackRef.current) void speakMessage(assistantMessage);
     } catch (error) {
       if (!mountedRef.current) return;
       const fallback = 'I hit a snag while checking that. Please try again or rephrase your question.';
       setMessages((current) => [...current, createMessage('assistant', fallback)]);
       notify(error?.message || 'The copilot could not answer right now.');
+      if (callActiveRef.current) {
+        restartTimerRef.current = window.setTimeout(() => startListeningRef.current?.(true), 500);
+      }
     } finally {
+      thinkingRef.current = false;
       if (mountedRef.current) setIsThinking(false);
     }
-  }, [isThinking, notify, onAsk, speakMessage, stopListening]);
+  }, [notify, onAsk, speakMessage, stopListening, stopSpeaking]);
+  submitPromptRef.current = submitPrompt;
 
-  const toggleListening = useCallback(async () => {
-    if (isThinking) return;
-    if (recognitionRef.current) {
-      stopListening();
-      return;
-    }
-
+  const startListening = useCallback((autoSubmit = false) => {
+    if (thinkingRef.current || recognitionRef.current || (autoSubmit && !callActiveRef.current)) return false;
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) {
-      notify('Voice input is unavailable here. You can still type your question.');
+      notify('This browser does not support speech recognition. You can still type your request.');
       inputRef.current?.focus();
-      return;
+      return false;
     }
 
-    if (!(await requestMicrophone())) return;
-
     const recognition = new SpeechRecognition();
+    let transcript = '';
     recognitionRef.current = recognition;
+    setMicState('requesting');
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US';
     recognition.onstart = () => {
-      if (mountedRef.current) setIsListening(true);
+      if (mountedRef.current && recognitionRef.current === recognition) {
+        setMicState('granted');
+        setIsListening(true);
+      }
     };
     recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
+      transcript = Array.from(event.results)
         .map((result) => result[0]?.transcript || '')
         .join(' ')
         .trim();
       if (mountedRef.current && transcript) setInput(transcript);
     };
     recognition.onerror = (event) => {
-      if (mountedRef.current && event.error !== 'aborted' && event.error !== 'no-speech') {
-        notify('Voice input stopped. You can continue by typing.');
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        callActiveRef.current = false;
+        setCallActive(false);
+        setMicState('denied');
+        notify('Microphone access is blocked. You can continue by typing.');
+      } else if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        callActiveRef.current = false;
+        setCallActive(false);
+        notify('Voice recognition stopped. You can continue by typing.');
       }
     };
     recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return;
+      recognitionRef.current = null;
       if (mountedRef.current) setIsListening(false);
-      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      if (autoSubmit && callActiveRef.current && transcript) {
+        void submitPromptRef.current?.(transcript);
+      } else if (autoSubmit && callActiveRef.current) {
+        restartTimerRef.current = window.setTimeout(() => startListeningRef.current?.(true), 700);
+      }
     };
 
     try {
       recognition.start();
+      return true;
     } catch {
       recognitionRef.current = null;
+      callActiveRef.current = false;
+      setCallActive(false);
+      setMicState('idle');
       setIsListening(false);
       notify('Voice input could not start. You can continue by typing.');
+      return false;
     }
-  }, [isThinking, notify, requestMicrophone, stopListening]);
+  }, [notify]);
+  startListeningRef.current = startListening;
+
+  const toggleListening = useCallback(() => {
+    if (recognitionRef.current) stopListening();
+    else startListening(false);
+  }, [startListening, stopListening]);
+
+  const toggleCall = useCallback(() => {
+    if (callActiveRef.current) {
+      endCall();
+      return;
+    }
+    callActiveRef.current = true;
+    setCallActive(true);
+    stopListening();
+    stopSpeaking();
+    if (!startListening(true)) {
+      callActiveRef.current = false;
+      setCallActive(false);
+    }
+  }, [endCall, startListening, stopListening, stopSpeaking]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -635,14 +734,22 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
       mountedRef.current = false;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
-      mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
+      if (restartTimerRef.current) window.clearTimeout(restartTimerRef.current);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        URL.revokeObjectURL(audioRef.current.src);
+        audioRef.current = null;
+      }
       if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
       speechRef.current = null;
     };
   }, []);
 
   useDrawerFocusTrap(open, dialogRef, closeButtonRef, closeDrawer);
+
+  useEffect(() => {
+    if (!open) endCall();
+  }, [endCall, open]);
 
   useEffect(() => {
     if (open && initialPrompt) setInput(initialPrompt);
@@ -678,7 +785,7 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
             <p className="talk-drawer__eyebrow"><span className="talk-drawer__live-dot" />Shopping copilot</p>
             <h2 className="talk-drawer__title" id={titleId}>Talk to Artha</h2>
             <p className="talk-drawer__subtitle" id={descriptionId}>
-              Ask about the trade-offs behind your shortlist.
+              Describe what you need. Artha will research, compare, and explain the next step.
             </p>
           </div>
           <button
@@ -698,23 +805,25 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
           ) : micState === 'requesting' ? (
             <><span className="talk-drawer__status-icon"><Icon name="mic" size={15} /></span>Allow microphone access to speak</>
           ) : isThinking ? (
-            <><span className="talk-drawer__status-icon"><Icon name="spark" size={15} /></span>Checking your shortlist</>
+            <><span className="talk-drawer__status-icon"><Icon name="spark" size={15} /></span>{workingStage ? `${workingStage.agent}: ${workingStage.detail}` : 'Checking your shortlist'}</>
           ) : speakingMessageId ? (
             <><span className="talk-drawer__status-icon"><Icon name="volume" size={15} /></span>Reading the answer aloud</>
+          ) : callActive ? (
+            <><span className="talk-drawer__status-icon"><Icon name="waveform" size={15} /></span>Voice call connected</>
           ) : (
             <><span className="talk-drawer__status-icon"><Icon name="spark" size={15} /></span>Ready when you are</>
           )}
         </div>
 
         <div className="talk-drawer__messages" ref={messagesRef} role="log" aria-live="polite" aria-busy={isThinking}>
-          <p className="talk-drawer__welcome">I can help compare rank, price, speed, and delivery details.</p>
-          <div className="talk-drawer__call-card">
+          <p className="talk-drawer__welcome">Tell me your brief or ask about a recommendation. Your transcript and each answer stay visible here.</p>
+          <div className={`talk-drawer__call-card ${callActive ? 'talk-drawer__call-card--active' : ''}`}>
             <div>
-              <strong><Icon name="waveform" size={14} /> Voice chat</strong>
-              <p>Ask hands-free. I’ll show the transcript before updating your shortlist.</p>
+              <strong><span className={`talk-drawer__call-orb ${isListening ? 'talk-drawer__call-orb--listening' : ''}`} aria-hidden="true" /> {callActive ? 'Voice call in progress' : 'In-app voice call'}</strong>
+              <p>{callActive ? (isThinking ? 'Researching your request…' : speakingMessageId ? 'Speaking the answer…' : 'Listening for your next request…') : getSpeechRecognition() ? 'Speak your brief. Artha listens, researches, and talks back.' : 'Voice calls need a browser with speech recognition. Text chat works here.'}</p>
             </div>
-            <button type="button" onClick={toggleListening} disabled={isThinking}>
-              <Icon name="mic" size={14} /> {isListening ? 'Stop' : 'Start voice chat'}
+            <button type="button" onClick={toggleCall} disabled={!callActive && !getSpeechRecognition()} aria-pressed={callActive}>
+              <Icon name={callActive ? 'close' : 'mic'} size={14} /> {callActive ? 'End call' : 'Start call'}
             </button>
           </div>
           {messages.map((message) => (
@@ -782,14 +891,15 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, initialPrompt = '' }
               }}
               placeholder="Ask about rank, price, speed, or delivery…"
               rows={1}
-              disabled={isThinking}
+              readOnly={isThinking}
+              aria-busy={isThinking}
               autoComplete="off"
             />
             <button
               type="button"
               className={`talk-drawer__icon-button ${isListening ? 'talk-drawer__icon-button--listening' : ''}`}
               onClick={toggleListening}
-              disabled={isThinking}
+              disabled={isThinking || callActive}
               aria-label={isListening ? 'Stop listening' : 'Use voice input'}
               aria-pressed={isListening}
             >

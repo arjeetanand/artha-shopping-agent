@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -46,6 +47,20 @@ class Fragments:
 
 
 class SecurityBoundaryContracts(unittest.TestCase):
+    def test_production_session_cookie_cannot_disable_secure(self) -> None:
+        from backend import auth
+
+        for override in ("", "0", "false", "no"):
+            with patch.dict(os.environ, {"APP_ENV": "production", "SHOPPINGHELP_COOKIE_SECURE": override}):
+                self.assertIn("Secure", auth.session_cookie("token").split("; "))
+                self.assertIn("Secure", auth.clear_session_cookie().split("; "))
+        with patch.dict(os.environ, {"APP_ENV": "development", "SHOPPINGHELP_COOKIE_SECURE": "0"}):
+            self.assertNotIn("Secure", auth.session_cookie("token").split("; "))
+            self.assertNotIn("Secure", auth.clear_session_cookie().split("; "))
+        with patch.dict(os.environ, {"APP_ENV": "development", "SHOPPINGHELP_COOKIE_SECURE": "1"}):
+            self.assertIn("Secure", auth.session_cookie("token").split("; "))
+            self.assertIn("Secure", auth.clear_session_cookie().split("; "))
+
     def test_oauth_state_cookie_binds_before_state_consumption(self) -> None:
         from backend import auth
 
@@ -133,6 +148,147 @@ class SecurityBoundaryContracts(unittest.TestCase):
         finally:
             for _ in range(acquired):
                 semaphore.release()
+
+    def test_paid_voice_has_per_ip_and_concurrency_admission(self) -> None:
+        from backend import server
+
+        provider = SimpleNamespace(provider="elevenlabs", speak=Mock(return_value=(b"audio", "audio/mpeg")))
+
+        def post_voice(client: str) -> list[int]:
+            result: list[int] = []
+            handler = server.Handler.__new__(server.Handler)
+            handler.path = "/api/voice/speak"
+            handler.client_address = (client, 1234)
+            handler._read_json = Mock(return_value={"text": "hello"})
+            handler._send = lambda status, body: result.append(status)
+            handler._send_bytes = lambda status, data, content_type: result.append(status)
+            server.Handler.do_POST(handler)
+            return result
+
+        with (
+            patch.object(server, "VoiceService", return_value=provider),
+            patch.object(server, "reserve_global_voice_call", return_value=True),
+            patch.object(server, "_VOICE_REQUESTS_PER_MINUTE", 1),
+            patch.object(server, "_voice_admission_lock", threading.Lock()),
+            patch.object(server, "_voice_requests_by_client", {}),
+            patch.object(server, "_last_voice_client_cleanup", 0.0),
+            patch.object(server, "_VOICE_CAPACITY", threading.BoundedSemaphore(2)),
+        ):
+            self.assertEqual(post_voice("192.0.2.10"), [200])
+            self.assertEqual(post_voice("192.0.2.10"), [429])
+            provider.speak.assert_called_once_with("hello")
+
+        provider.speak.reset_mock()
+        capacity = threading.BoundedSemaphore(1)
+        self.assertTrue(capacity.acquire(blocking=False))
+        with (
+            patch.object(server, "VoiceService", return_value=provider),
+            patch.object(server, "_VOICE_CAPACITY", capacity),
+            patch.object(server, "_voice_admission_lock", threading.Lock()),
+            patch.object(server, "_voice_requests_by_client", {}),
+            patch.object(server, "_last_voice_client_cleanup", 0.0),
+        ):
+            self.assertEqual(post_voice("192.0.2.11"), [503])
+            provider.speak.assert_not_called()
+        capacity.release()
+
+    def test_global_paid_voice_budget_persists_across_database_instances(self) -> None:
+        from datetime import datetime, timezone
+
+        from backend import voice_limits
+        from backend.db import Database
+
+        with tempfile.TemporaryDirectory(prefix="artha-voice-budget-", dir="/private/tmp") as directory:
+            database_path = Path(directory) / "voice-budget.sqlite3"
+            database = Database(database_path)
+            current_hour = datetime(2026, 10, 3, 12, 15, tzinfo=timezone.utc)
+            with patch.object(voice_limits, "_MAX_GLOBAL_VOICE_CALLS_PER_HOUR", 2):
+                self.assertTrue(voice_limits.reserve_global_voice_call(database, now=current_hour))
+                self.assertTrue(voice_limits.reserve_global_voice_call(database, now=current_hour))
+                self.assertFalse(voice_limits.reserve_global_voice_call(Database(database_path), now=current_hour))
+                self.assertTrue(voice_limits.reserve_global_voice_call(database, now=current_hour.replace(hour=13)))
+
+    def test_search_storage_expires_caps_and_preserves_plan_references(self) -> None:
+        from backend import db as db_module
+        from backend.db import Database, now_iso
+
+        with tempfile.TemporaryDirectory(prefix="artha-search-retention-", dir="/private/tmp") as directory:
+            database = Database(Path(directory) / "searches.sqlite3")
+            with patch.object(db_module, "_MAX_SEARCH_ROWS", 2):
+                database.save_search("expired", "old query", {}, [])
+                database.save_search("plan-search", "saved query", {}, [], products=[{"id": "p1", "price": 10}])
+                with database._connect() as connection:
+                    connection.execute(
+                        "INSERT INTO purchase_plans (id, user_id, search_id, status, total, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        ("plan-1", "user-1", "plan-search", "ready", 10, "{}", now_iso(), now_iso()),
+                    )
+                    connection.execute("UPDATE searches SET created_at = '2000-01-01T00:00:00+00:00'")
+                database.save_search("newest", "new query", {}, [])
+                with database._connect() as connection:
+                    ids = {row["id"] for row in connection.execute("SELECT id FROM searches")}
+                    connection.execute(
+                        "INSERT INTO purchase_plans (id, user_id, search_id, status, total, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        ("plan-2", "user-2", "newest", "ready", 0, "{}", now_iso(), now_iso()),
+                    )
+                self.assertEqual(ids, {"plan-search", "newest"})
+                self.assertIsNone(database.get_search("plan-search"))
+                self.assertEqual(database.get_search_products("plan-search")[0]["id"], "p1")
+                with self.assertRaises(RuntimeError):
+                    database.save_search("overflow", "blocked", {}, [])
+
+        with tempfile.TemporaryDirectory(prefix="artha-search-size-", dir="/private/tmp") as directory:
+            database = Database(Path(directory) / "search-size.sqlite3")
+            with patch.object(db_module, "_MAX_SEARCH_RECORD_BYTES", 32):
+                with self.assertRaises(ValueError):
+                    database.save_search("oversized", "x" * 40, {}, [])
+                with database._connect() as connection:
+                    self.assertEqual(connection.execute("SELECT COUNT(*) FROM searches").fetchone()[0], 0)
+
+    def test_total_header_deadline_and_connection_cap(self) -> None:
+        from backend import server
+
+        started = threading.Event()
+
+        class TrackedHandler(server.Handler):
+            def setup(self) -> None:
+                super().setup()
+                started.set()
+
+        with (
+            patch.object(server, "_HEADER_READ_TIMEOUT_SECONDS", 0.15),
+            patch.object(server, "_SOCKET_IDLE_TIMEOUT_SECONDS", 1),
+            patch.object(server, "_MAX_ACTIVE_CONNECTIONS", 1),
+        ):
+            httpd = server.BoundedThreadingHTTPServer(("127.0.0.1", 0), TrackedHandler)
+            server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            server_thread.start()
+            first = second = third = None
+            try:
+                first = socket.create_connection(httpd.server_address, timeout=1)
+                self.assertTrue(started.wait(1))
+                first.settimeout(1)
+                first.sendall(b"GET /missing HTTP/1.1\r\nHost: localhost\r\nX-Slow: ")
+                second = socket.create_connection(httpd.server_address, timeout=1)
+                second.settimeout(1)
+                self.assertEqual(second.recv(1), b"")
+
+                started_at = time.monotonic()
+                while first.recv(1024):
+                    pass
+                self.assertLess(time.monotonic() - started_at, 0.8)
+
+                third = socket.create_connection(httpd.server_address, timeout=1)
+                third.settimeout(1)
+                third.sendall(b"GET /missing HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                response = third.recv(1024)
+                self.assertIn(b"404", response)
+            finally:
+                for connection in (first, second, third):
+                    if connection is not None:
+                        connection.close()
+                httpd.shutdown()
+                httpd.server_close()
+                server_thread.join(timeout=1)
 
     def test_async_job_capacity_rejects_excess_work(self) -> None:
         from backend import jobs

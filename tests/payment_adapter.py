@@ -1,4 +1,4 @@
-"""Offline contract test for the opt-in Razorpay adapter."""
+"""No new charges without merchant fulfillment; old attempts remain verifiable."""
 
 from __future__ import annotations
 
@@ -39,9 +39,24 @@ def main() -> None:
             [],
             products=[{"id": "p1", "name": "Chair", "price": 1000, "total_price": 1000, "quantity": 1, "url": "https://store.example/chair", "delivery_days": 3}],
         )
-        payments._razorpay_order = lambda amount, receipt, notes, key_id, key_secret: {"id": "order_test_123", "amount": amount * 100, "currency": "INR"}
-        payment = payments.create_payment_order({"confirmed": True, "search_id": search_id, "products": [{"id": "p1"}], "location": "Bengaluru"}, user)
-        assert payment["order_id"] == "order_test_123"
+        assert payments.payment_status()["configured"] is False
+        try:
+            payments.create_payment_order({"confirmed": True, "search_id": search_id, "products": [{"id": "p1"}], "location": "Bengaluru"}, user)
+        except payments.PaymentError as error:
+            assert error.status == 503 and "retailer fulfillment" in str(error)
+        else:
+            raise AssertionError("new paid checkout was allowed without retailer fulfillment")
+        assert db.get_payment_attempt("order_test_123", user["id"]) is None
+
+        # An attempt created before the gate must still be settled honestly.
+        db.save_payment_attempt({
+            "id": "pay-historical", "user_id": user["id"], "provider": "razorpay",
+            "provider_order_id": "order_test_123", "amount": 1000, "currency": "INR",
+            "status": "created", "created_at": "2026-09-25T00:00:00+00:00",
+            "updated_at": "2026-09-25T00:00:00+00:00",
+            "purchase_payload": {"confirmed": True, "search_id": search_id,
+                                 "products": [{"id": "p1", "quantity": 1}], "location": "Bengaluru"},
+        })
         signature = hmac.new(b"test_secret", b"order_test_123|pay_test_123", hashlib.sha256).hexdigest()
         order = payments.verify_payment(
             {"razorpay_order_id": "order_test_123", "razorpay_payment_id": "pay_test_123", "razorpay_signature": signature},

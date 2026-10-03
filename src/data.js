@@ -1,16 +1,16 @@
 export const DEFAULT_INTENT = {
-  category: 'Fashion',
-  occasion: 'Office',
-  budget: 18000,
-  location: 'Bengaluru',
-  arrive_by: 'within 5 days',
-  arrive_by_days: 5,
-  must_have: ['breathable fabrics', 'neutral palette', 'office-ready'],
-  nice_to_have: ['durable', 'easy to layer'],
-  style: 'quietly considered',
-  description: 'An office-ready look under ₹18,000',
-  raw_text: 'Find an office-ready look under ₹18,000',
-  extraction_source: 'local rules',
+  category: 'Shopping',
+  occasion: null,
+  budget: null,
+  location: null,
+  arrive_by: null,
+  arrive_by_days: null,
+  must_have: [],
+  nice_to_have: [],
+  style: null,
+  description: '',
+  raw_text: '',
+  extraction_source: null,
 };
 
 export const DEFAULT_RESULT = {
@@ -70,7 +70,7 @@ export function sanitizeSnippet(rawSnippet = '') {
   text = text.replace(/[「][^」]*[」]/g, '');
   text = text.replace(/\*\s*(?:Home|Clothing|Shirts|Search|Sign in|Favourites|Shopping bag)[^*]*/gi, '');
   text = text.replace(/\s{2,}/g, ' ').trim();
-  if (text.length < 15) return 'Verified retailer source. Confirm current price and stock on store page.';
+  if (text.length < 15) return 'Retailer source. Confirm current price and stock on store page.';
   return text.length > 140 ? `${text.slice(0, 137)}…` : text;
 }
 

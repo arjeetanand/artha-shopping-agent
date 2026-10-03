@@ -16,6 +16,9 @@ from .settings import load_env
 load_env()
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("SHOPPINGHELP_DB_PATH", ROOT / "shoppinghelp.sqlite3"))
+_SEARCH_RETENTION_DAYS = 7
+_MAX_SEARCH_ROWS = 256
+_MAX_SEARCH_RECORD_BYTES = 256 * 1024
 
 
 def now_iso() -> str:
@@ -53,6 +56,8 @@ class Database:
                     intent_json TEXT NOT NULL,
                     workflow_json TEXT NOT NULL,
                     products_json TEXT NOT NULL DEFAULT '[]',
+                    source_json TEXT NOT NULL DEFAULT '{}',
+                    server_verified INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
 
@@ -147,6 +152,21 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS usage_events_created_index ON usage_events(created_at DESC);
                 CREATE INDEX IF NOT EXISTS usage_events_runtime_index ON usage_events(runtime, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS price_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_key TEXT NOT NULL,
+                    product_id TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    seller TEXT NOT NULL,
+                    price INTEGER NOT NULL CHECK(price > 0),
+                    currency TEXT NOT NULL,
+                    source_status TEXT NOT NULL,
+                    observed_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS price_observations_product_index
+                ON price_observations(product_key, observed_at);
                 """
             )
             order_columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()}
@@ -162,6 +182,38 @@ class Database:
             search_columns = {row[1] for row in connection.execute("PRAGMA table_info(searches)").fetchall()}
             if "products_json" not in search_columns:
                 connection.execute("ALTER TABLE searches ADD COLUMN products_json TEXT NOT NULL DEFAULT '[]'")
+            if "source_json" not in search_columns:
+                connection.execute("ALTER TABLE searches ADD COLUMN source_json TEXT NOT NULL DEFAULT '{}'")
+            if "server_verified" not in search_columns:
+                connection.execute("ALTER TABLE searches ADD COLUMN server_verified INTEGER NOT NULL DEFAULT 0")
+            self._prune_searches(connection, _MAX_SEARCH_ROWS)
+
+    def _prune_searches(self, connection: sqlite3.Connection, max_rows: int) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")
+        referenced = "id IN (SELECT search_id FROM purchase_plans WHERE search_id IS NOT NULL)"
+        connection.execute(f"DELETE FROM searches WHERE created_at < ? AND NOT {referenced}", (cutoff,))
+        connection.execute(
+            f"""
+            DELETE FROM searches
+            WHERE NOT {referenced}
+              AND length(CAST(id AS BLOB))
+                + length(CAST(query AS BLOB))
+                + length(CAST(intent_json AS BLOB))
+                + length(CAST(workflow_json AS BLOB))
+                + length(CAST(products_json AS BLOB))
+                + length(CAST(source_json AS BLOB)) > ?
+            """,
+            (_MAX_SEARCH_RECORD_BYTES,),
+        )
+        count = int(connection.execute("SELECT COUNT(*) FROM searches").fetchone()[0])
+        excess = count - max_rows
+        if excess <= 0:
+            return
+        oldest_unreferenced = connection.execute(
+            f"SELECT id FROM searches WHERE NOT {referenced} ORDER BY created_at ASC, id ASC LIMIT ?",
+            (excess,),
+        ).fetchall()
+        connection.executemany("DELETE FROM searches WHERE id = ?", [(row["id"],) for row in oldest_unreferenced])
 
     def save_search(
         self,
@@ -170,30 +222,99 @@ class Database:
         intent: dict[str, Any],
         workflow: list[dict[str, Any]],
         products: list[dict[str, Any]] | None = None,
+        source: dict[str, Any] | None = None,
     ) -> None:
+        intent_json = json.dumps(intent, ensure_ascii=False)
+        workflow_json = json.dumps(workflow, ensure_ascii=False)
+        products_json = json.dumps(products or [], ensure_ascii=False)
+        source_json = json.dumps(source or {}, ensure_ascii=False)
+        row_size = sum(len(value.encode("utf-8")) for value in (search_id, query, intent_json, workflow_json, products_json, source_json))
+        if row_size > _MAX_SEARCH_RECORD_BYTES:
+            raise ValueError("Search result is too large to retain")
         with self._connect() as connection:
+            already_exists = connection.execute("SELECT 1 FROM searches WHERE id = ?", (search_id,)).fetchone() is not None
+            self._prune_searches(connection, _MAX_SEARCH_ROWS)
+            already_exists = already_exists and connection.execute("SELECT 1 FROM searches WHERE id = ?", (search_id,)).fetchone() is not None
+            self._prune_searches(connection, _MAX_SEARCH_ROWS if already_exists else _MAX_SEARCH_ROWS - 1)
+            remaining = int(connection.execute("SELECT COUNT(*) FROM searches").fetchone()[0])
+            if not already_exists and remaining >= _MAX_SEARCH_ROWS:
+                raise RuntimeError("Search storage is at capacity; try again later.")
             connection.execute(
-                "INSERT OR REPLACE INTO searches (id, query, intent_json, workflow_json, products_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO searches (id, query, intent_json, workflow_json, products_json, source_json, server_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
                 (
                     search_id,
                     query,
-                    json.dumps(intent, ensure_ascii=False),
-                    json.dumps(workflow, ensure_ascii=False),
-                    json.dumps(products or [], ensure_ascii=False),
+                    intent_json,
+                    workflow_json,
+                    products_json,
+                    source_json,
                     now_iso(),
                 ),
             )
 
+    def get_search(self, search_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, query, intent_json, workflow_json, products_json, source_json, server_verified FROM searches WHERE id = ? AND created_at >= ?",
+                (search_id, (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            intent = json.loads(row["intent_json"])
+            workflow = json.loads(row["workflow_json"])
+            products = json.loads(row["products_json"])
+            source = json.loads(row["source_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(intent, dict) or not isinstance(workflow, list) or not isinstance(products, list):
+            return None
+        if not isinstance(source, dict) or not source:
+            mode = "clarification" if intent.get("clarifications") and not products else (
+                "sandbox" if products and all(isinstance(product, dict) and product.get("source_kind") == "sandbox_catalog" for product in products) else "unknown"
+            )
+            source = {"mode": mode}
+        return {"id": row["id"], "query": row["query"], "intent": intent, "trusted": bool(row["server_verified"]),
+                "workflow": workflow, "products": products, "source": source}
+
     def get_search_products(self, search_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
-            row = connection.execute("SELECT products_json FROM searches WHERE id = ?", (search_id,)).fetchone()
-        if not row:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")
+            row = connection.execute(
+                "SELECT products_json, server_verified FROM searches WHERE id = ? AND (created_at >= ? OR id IN (SELECT search_id FROM purchase_plans WHERE search_id IS NOT NULL))",
+                (search_id, cutoff),
+            ).fetchone()
+        if not row or not row["server_verified"]:
             return []
         try:
             products = json.loads(row["products_json"] or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             return []
         return products if isinstance(products, list) else []
+
+    def record_price_observations(self, observations: list[dict[str, Any]]) -> None:
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO price_observations
+                (product_key, product_id, source_url, seller, price, currency, source_status, observed_at)
+                VALUES (:product_key, :product_id, :source_url, :seller, :price, :currency, :source_status, :observed_at)
+                """,
+                observations,
+            )
+
+    def price_observations(self, product_key: str) -> list[dict[str, Any]]:
+        if not product_key:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT product_id, source_url, seller, price, currency, source_status, observed_at
+                FROM price_observations WHERE product_key = ? ORDER BY observed_at, id
+                """,
+                (product_key,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def upsert_google_user(self, *, google_sub: str, email: str, name: str, picture: str) -> dict[str, Any]:
         timestamp = now_iso()
@@ -364,7 +485,7 @@ class Database:
     def get_payment_attempt(self, provider_order_id: str, user_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT payload_json FROM payment_attempts WHERE provider_order_id = ? AND user_id = ?",
+                "SELECT status, payload_json FROM payment_attempts WHERE provider_order_id = ? AND user_id = ?",
                 (provider_order_id, user_id),
             ).fetchone()
         if not row:
@@ -373,7 +494,33 @@ class Database:
             value = json.loads(row["payload_json"])
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
-        return value if isinstance(value, dict) else None
+        if not isinstance(value, dict):
+            return None
+        value["status"] = row["status"]
+        return value
+
+    def claim_payment_attempt(self, provider_order_id: str, user_id: str) -> dict[str, Any] | None:
+        """Atomically let one verifier advance a created attempt."""
+        # ponytail: a process crash can strand "verifying"; reconcile with Razorpay before allowing a retry.
+        with self._connect() as connection:
+            updated = connection.execute(
+                "UPDATE payment_attempts SET status = 'verifying', updated_at = ? WHERE provider_order_id = ? AND user_id = ? AND status = 'created'",
+                (now_iso(), provider_order_id, user_id),
+            ).rowcount
+            if not updated:
+                return None
+            row = connection.execute(
+                "SELECT payload_json FROM payment_attempts WHERE provider_order_id = ? AND user_id = ?",
+                (provider_order_id, user_id),
+            ).fetchone()
+        try:
+            attempt = json.loads(row["payload_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(attempt, dict):
+            return None
+        attempt["status"] = "verifying"
+        return attempt
 
     def update_payment_attempt(self, attempt: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:
