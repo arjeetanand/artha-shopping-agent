@@ -154,12 +154,12 @@ class SecurityBoundaryContracts(unittest.TestCase):
 
         provider = SimpleNamespace(provider="elevenlabs", speak=Mock(return_value=(b"audio", "audio/mpeg")))
 
-        def post_voice(client: str) -> list[int]:
+        def post_voice(client: str, text: str = "hello") -> list[int]:
             result: list[int] = []
             handler = server.Handler.__new__(server.Handler)
             handler.path = "/api/voice/speak"
             handler.client_address = (client, 1234)
-            handler._read_json = Mock(return_value={"text": "hello"})
+            handler._read_json = Mock(return_value={"text": text})
             handler._send = lambda status, body: result.append(status)
             handler._send_bytes = lambda status, data, content_type: result.append(status)
             server.Handler.do_POST(handler)
@@ -177,6 +177,32 @@ class SecurityBoundaryContracts(unittest.TestCase):
             self.assertEqual(post_voice("192.0.2.10"), [200])
             self.assertEqual(post_voice("192.0.2.10"), [429])
             provider.speak.assert_called_once_with("hello")
+
+        provider.speak.reset_mock()
+        reserve_budget = Mock(return_value=True)
+        with (
+            patch.object(server, "VoiceService", return_value=provider),
+            patch.object(server, "reserve_global_voice_call", reserve_budget),
+            patch.object(server, "_voice_admission_lock", threading.Lock()),
+            patch.object(server, "_voice_requests_by_client", {}),
+            patch.object(server, "_last_voice_client_cleanup", 0.0),
+            patch.object(server, "_VOICE_CAPACITY", threading.BoundedSemaphore(1)),
+        ):
+            self.assertEqual(post_voice("192.0.2.13", " \n  "), [400])
+            reserve_budget.assert_not_called()
+            provider.speak.assert_not_called()
+
+        provider.speak.reset_mock()
+        with (
+            patch.object(server, "VoiceService", return_value=provider),
+            patch.object(server, "reserve_global_voice_call", return_value=False),
+            patch.object(server, "_voice_admission_lock", threading.Lock()),
+            patch.object(server, "_voice_requests_by_client", {}),
+            patch.object(server, "_last_voice_client_cleanup", 0.0),
+            patch.object(server, "_VOICE_CAPACITY", threading.BoundedSemaphore(1)),
+        ):
+            self.assertEqual(post_voice("192.0.2.12"), [429])
+            provider.speak.assert_not_called()
 
         provider.speak.reset_mock()
         capacity = threading.BoundedSemaphore(1)
@@ -217,24 +243,34 @@ class SecurityBoundaryContracts(unittest.TestCase):
             with patch.object(db_module, "_MAX_SEARCH_ROWS", 2):
                 database.save_search("expired", "old query", {}, [])
                 database.save_search("plan-search", "saved query", {}, [], products=[{"id": "p1", "price": 10}])
+                timestamp = now_iso()
+                database.save_purchase_plan({
+                    "id": "plan-1", "user_id": "user-1", "search_id": "plan-search",
+                    "status": "ready", "total": 10, "items": [{"id": "p1", "price": 10}],
+                    "created_at": timestamp, "updated_at": timestamp,
+                })
                 with database._connect() as connection:
-                    connection.execute(
-                        "INSERT INTO purchase_plans (id, user_id, search_id, status, total, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        ("plan-1", "user-1", "plan-search", "ready", 10, "{}", now_iso(), now_iso()),
-                    )
                     connection.execute("UPDATE searches SET created_at = '2000-01-01T00:00:00+00:00'")
                 database.save_search("newest", "new query", {}, [])
+                timestamp = now_iso()
+                database.save_purchase_plan({
+                    "id": "plan-2", "user_id": "user-2", "search_id": "newest",
+                    "status": "ready", "total": 0, "items": [],
+                    "created_at": timestamp, "updated_at": timestamp,
+                })
                 with database._connect() as connection:
                     ids = {row["id"] for row in connection.execute("SELECT id FROM searches")}
-                    connection.execute(
-                        "INSERT INTO purchase_plans (id, user_id, search_id, status, total, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        ("plan-2", "user-2", "newest", "ready", 0, "{}", now_iso(), now_iso()),
-                    )
                 self.assertEqual(ids, {"plan-search", "newest"})
                 self.assertIsNone(database.get_search("plan-search"))
                 self.assertEqual(database.get_search_products("plan-search")[0]["id"], "p1")
                 with self.assertRaises(RuntimeError):
                     database.save_search("overflow", "blocked", {}, [])
+                with self.assertRaisesRegex(ValueError, "Saved search expired"):
+                    database.save_purchase_plan({
+                        "id": "plan-missing", "user_id": "user-3", "search_id": "missing",
+                        "status": "ready", "total": 0, "items": [],
+                        "created_at": timestamp, "updated_at": timestamp,
+                    })
 
         with tempfile.TemporaryDirectory(prefix="artha-search-size-", dir="/private/tmp") as directory:
             database = Database(Path(directory) / "search-size.sqlite3")
@@ -268,6 +304,18 @@ class SecurityBoundaryContracts(unittest.TestCase):
                 self.assertTrue(started.wait(1))
                 first.settimeout(1)
                 first.sendall(b"GET /missing HTTP/1.1\r\nHost: localhost\r\nX-Slow: ")
+                stop_dripping = threading.Event()
+
+                def drip_header_bytes() -> None:
+                    while not stop_dripping.is_set():
+                        try:
+                            first.sendall(b"x")
+                        except OSError:
+                            return
+                        time.sleep(0.03)
+
+                dripper = threading.Thread(target=drip_header_bytes, daemon=True)
+                dripper.start()
                 second = socket.create_connection(httpd.server_address, timeout=1)
                 second.settimeout(1)
                 self.assertEqual(second.recv(1), b"")
@@ -283,6 +331,9 @@ class SecurityBoundaryContracts(unittest.TestCase):
                 response = third.recv(1024)
                 self.assertIn(b"404", response)
             finally:
+                if "stop_dripping" in locals():
+                    stop_dripping.set()
+                    dripper.join(timeout=1)
                 for connection in (first, second, third):
                     if connection is not None:
                         connection.close()

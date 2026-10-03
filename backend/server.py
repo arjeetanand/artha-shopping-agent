@@ -43,6 +43,7 @@ else:
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SHOPPINGHELP_PORT", "8000"))
 _MAX_BODY_BYTES = 8_000_000
+_MAX_VOICE_BODY_BYTES = 16 * 1024
 _BODY_READ_TIMEOUT_SECONDS = 15
 _HEADER_READ_TIMEOUT_SECONDS = 10
 _SOCKET_IDLE_TIMEOUT_SECONDS = 5
@@ -222,12 +223,12 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
-    def _read_json(self) -> dict[str, Any]:
+    def _read_json(self, max_bytes: int = _MAX_BODY_BYTES) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length < 0:
                 raise ApiError("Invalid Content-Length")
-            if length > _MAX_BODY_BYTES:
+            if length > max_bytes:
                 raise ApiError("Request is too large", 413)
             if length:
                 deadline = time.monotonic() + _BODY_READ_TIMEOUT_SECONDS
@@ -423,7 +424,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not _SEARCH_REQUEST_CAPACITY.acquire(blocking=False):
                     raise ApiError("Research service is busy; try again shortly.", 503)
                 search_request_admitted = True
-            payload = self._read_json()
+            payload = self._read_json(_MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_BODY_BYTES)
             if path == "/api/agent/search/jobs":
                 self._send(202, submit_search(payload))
                 return
@@ -490,6 +491,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, {"provider": "browser", "text": str(payload.get("text") or "")[:1800]})
                     return
                 if voice.provider == "elevenlabs":
+                    voice_text = str(payload.get("text") or "")
+                    if not " ".join(voice_text.split())[:1800]:
+                        raise ApiError("There is nothing to speak yet.")
                     admission_error = _admit_paid_voice_request(self.client_address[0])
                     if admission_error:
                         message = "Voice service is busy; try again shortly." if admission_error == 503 else "Voice request limit reached; try again later."

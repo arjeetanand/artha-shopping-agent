@@ -11,28 +11,25 @@ _MAX_GLOBAL_VOICE_CALLS_PER_HOUR = 120
 
 
 def reserve_global_voice_call(database: Database = db, *, now: datetime | None = None) -> bool:
-    """Atomically reserve one call in the current UTC hour across app workers."""
+    """Atomically reserve one call within the previous rolling hour across app workers."""
     current = now or datetime.now(timezone.utc)
     current = current.astimezone(timezone.utc)
-    window_start = current.replace(minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
-    retention_cutoff = (current - timedelta(days=1)).isoformat(timespec="seconds")
+    timestamp = current.isoformat(timespec="microseconds")
+    cutoff = (current - timedelta(hours=1)).isoformat(timespec="microseconds")
 
     with database._connect() as connection:
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS voice_call_budget (
-                window_start TEXT PRIMARY KEY,
-                request_count INTEGER NOT NULL CHECK(request_count >= 0)
+            CREATE TABLE IF NOT EXISTS voice_call_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL
             )
             """
         )
-        connection.execute("DELETE FROM voice_call_budget WHERE window_start < ?", (retention_cutoff,))
-        reservation = connection.execute(
-            """
-            INSERT INTO voice_call_budget (window_start, request_count) VALUES (?, 1)
-            ON CONFLICT(window_start) DO UPDATE SET request_count = request_count + 1
-            WHERE request_count < ?
-            """,
-            (window_start, _MAX_GLOBAL_VOICE_CALLS_PER_HOUR),
-        )
-        return reservation.rowcount == 1
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DELETE FROM voice_call_events WHERE created_at <= ?", (cutoff,))
+        count = int(connection.execute("SELECT COUNT(*) FROM voice_call_events").fetchone()[0])
+        if count >= _MAX_GLOBAL_VOICE_CALLS_PER_HOUR:
+            return False
+        connection.execute("INSERT INTO voice_call_events (created_at) VALUES (?)", (timestamp,))
+        return True

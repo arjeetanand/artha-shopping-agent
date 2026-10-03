@@ -190,12 +190,12 @@ class Database:
 
     def _prune_searches(self, connection: sqlite3.Connection, max_rows: int) -> None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")
-        referenced = "id IN (SELECT search_id FROM purchase_plans WHERE search_id IS NOT NULL)"
-        connection.execute(f"DELETE FROM searches WHERE created_at < ? AND NOT {referenced}", (cutoff,))
+        unreferenced = "id NOT IN (SELECT search_id FROM purchase_plans WHERE search_id IS NOT NULL)"
+        connection.execute(f"DELETE FROM searches WHERE created_at < ? AND {unreferenced}", (cutoff,))
         connection.execute(
             f"""
             DELETE FROM searches
-            WHERE NOT {referenced}
+            WHERE {unreferenced}
               AND length(CAST(id AS BLOB))
                 + length(CAST(query AS BLOB))
                 + length(CAST(intent_json AS BLOB))
@@ -210,7 +210,7 @@ class Database:
         if excess <= 0:
             return
         oldest_unreferenced = connection.execute(
-            f"SELECT id FROM searches WHERE NOT {referenced} ORDER BY created_at ASC, id ASC LIMIT ?",
+            f"SELECT id FROM searches WHERE {unreferenced} ORDER BY created_at ASC, id ASC LIMIT ?",
             (excess,),
         ).fetchall()
         connection.executemany("DELETE FROM searches WHERE id = ?", [(row["id"],) for row in oldest_unreferenced])
@@ -376,6 +376,15 @@ class Database:
 
     def save_purchase_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:
+            search_id = str(plan.get("search_id") or "").strip()
+            connection.execute("BEGIN IMMEDIATE")
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")
+            search = connection.execute(
+                "SELECT 1 FROM searches WHERE id = ? AND server_verified = 1 AND (created_at >= ? OR id IN (SELECT search_id FROM purchase_plans WHERE search_id IS NOT NULL))",
+                (search_id, cutoff),
+            ).fetchone()
+            if not search:
+                raise ValueError("Saved search expired before the purchase plan could be saved; run the search again")
             connection.execute(
                 """
                 INSERT INTO purchase_plans (id, user_id, search_id, status, total, payload_json, created_at, updated_at)
