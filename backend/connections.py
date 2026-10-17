@@ -67,6 +67,8 @@ def start_sync(user_id: str, provider: str) -> dict[str, Any]:
     provider = str(provider).lower().strip()
     if provider not in PROVIDERS:
         raise ValueError("Choose Amazon, Flipkart, Myntra, Ajio, or Instagram")
+    if provider == "instagram":
+        raise ValueError("Instagram's official API does not provide personal-account video history. Paste a public Reel URL into Discover to save its style.")
     if is_production():
         raise RuntimeError("Retailer login runs in the local desktop app. A hosted deployment requires a separate local connector.")
     with _lock:
@@ -92,6 +94,8 @@ def _store_invoice(user_id: str, provider: str, event: dict[str, Any], directory
     if not re.fullmatch(r"[a-f0-9]{64}\.pdf",filename):
         raise ValueError("Invalid invoice filename")
     file = directory / "invoices" / filename
+    if not file.is_file() or file.stat().st_size > 20*1024*1024:
+        raise ValueError("Retailer invoice exceeds the supported file size")
     content = file.read_bytes()
     digest = hashlib.sha256(content).hexdigest()
     if len(content)>20*1024*1024 or not content.startswith(b"%PDF-") or digest != event.get("sha256"):
@@ -223,8 +227,20 @@ def list_connections(user_id: str) -> list[dict[str, Any]]:
                 record["details"] = _snapshot(job)
                 record["status"] = job["status"]
             elif record["status"] in {"connecting","awaiting_login","syncing","indexing"}:
-                record["status"] = "interrupted"
-                record["details"]["message"] = "The app restarted before sync finished. Reconnect to resume."
+                if record["details"].get("connector") == "chrome_extension":
+                    try:
+                        started = datetime.fromisoformat(record["details"].get("started_at", "").replace("Z", "+00:00"))
+                        expired = datetime.now(timezone.utc) - started > timedelta(minutes=30)
+                    except (TypeError, ValueError):
+                        expired = True
+                    if expired:
+                        record["status"] = "interrupted"
+                        record["details"]["message"] = "The app restarted before order processing finished. Connect again to retry."
+                        db.save_account_connection(user_id, record["provider"], record["account_email"],
+                                                   record["synced_orders_count"], record["status"], record["details"])
+                else:
+                    record["status"] = "interrupted"
+                    record["details"]["message"] = "The app restarted before sync finished. Reconnect to resume."
             record.pop("details_json",None)
     return records
 

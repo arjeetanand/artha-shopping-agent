@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { TalkDrawer } from './components/TalkDrawer';
+import { HomeVoiceAssistant } from './components/HomeVoiceAssistant';
 import { SocialThemeBar } from './components/SocialThemeBar';
 import { registerWebMCPCommerceTools } from './lib/webmcp';
 import { getSpeechRecognition, requestMicrophone, speechErrorMessage, stopMicrophone } from './lib/speechRecognition';
 import { Card3D } from './components/Card3D';
-import { BagsPurchaseTracker, BagFolderCard, BagDetailModal, DEMO_BAGS } from './components/BagsPurchaseTracker';
+import { BagsPurchaseTracker, BagFolderCard, BagDetailModal, planToBag } from './components/BagsPurchaseTracker';
 import { TasteGraphView } from './components/TasteGraphView';
 import { HowArthaWorks } from './components/HowArthaWorks';
 import {
@@ -1131,6 +1132,12 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
   const cleanDesc = sanitizeSnippet(product.description);
   const sizes = Array.isArray(product.sizes) ? product.sizes : [];
   const colors = Array.isArray(product.colors) ? product.colors : [];
+  const matchKindLabel = product.match_kind_label || (product.match_kind === 'exact_match' ? 'Verified exact match' : 'Visually similar match');
+  const isExactMatch = product.match_kind === 'exact_match';
+  const availabilityLabel = product.availability_label || (product.in_stock === false ? 'Out of stock' : 'In stock / available');
+  const retrievedTimeText = product.retrieved_at
+    ? new Date(product.retrieved_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
+    : '';
 
   return (
     <Card3D
@@ -1146,6 +1153,13 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
         <ProductThumb product={product} />
         <div className="product-card__badges">
           <SourceMark product={product} />
+          <span
+            className={`match-kind-badge ${isExactMatch ? 'is-exact' : 'is-similar'}`}
+            data-testid="product-match-kind-badge"
+            title={matchKindLabel}
+          >
+            {matchKindLabel}
+          </span>
           <span className={`match-badge ${product.eligible === false ? 'is-invalid' : ''}`} title={product.eligible === false ? product.reason_tags?.join(' · ') : `Match Score: ${product.match_score || 90}%`}>
             <Icon name="spark" size={12} />
             <span>{product.eligible === false ? 'Not a fit' : `${product.match_score || 92}% Match`}</span>
@@ -1178,21 +1192,41 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
               )}
             </span>
           </div>
+          <small className="product-card__availability" data-testid="product-availability-meta">
+            {availabilityLabel}{retrievedTimeText ? ` · Observed ${retrievedTimeText}` : ''}
+          </small>
           {live && !product.lowest_current_offer ? <small className="product-card__price-signal is-unverified">Price not directly verified · confirm at retailer</small> : null}
           {product.quantity > 1 ? <small className="product-card__quantity-note">{product.quantity} units · {formatPrice(product.unit_total || product.total_price)} each</small> : null}
           <div className="product-card__delivery">
             <Icon name="truck" size={14} />
             <span>{product.delivery_label || 'Confirm at store'}</span>
           </div>
-          {sizes.length || colors.length ? (
-            <small className="product-card__variant">
-              {sizes.length ? `Sizes: ${sizes.slice(0, 4).join(', ')}` : ''}
-              {sizes.length && colors.length ? ' · ' : ''}
+          {product.size_status || sizes.length || colors.length ? (
+            <small className="product-card__variant" data-testid="product-size-status">
+              {product.size_status ? product.size_status : sizes.length ? `Sizes: ${sizes.slice(0, 4).join(', ')}` : ''}
+              {(product.size_status || sizes.length) && colors.length ? ' · ' : ''}
               {colors.length ? `Colours: ${colors.slice(0, 3).join(', ')}` : ''}
             </small>
           ) : null}
           {product.lowest_current_offer ? <small className="product-card__price-signal">{product.current_offers?.length > 1 ? 'Lowest checked matching offer' : 'Directly checked price'} {formatPrice(product.lowest_current_offer.price)} · {product.current_offers?.length || 1} {product.current_offers?.length === 1 ? 'store' : 'stores'}</small> : null}
+          {product.match_explanation ? (
+            <p className="product-card__match-explanation" data-testid="product-match-explanation">
+              {product.match_explanation}
+            </p>
+          ) : null}
           <small className={`constraint-note ${product.eligible === false ? 'is-invalid' : ''}`}>{(product.reason_tags || []).join(' · ')}</small>
+          {product.url ? (
+            <a
+              href={product.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="product-card__direct-link"
+              data-testid="product-direct-link"
+            >
+              <span>{product.seller || 'Retailer'} direct product link</span>
+              <Icon name="external" size={12} />
+            </a>
+          ) : null}
         </div>
 
         <div className="product-card__actions">
@@ -1699,6 +1733,9 @@ function DiscoverView({
   useProfile,
   onToggleProfile,
   onOpenTasteGraph,
+  plans,
+  isPlansLoading,
+  onAssistantSearchResult,
 }) {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
   const [homeInspectBag, setHomeInspectBag] = useState(null);
@@ -1755,6 +1792,13 @@ function DiscoverView({
   return (
     <div ref={discoverRef} className="discover-layout">
       <section className="main-column">
+        <HomeVoiceAssistant
+          user={user}
+          health={health}
+          location={location}
+          onSearchComplete={onAssistantSearchResult}
+        />
+
         <div className="hero-copy">
           <div className="hero-copy__intro">
             <span className="hero-eyebrow">A little more thought in every buy</span>
@@ -1866,28 +1910,54 @@ function DiscoverView({
                 <div className="home-bags-showcase__header">
                   <div className="home-bags-showcase__title-wrap">
                     <span className="section-kicker">
-                      <Icon name="spark" size={13} /> Curated Starter Missions
+                      <Icon name="spark" size={13} /> {plans.length ? 'Your saved bags' : 'Starter missions'}
                     </span>
-                    <h2 id="home-bags-title">Explore Popular Shopping Bags</h2>
+                    <h2 id="home-bags-title">{plans.length ? 'Continue a saved bag' : 'Start a shopping mission'}</h2>
                     <p>
-                      Browse pre-researched bags across top retailers, inspect verified prices, or launch an instant research mission with Artha.
+                      {plans.length
+                        ? 'Your saved items, retailer links, and totals, loaded from your account.'
+                        : 'Choose a brief to start. Artha will find retailer items and check prices when you launch a mission.'}
                     </p>
                   </div>
                   <span className="home-bags-showcase__hint">
-                    Tap &ldquo;View Bag&rdquo; to inspect or &ldquo;Research&rdquo; to run Artha
+                    {plans.length ? 'View a saved bag or research it again' : 'Choose a brief to run Artha'}
                   </span>
                 </div>
 
-                <div className="bags-tracker__shelf bags-tracker__shelf--grid">
-                  {DEMO_BAGS.map((bag) => (
-                    <BagFolderCard
-                      key={bag.id}
-                      bag={bag}
-                      onInspect={(b) => setHomeInspectBag(b)}
-                      onResearch={handleBagResearch}
-                    />
-                  ))}
-                </div>
+                {plans.length ? (
+                  <div className="bags-tracker__shelf bags-tracker__shelf--grid">
+                    {plans.slice(0, 3).map((plan, index) => {
+                      const bag = planToBag(plan, index);
+                      return (
+                        <BagFolderCard
+                          key={bag.id}
+                          bag={bag}
+                          onInspect={setHomeInspectBag}
+                          onResearch={handleBagResearch}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : isSessionLoading || isPlansLoading ? (
+                  <p className="home-bags-showcase__empty" role="status">Loading your saved bags…</p>
+                ) : (
+                  <div className="home-bags-showcase__empty">
+                    <p>No saved bags yet. Start with one of these briefs:</p>
+                    <div className="home-bags-showcase__suggestions">
+                      {SUGGESTED_SEARCHES.map((prompt) => (
+                        <button
+                          type="button"
+                          key={prompt}
+                          className="suggestion-chip"
+                          onClick={() => handleBagResearch({ briefQuery: prompt })}
+                        >
+                          <Icon name="spark" size={12} />
+                          <span>{prompt}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
             )
           ) : (
@@ -2253,7 +2323,7 @@ function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn, onToas
         <div className="plans-guest-banner">
           <div className="plans-guest-banner__info">
             <span className="plans-guest-banner__dot" />
-            <span>Viewing demonstration purchase bags. Sign in with Google to sync and save your private research plans.</span>
+            <span>Sign in with Google to sync your private purchase plans across devices.</span>
           </div>
           <button type="button" className="secondary-button" onClick={onSignIn}>
             <Icon name="user" size={14} />
@@ -2901,12 +2971,6 @@ export default function App() {
     [result.products, selectedIds],
   );
 
-  const refreshPlans = useCallback(async () => {
-    if (!user?.id) return;
-    const body = await getPlans();
-    setPlans(body.plans || []);
-  }, [user?.id]);
-
   const refreshOrders = useCallback(async () => {
     if (!user?.id) return;
     const [checkoutBody, retailerBody] = await Promise.all([getOrders(), getProfileOrders()]);
@@ -2940,7 +3004,7 @@ export default function App() {
       if (session?.user) setUser(session.user);
       if (nextVoice) {
         setVoice(nextVoice);
-        if (nextVoice.provider === 'kokoro') {
+        if (nextVoice.provider === 'kokoro' || nextVoice.provider === 'local') {
           warmVoice()
             .then((warmState) => setVoice((current) => ({ ...current, ...warmState })))
             .catch(() => {
@@ -2982,8 +3046,20 @@ export default function App() {
   }, [savedIds]);
 
   useEffect(() => {
-    if (activeView === 'plans') refreshPlans().catch((error) => setToast(error.message));
-  }, [activeView, refreshPlans]);
+    if (!user?.id) {
+      setPlans([]);
+      setIsPlansLoading(false);
+      return undefined;
+    }
+    if (activeView !== 'plans' && activeView !== 'discover') return undefined;
+    let active = true;
+    setIsPlansLoading(true);
+    getPlans()
+      .then((body) => { if (active) setPlans(body.plans || []); })
+      .catch((error) => { if (active) setToast(error.message); })
+      .finally(() => { if (active) setIsPlansLoading(false); });
+    return () => { active = false; };
+  }, [activeView, user?.id]);
 
   useEffect(() => {
     if (activeView !== 'orders') return undefined;
@@ -3146,6 +3222,27 @@ export default function App() {
     },
     [handleSearchWithPayload, postUrl, query, reference],
   );
+
+  const handleAssistantSearchResult = useCallback((body) => {
+    if (!body || !Array.isArray(body.products)) return;
+    setResult(body);
+    if (body.intent) {
+      setMission(missionFromIntent(body.intent));
+      if (body.intent.raw_query) setQuery(body.intent.raw_query);
+    }
+    const nextProducts = Array.isArray(body.products) ? body.products : [];
+    setSelectedIds(
+      Array.isArray(body.selected_product_ids)
+        ? body.selected_product_ids
+        : nextProducts.slice(0, 3).map((product) => product.id),
+    );
+    setFocusedId(nextProducts[0]?.id || '');
+    setToast(
+      nextProducts.length
+        ? `Found ${nextProducts.length} source-backed product${nextProducts.length === 1 ? '' : 's'} matching your conversation.`
+        : 'No matching purchasable product pages found yet.',
+    );
+  }, []);
 
   const handlePickPrompt = useCallback(
     (prompt) => {
@@ -3338,7 +3435,7 @@ export default function App() {
     }
     setIsSavingPlan(true);
     try {
-      const body = await createPlan({ search_id: result.search_id, products: selectedProducts });
+      const body = await createPlan({ name: query, search_id: result.search_id, products: selectedProducts });
       setPlans((current) => [body.plan, ...current.filter((plan) => plan.id !== body.plan.id)]);
       clearPendingSearch();
       setAuthAction(null);
@@ -3357,7 +3454,7 @@ export default function App() {
     } finally {
       setIsSavingPlan(false);
     }
-  }, [isSavingPlan, result.search_id, selectedProducts, user]);
+  }, [isSavingPlan, query, result.search_id, selectedProducts, user]);
 
   useEffect(() => {
     if (user?.id && postAuthAction === 'save_plan' && selectedProducts.length && !isSavingPlan) {
@@ -3612,6 +3709,9 @@ export default function App() {
         useProfile={useProfile}
         onToggleProfile={() => setUseProfile((current) => !current)}
         onOpenTasteGraph={() => setActiveView('taste-graph')}
+        plans={plans}
+        isPlansLoading={isPlansLoading}
+        onAssistantSearchResult={handleAssistantSearchResult}
       />
     ) : activeView === 'taste-graph' ? (
       <TasteGraphView

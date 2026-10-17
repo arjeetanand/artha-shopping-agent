@@ -30,7 +30,7 @@ from .taste_memory import remember_orders
 
 
 GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1/users/me"
-GMAIL_SEARCH = "{from:amazon.in from:amazon.com from:flipkart.com from:myntra.com}"
+GMAIL_SEARCH = "label:Shopping OR ({from:amazon.in from:amazon.com from:flipkart.com from:myntra.com} -label:\"Mutual Funds\" -label:\"Job Applications\" -label:\"Credit Card Bills\")"
 _MAX_PDF_BYTES = 20 * 1024 * 1024
 _MAX_MESSAGE_TEXT_BYTES = 1_000_000
 _TRANSACTION_RE = re.compile(r"\b(order|invoice|receipt|shipped|shipment|delivered|dispatch|refund|return|purchase|placed|confirmed)\b", re.I)
@@ -334,7 +334,7 @@ def start_gmail_sync(user_id: str) -> dict[str, Any]:
         job = {"id": "gmail-" + hashlib.sha256(f"{user_id}:{time.time_ns()}".encode()).hexdigest()[:20],
                "user_id": user_id, "email": stored["account_email"], "status": "syncing",
                "message": "Searching Amazon, Flipkart, and Myntra emails in Gmail.", "messages_scanned": 0,
-               "orders": 0, "invoices": 0, "skipped": 0, "errors": 0, "started_at": now_iso()}
+               "orders": 0, "invoices": 0, "skipped": 0, "errors": 0, "unreadable_products": 0, "started_at": now_iso()}
         _JOBS[user_id] = job
         _persist(job)
         job["thread"] = threading.Thread(target=_run_sync, args=(job,), daemon=True, name="gmail-receipt-sync")
@@ -377,18 +377,18 @@ def _save_attachments(user_id: str, provider: str, order_id: str, attachments: l
     return texts
 
 
-def _process_message(user_id: str, message_id: str, access_token: str) -> tuple[str, str, list[dict[str, Any]]]:
+def _process_message(user_id: str, message_id: str, access_token: str) -> tuple[str, str, list[dict[str, Any]], int]:
     message = _google_get(f"messages/{urllib.parse.quote(message_id, safe='')}", access_token, {"format": "full"})
     provider = _provider(message)
     if not provider:
-        return "skipped", "", []
+        return "skipped", "", [], 0
     subject = _header(message, "Subject")
     text, links, attachments = _parts(message, message_id, access_token)
     if not attachments and not _TRANSACTION_RE.search(subject + "\n" + text):
-        return "skipped", provider, []
+        return "skipped", provider, [], 0
     date_value = _message_date(message)
     if not date_value:
-        return "unreadable", provider, []
+        return "unreadable", provider, [], 0
     order_id = _order_id(subject + "\n" + text, message_id)
     pdf_text = _save_attachments(user_id, provider, order_id, attachments)
     items = _items_from_links(provider, links)
@@ -399,8 +399,8 @@ def _process_message(user_id: str, message_id: str, access_token: str) -> tuple[
         evidence = hashlib.sha256(f"gmail:{message_id}:{provider}".encode("utf-8")).hexdigest()
         orders = ingest_gmail_orders(user_id, provider, [{"id": order_id, "order_date": date_value,
             "items": items, "evidence_hash": evidence, "invoice_status": "available" if attachments else "unavailable"}])
-    result = "imported" if orders and attachments else "order_only" if orders else "invoice_only" if attachments else "unreadable"
-    return result, provider, orders
+    result = "imported" if orders and attachments else "order_only" if orders else "invoice_only" if attachments else "skipped"
+    return result, provider, orders, len(attachments)
 
 
 def _run_sync(job: dict[str, Any]) -> None:
@@ -423,24 +423,28 @@ def _run_sync(job: dict[str, Any]) -> None:
                 if not message_id or len(message_id) > 256:
                     job["errors"] += 1
                     continue
+                job["messages_scanned"] += 1
                 if db.has_gmail_import(user_id, message_id):
                     job["skipped"] += 1
                     continue
                 try:
-                    result, provider, orders = _process_message(user_id, message_id, access_token)
-                    db.save_gmail_import(user_id, message_id, provider, result)
-                    job["messages_scanned"] += 1
+                    result, provider, orders, invoice_count = _process_message(user_id, message_id, access_token)
+                    if result != "unreadable":
+                        db.save_gmail_import(user_id, message_id, provider, result)
                     if result in {"imported", "order_only"}:
                         for order in orders:
                             imported_orders[order["id"]] = order
-                    if result in {"imported", "invoice_only"}:
-                        job["invoices"] += 1
+                    job["invoices"] += invoice_count
                     if result in {"order_only", "imported"}:
                         job["orders"] += len(orders)
                     if result == "unreadable":
                         job["errors"] += 1
-                except GmailSyncError:
-                    raise
+                    elif result == "invoice_only":
+                        job["unreadable_products"] += 1
+                except GmailSyncError as error:
+                    if error.fatal:
+                        raise
+                    job["errors"] += 1
                 except Exception:
                     job["errors"] += 1
                 if job["messages_scanned"] % 25 == 0:
@@ -454,11 +458,13 @@ def _run_sync(job: dict[str, Any]) -> None:
         if job["status"] == "cancelled":
             job["message"] = "Gmail sync cancelled. Imported products and invoices are kept."
         else:
-            job["coverage_complete"] = job["errors"] == 0
+            job["coverage_complete"] = job["errors"] == 0 and job["unreadable_products"] == 0
             job["message"] = f"Checked {job['messages_scanned']} retailer emails; imported {job['orders']} orders and {job['invoices']} invoice PDFs."
             if job["errors"]:
                 job["message"] += f" {job['errors']} emails could not be fully read; run sync again to retry them."
-            _persist(job, "partial" if job["errors"] else "synced")
+            if job["unreadable_products"]:
+                job["message"] += f" {job['unreadable_products']} invoice PDFs had no readable product titles."
+            _persist(job, "partial" if job["errors"] or job["unreadable_products"] else "synced")
     except Exception as error:
         job["errors"] += 1
         job["coverage_complete"] = False
@@ -480,6 +486,7 @@ def disconnect_gmail(user_id: str) -> dict[str, Any]:
         job = _JOBS.get(user_id)
         if job and job["status"] in _ACTIVE:
             job["status"] = "cancelled"
+        _JOBS.pop(user_id, None)
     revoke_error = False
     if stored:
         try:

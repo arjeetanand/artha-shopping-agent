@@ -1,66 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Icon } from './Icon';
 import { Card3D } from './Card3D';
-
-export const DEMO_BAGS = [
-  {
-    id: 'bag-japan-2026',
-    title: 'Japan Trip 2026',
-    subtitle: 'Track travel purchases, organize trip essentials, and manage everything you need',
-    briefQuery: 'Japan travel essentials: lightweight linen daypack, vintage 35mm rangefinder camera, custom leather passport case under ₹2,00,000',
-    color: '#F8D148',
-    colorLight: '#FFF8D6',
-    textColor: '#8C6C00',
-    itemCount: '8 of 12 items',
-    totalPrice: '₹1,87,300',
-    numericTotal: 187300,
-    stickers: ['⛩️', '👒', '📷', '🌸'],
-    status: 'active',
-    items: [
-      { id: 'j1', name: 'Handcrafted Linen Tokyo Daypack', seller: 'Etsy', price: 8200, delivery: 'Arrives in 4 days', iconColor: '#F16521' },
-      { id: 'j2', name: 'Vintage 35mm Rangefinder Camera', seller: 'eBay', price: 14900, delivery: 'Arrives in 6 days', iconColor: '#0064D2' },
-      { id: 'j3', name: 'Custom Travel Leather Passport Case', seller: 'Zazzle', price: 2490, delivery: 'Express dispatch', iconColor: '#111111' },
-    ],
-  },
-  {
-    id: 'bag-school-desk',
-    title: 'Workstation & Desk 2026',
-    subtitle: 'Organize workstation essentials, track ergonomic gear, and stay ready for work',
-    briefQuery: 'Ergonomic workstation gear: high-back mesh chair, dual monitor arm, mechanical wireless keyboard under ₹35,000',
-    color: '#1EA7FD',
-    colorLight: '#E5F5FF',
-    textColor: '#026AA7',
-    itemCount: '5 of 7 items',
-    totalPrice: '₹34,800',
-    numericTotal: 34800,
-    stickers: ['⚽', '💻', '🎧', '⚡'],
-    status: 'active',
-    items: [
-      { id: 'd1', name: 'Featherlite Liberate High-Back Mesh', seller: 'Flipkart', price: 12490, delivery: 'Arrives in 2 days', iconColor: '#2874F0' },
-      { id: 'd2', name: 'Dual-Monitor Ergonomic Gas Spring Arm', seller: 'Amazon', price: 4899, delivery: 'Prime Next-day', iconColor: '#FF9900' },
-      { id: 'd3', name: 'Keychron K2 Wireless Mechanical Keyboard', seller: 'Amazon', price: 8199, delivery: 'Prime in 2 days', iconColor: '#FF9900' },
-    ],
-  },
-  {
-    id: 'bag-emmas-party',
-    title: "Emma's Celebration",
-    subtitle: "Plan everything for Emma's big day and keep all outfits, gifts, & decor organized",
-    briefQuery: "Celebration event outfit and essentials: vintage silk slip midi dress, instax mini camera, balloon garland under ₹55,000",
-    color: '#F04D99',
-    colorLight: '#FFE8F3',
-    textColor: '#9E165A',
-    itemCount: '5 of 11 items',
-    totalPrice: '₹54,200',
-    numericTotal: 54200,
-    stickers: ['🧸', '🕶️', '🎂', '✨'],
-    status: 'active',
-    items: [
-      { id: 'p1', name: 'Pastel Vintage Silk Slip Midi Dress', seller: 'Poshmark', price: 6900, delivery: 'Standard 3 days', iconColor: '#79242F' },
-      { id: 'p2', name: 'Fujifilm Instax Mini 12 Camera Kit', seller: 'Amazon', price: 7499, delivery: 'Arrives tomorrow', iconColor: '#FF9900' },
-      { id: 'p3', name: 'Custom Foil Balloon Arch & Garland', seller: 'Zazzle', price: 3850, delivery: 'Made to order', iconColor: '#111111' },
-    ],
-  },
-];
+import { formatPrice, productTotal } from '../data';
 
 const COLOR_PALETTE = [
   { color: '#F8D148', colorLight: '#FFF8D6', textColor: '#8C6C00' },
@@ -70,6 +11,43 @@ const COLOR_PALETTE = [
   { color: '#10B981', colorLight: '#ECFDF5', textColor: '#065F46' },
 ];
 
+export function planToBag(plan, index = 0) {
+  const palette = COLOR_PALETTE[index % COLOR_PALETTE.length];
+  const items = (Array.isArray(plan?.items) ? plan.items : []).map((item) => ({
+    id: item.id,
+    name: item.name || 'Retailer item',
+    seller: item.seller || 'Retailer',
+    price: productTotal(item),
+    delivery: item.delivery_label || 'Confirm at retailer',
+    url: item.url,
+    iconColor: '#0694D6',
+  }));
+  const sellers = [...new Set(items.map((item) => item.seller))];
+  const savedTotal = Number(plan?.total);
+  const numericTotal = Number.isFinite(savedTotal) && savedTotal > 0
+    ? savedTotal
+    : items.reduce((sum, item) => sum + item.price, 0);
+  const name = String(plan?.name || '').trim();
+
+  return {
+    id: plan?.id,
+    isUserPlan: true,
+    title: name || items[0]?.name || 'Saved purchase plan',
+    subtitle: `${items.length} saved ${items.length === 1 ? 'item' : 'items'}${sellers.length ? ` across ${sellers.join(', ')}` : ''}`,
+    briefQuery: name || items.map((item) => item.name).slice(0, 3).join(', '),
+    color: palette.color,
+    colorLight: palette.colorLight,
+    textColor: palette.textColor,
+    itemCount: `${items.length} saved ${items.length === 1 ? 'item' : 'items'}`,
+    totalPrice: formatPrice(numericTotal),
+    numericTotal,
+    stickers: ['🛍️', '📦', '🔎', '✨'],
+    status: 'active',
+    items,
+    rawPlan: plan,
+  };
+}
+
 export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToast }) {
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'archived' | 'all'
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,42 +55,7 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
   const [sortBy, setSortBy] = useState('recent'); // 'recent' | 'price-high' | 'price-low'
   const [inspectBag, setInspectBag] = useState(null);
 
-  // Convert user plans to the Bags format
-  const userBags = useMemo(() => {
-    return plans.map((plan, index) => {
-      const palette = COLOR_PALETTE[index % COLOR_PALETTE.length];
-      const items = (plan.items || []).map((it) => ({
-        id: it.id,
-        name: it.name,
-        seller: it.seller || 'Verified Retailer',
-        price: it.price || 0,
-        delivery: it.delivery_label || 'Confirmed shipping',
-        url: it.url,
-        iconColor: '#0694D6',
-      }));
-      return {
-        id: plan.id,
-        isUserPlan: true,
-        title: plan.name || `Private Plan #${plan.id.slice(-4).toUpperCase()}`,
-        subtitle: plan.notice || 'Verified research plan ready for retailer handoff',
-        color: palette.color,
-        colorLight: palette.colorLight,
-        textColor: palette.textColor,
-        itemCount: `${items.length} of ${items.length} items verified`,
-        totalPrice: `₹${Number(plan.total || 0).toLocaleString('en-IN')}`,
-        numericTotal: Number(plan.total || 0),
-        stickers: ['🛒', '🏷️', '📦', '✨'],
-        status: 'active',
-        items,
-        rawPlan: plan,
-      };
-    });
-  }, [plans]);
-
-  // Combine user bags with demo showcase bags
-  const allBags = useMemo(() => {
-    return [...userBags, ...DEMO_BAGS];
-  }, [userBags]);
+  const allBags = useMemo(() => plans.map(planToBag), [plans]);
 
   // Filter & sort
   const filteredBags = useMemo(() => {
@@ -237,8 +180,8 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
       {filteredBags.length === 0 && (
         <div className="bags-tracker__empty">
           <span className="bags-tracker__empty-icon">🎒</span>
-          <h3>No matching bags found</h3>
-          <p>Try clearing your search query or create a new research brief with Artha's 7 agents.</p>
+          <h3>{plans.length ? 'No matching bags found' : 'No saved bags yet'}</h3>
+          <p>{plans.length ? 'Try clearing your search query or create a new research brief with Artha.' : 'Research a brief, choose retailer items, and save your first purchase plan.'}</p>
           <button type="button" className="primary-button" onClick={onDiscover}>
             <span>New Research Brief</span>
             <Icon name="arrow" size={16} />
@@ -417,7 +360,7 @@ export function BagDetailModal({
 
         <div className="bags-modal__footer">
           <div className="bags-modal__total-display">
-            <span>Verified subtotal:</span>
+            <span>Known subtotal:</span>
             <strong>{bag.totalPrice}</strong>
           </div>
           <div className="bags-modal__footer-btns">

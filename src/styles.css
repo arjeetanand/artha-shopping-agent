@@ -1,39 +1,39 @@
 @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 
-/* ─── Design Tokens & Theme Variables ─────────────────────────────────────── */
+/* ─── Design Tokens & Theme Variables (Gen-Z Neo-Minimalist Editorial) ────── */
 :root {
-  /* ── SLNG-inspired neutral and green palette ── */
-  --bg-app:         #F3F1EC;
-  --bg-deep:        #EAE7E0;
+  /* ── Warm Editorial Paper Canvas ── */
+  --bg-app:         #F5F3ED;
+  --bg-deep:        #EBE8DE;
 
-  /* ── Surfaces (Warm Paper & Card Ivory) ── */
+  /* ── Surfaces (Warm Paper & Frosted Card Ivory) ── */
   --surface:        #FFFEFA;
   --surface-solid:  #FFFEFA;
   --surface-subtle: #F1EFE8;
-  --surface-hover:  #EBE9E0;
+  --surface-hover:  #EAE6DC;
   --surface-raised: #FFFEFA;
 
   /* ── Borders & Rules ── */
   --line:         #E5E1D7;
   --line-subtle:  #EDEAE2;
-  --line-strong:  #D4D0C5;
-  --line-glow:    rgba(0, 187, 127, 0.2);
+  --line-strong:  #D4CFC3;
+  --line-glow:    rgba(169, 79, 50, 0.28);
 
-  /* ── NavRail (Deep Forest Green) ── */
-  --rail-bg:     #15120D;
+  /* ── NavRail (Deep Forest Obsidian) ── */
+  --rail-bg:     #16261F;
   --rail-border: rgba(255, 255, 255, 0.08);
   --rail-text:   #F3F1EC;
-  --rail-muted:  #B4B4B3;
+  --rail-muted:  #9EACA3;
   --rail-hover:  rgba(255, 255, 255, 0.07);
-  --rail-active: rgba(255, 255, 255, 0.12);
+  --rail-active: rgba(255, 255, 255, 0.13);
 
-  /* Darkened SLNG green keeps white action labels readable. */
-  --primary:       #007A67;
-  --primary-hover: #006B5A;
-  --primary-light: rgba(0, 187, 127, 0.08);
-  --primary-ring:  rgba(0, 187, 127, 0.22);
-  --glow-cyan:     0 4px 16px rgba(0, 187, 127, 0.18);
+  /* ── Primary Brand Action (Terracotta) ── */
+  --primary:       #A94F32;
+  --primary-hover: #8E3F27;
+  --primary-light: rgba(169, 79, 50, 0.08);
+  --primary-ring:  rgba(169, 79, 50, 0.22);
+  --glow-cyan:     0 6px 20px rgba(169, 79, 50, 0.2);
 
   /* ── Accent — Cobalt Blue (Verified Retailer Sources) ── */
   --accent-blue:        #2D5BD1;
@@ -42,13 +42,13 @@
   --accent-blue-border: rgba(45, 91, 209, 0.22);
 
   /* ── Accent — Emerald (Verified / Complete Status) ── */
-  --emerald:        #007A67;
+  --emerald:        #1E7A56;
   --emerald-soft:   #EDF8F4;
-  --emerald-border: rgba(0, 122, 103, 0.22);
-  --emerald-text:   #005E4D;
+  --emerald-border: rgba(30, 122, 86, 0.24);
+  --emerald-text:   #14593E;
 
-  /* ── Accent — Coral & Warning ── */
-  --coral:      #B4541C;
+  /* ── Accent — Coral & Price Highlight ── */
+  --coral:      #A94F32;
   --coral-soft: #FFF0EB;
 
   /* ── Error & Alert ── */
@@ -56,30 +56,31 @@
   --danger-soft: #FEF3F2;
 
   /* ── Typography & Ink ── */
-  --ink:           #15120D;
-  --ink-secondary: #3C3B3B;
-  --muted:         #737373;
-  --faint:         #8A8783;
+  --ink:           #1A211C;
+  --ink-secondary: #4A524C;
+  --muted:         #68706A;
+  --faint:         #8A8F8B;
 
   /* ── Fonts ── */
   --serif: 'Instrument Serif', Georgia, serif;
   --sans:  'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --mono:  'JetBrains Mono', monospace;
+  --mono:  'DM Mono', 'JetBrains Mono', monospace;
 
-  /* ── Elevations (Tactile Natural Paper) ── */
-  --shadow-xs: 0 1px 2px rgba(34, 42, 36, 0.04);
-  --shadow-sm: 0 2px 8px rgba(34, 42, 36, 0.06), 0 0 0 1px #E5E1D7;
-  --shadow-md: 0 8px 24px rgba(34, 42, 36, 0.07), 0 0 0 1px #E5E1D7;
-  --shadow-lg: 0 16px 40px rgba(34, 42, 36, 0.09), 0 0 0 1px #E5E1D7;
-  --shadow-xl: 0 24px 64px rgba(34, 42, 36, 0.12), 0 0 0 1px #E5E1D7;
-  --shadow-primary: 0 4px 16px rgba(0, 107, 90, 0.25);
-  --shadow-card: 0 2px 12px rgba(34, 42, 36, 0.05), 0 0 0 1px #E5E1D7;
+  /* ── Elevations & Spring Physics ── */
+  --spring-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --shadow-xs: 0 1px 2px rgba(22, 38, 31, 0.04);
+  --shadow-sm: 0 2px 10px -2px rgba(22, 38, 31, 0.06), 0 0 0 1px rgba(34, 42, 36, 0.07);
+  --shadow-md: 0 10px 28px -6px rgba(22, 38, 31, 0.09), 0 0 0 1px rgba(34, 42, 36, 0.08);
+  --shadow-lg: 0 18px 42px -8px rgba(22, 38, 31, 0.12), 0 0 0 1px rgba(34, 42, 36, 0.08);
+  --shadow-xl: 0 26px 64px -12px rgba(22, 38, 31, 0.16), 0 0 0 1px rgba(34, 42, 36, 0.08);
+  --shadow-primary: 0 4px 16px rgba(169, 79, 50, 0.28);
+  --shadow-card: 0 4px 16px -2px rgba(22, 38, 31, 0.06), 0 0 0 1px rgba(34, 42, 36, 0.07);
 
-  /* ── Surfaces ── */
-  --glass-bg:      #FFFEFA;
-  --glass-border:  #E5E1D7;
-  --glass-blur:    blur(0px);
-  --glass-blur-sm: blur(0px);
+  /* ── Glassmorphic Surfaces ── */
+  --glass-bg:      rgba(255, 254, 250, 0.88);
+  --glass-border:  rgba(229, 225, 215, 0.85);
+  --glass-blur:    blur(20px) saturate(150%);
+  --glass-blur-sm: blur(12px) saturate(140%);
 }
 
 /* ─── Global Resets & Base ─────────────────────────────────────────────────── */
@@ -1037,13 +1038,13 @@ button:disabled {
 
 .product-card:hover {
   border-color: var(--line-glow);
-  box-shadow: 0 22px 40px -10px rgba(0, 0, 0, 0.6), var(--glow-cyan);
-  transform: perspective(1000px) translateZ(28px) rotateX(3.5deg) translateY(-4px);
+  box-shadow: var(--shadow-lg), var(--glow-cyan);
+  transform: translateY(-3px) scale(1.005);
 }
 
 .product-card.is-selected {
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary), var(--glow-cyan), var(--shadow-md);
+  box-shadow: 0 0 0 1.5px var(--primary), var(--glow-cyan), var(--shadow-md);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1088,19 +1089,19 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 99px;
-  background: rgba(5, 10, 20, 0.85);
-  color: var(--primary);
+  background: rgba(22, 38, 31, 0.9);
+  color: #FFFEFA;
   font-size: 11px;
   font-weight: 700;
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(99, 213, 255, 0.2);
-  box-shadow: var(--glow-cyan);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: var(--shadow-sm);
 }
 
 .match-badge .icon {
-  color: var(--primary);
+  color: #FCD4C7;
 }
 
 .product-card__body {
@@ -1166,7 +1167,7 @@ button:disabled {
   margin-top: 2px;
   font-size: 11px;
   font-weight: 600;
-  color: #FCD34D;
+  color: #B45309;
 }
 
 .product-card__delivery {
@@ -7600,6 +7601,21 @@ img.product-thumb {
   padding: 6px 14px;
   border-radius: 99px;
   white-space: nowrap;
+}
+
+.home-bags-showcase__empty {
+  display: grid;
+  gap: 12px;
+  color: var(--ink-secondary, #596159);
+  font-size: 13px;
+}
+
+.home-bags-showcase__empty p { margin: 0; }
+
+.home-bags-showcase__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 @media (max-width: 768px) {

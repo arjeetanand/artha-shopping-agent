@@ -25,7 +25,7 @@ The easiest way to start both the Python backend and the Vite frontend together:
 # or: npm start
 ```
 
-Taste OS: sign in with Google, open **Taste OS**, and click **Connect** beside a retailer. Complete retailer login and OTP in the separate Chrome window. The connector reads the last six calendar months of visible order history, downloads available invoice PDFs, and reports missing invoices or incomplete pagination. It never substitutes sample purchases. This requires running the app on your desktop with Chrome installed; hosted deployments need a separate local connector.
+Taste OS: sign in with Google and open **Taste OS**. Amazon India, Flipkart, Myntra, and AJIO use the Chrome extension in `extension/`: click **Connect**, then sign in on the retailer tab Chrome opens. The extension sends only order fields needed for import in one batch; Artha never receives retailer passwords, cookies, or delivery addresses. It reads the last six calendar months and reports incomplete pagination. Invoice PDFs are not included. For local development, install the unpacked extension using [extension/README.md](extension/README.md). Hosted deployments must add the exact portal origin to the extension manifest before publishing it. Instagram personal-account history is unavailable through Meta's official API; users can add public Reel URLs in Discover.
 
 You can also connect Gmail from Taste OS. After Google read-only consent, Artha searches retailer emails from Amazon, Flipkart, and Myntra, imports readable product titles into purchase memory, and privately stores attached PDF invoices. Gmail sync checks all matching message history and deduplicates imported messages; unsupported email layouts are reported as partial instead of inventing product data.
 
@@ -33,7 +33,7 @@ Keep the private Chrome window open until sync finishes. Flipkart invoices are d
 
 Amazon Business uses a separate year selector; the connector selects it explicitly because Amazon can ignore the date in the URL. Confirm you signed into the account containing your purchases. An empty Business account cannot supply personal-account orders. The browser regression test is `npm run test:retailer-browser`.
 
-Connect Instagram to read shared posts that require login. Sharing a readable post saves its analyzed style as a personal memory. Saving a product also teaches the profile; removing that saved product removes its preference memory. Real semantic vectors use the configured Gemini embedding API, or an installed Ollama embedding model. Unavailable embeddings remain explicitly pending, with keyword retrieval until reindexing succeeds. Invoice PDFs, extracted invoice text, and browser sessions stay in the private OS user-data directory; embedding requests contain product or style descriptions.
+Paste a public Instagram Reel URL in Discover to analyze its style as a personal memory; Meta's official API does not expose personal-account video history. Saving a product also teaches the profile; removing that saved product removes its preference memory. Real semantic vectors use the configured Gemini embedding API, or an installed Ollama embedding model. Unavailable embeddings remain explicitly pending, with keyword retrieval until reindexing succeeds. Invoice PDFs, extracted invoice text, and local browser sessions stay in the private OS user-data directory; embedding requests contain product or style descriptions.
 
 This single command:
 1. Creates or uses `.venv` and installs the backend requirements when missing.
@@ -135,10 +135,10 @@ The flow uses authorization-code OAuth with PKCE. It verifies the Google user id
 
 ### Gmail purchase history
 
-Enable the Gmail API in the same Google Cloud project and register `GOOGLE_GMAIL_REDIRECT_URI` as an authorized redirect URI alongside the sign-in callback. The default local value is:
+Enable the Gmail API in the same Google Cloud project. By default, Gmail reuses the exact `GOOGLE_REDIRECT_URI` that already supports sign-in, so no second redirect URI registration is needed. To use a separate callback, set `GOOGLE_GMAIL_REDIRECT_URI` and register it as an authorized redirect URI in Google Cloud. The local callback is:
 
 ```text
-http://127.0.0.1:8000/api/auth/gmail/callback
+http://127.0.0.1:8000/api/auth/google/callback
 ```
 
 Gmail is an explicit second consent step. Artha requests only `gmail.readonly`, stores the refresh token encrypted with AES-GCM, and reads retailer messages from Amazon, Flipkart, and Myntra. The encryption key is derived from `GOOGLE_CLIENT_SECRET`; rotating that secret requires connecting Gmail again. Disconnecting Gmail revokes the Google grant and keeps imported orders and invoice PDFs in the user's history.

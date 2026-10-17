@@ -154,7 +154,7 @@ class TasteContracts(unittest.TestCase):
               patch('backend.social.capture_social_page',return_value={'success':False,'requires_login':True})):
             result=extract_theme_from_url('https://www.instagram.com/reel/example/',user_id=self.user)
         self.assertFalse(result['success'])
-        self.assertIn('Personal-account history is unavailable',result['error'])
+        self.assertIn('publicly viewable Reel links only',result['error'])
 
     def test_invoice_is_private_and_validated(self):
         from pypdf import PdfWriter

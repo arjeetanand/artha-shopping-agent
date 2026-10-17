@@ -107,9 +107,11 @@ export function parseOrderEvidence(snapshot, provider) {
   }
   if (!items.length) return {error:'order_items_missing', id, order_date:orderDate};
   const totalText = text.match(/(?:grand\s*total|order\s*total|total\s*amount|total\s*paid)\s*[:\n]?\s*((?:₹|INR|Rs\.?)[\s\d,.]+)/i)?.[1];
-  return {id, order_date:orderDate, total:parseMoney(totalText), currency:'INR', items,
-    status:text.match(/(?:^|\n)\s*(delivered|cancelled|canceled|returned|refunded|shipped|dispatched)\b/i)?.[1]?.toLowerCase() || 'unknown',
-    location:snapshot.deliveryLocation || '', source_url:snapshot.url, evidence_hash:createHash('sha256').update(text).digest('hex')};
+  const total = parseMoney(totalText);
+  const status = text.match(/(?:^|\n)\s*(delivered|cancelled|canceled|returned|refunded|shipped|dispatched)\b/i)?.[1]?.toLowerCase() || 'unknown';
+  const location = snapshot.deliveryLocation || '';
+  const evidence = {id, order_date:orderDate, total, currency:'INR', items, status, location, source_url:snapshot.url};
+  return {...evidence, evidence_hash:createHash('sha256').update(JSON.stringify(evidence)).digest('hex')};
 }
 
 function inrAmount(money) {

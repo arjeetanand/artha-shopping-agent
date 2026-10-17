@@ -21,12 +21,12 @@ else
   exit 1
 fi
 
-# Invoice text is parsed locally; install its runtime in the project virtual environment.
+# Invoice PDFs and Gmail tokens use these runtime libraries.
 if [ ! -f ".venv/bin/python" ]; then
   "$PYTHON_BIN" -m venv .venv
 fi
 PYTHON_BIN=".venv/bin/python"
-if ! "$PYTHON_BIN" -c 'import pypdf' >/dev/null 2>&1; then
+if ! "$PYTHON_BIN" -c 'import pypdf, cryptography' >/dev/null 2>&1; then
   "$PYTHON_BIN" -m pip install -r backend/requirements.txt
 fi
 

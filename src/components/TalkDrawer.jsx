@@ -831,7 +831,7 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], produ
       microphoneRef.current = null;
       if (mountedRef.current) setIsListening(false);
       setMicState('idle');
-      if (transcript && ((autoSubmit && callActiveRef.current) || voice?.provider === 'slng')) {
+      if (transcript && ((autoSubmit && callActiveRef.current) || ['slng', 'local'].includes(voice?.provider))) {
         void submitPromptRef.current?.(transcript);
       } else if (autoSubmit && callActiveRef.current) {
         restartTimerRef.current = window.setTimeout(() => startListeningRef.current?.(true), 700);
@@ -864,7 +864,7 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], produ
   startListeningRef.current = startListening;
 
   const toggleListening = useCallback(() => {
-    if (recognitionRef.current?.stop && voice?.provider === 'slng') recognitionRef.current.stop();
+    if (recognitionRef.current?.stop && ['slng', 'local'].includes(voice?.provider)) recognitionRef.current.stop();
     else if (recognitionRef.current) stopListening();
     else startListening(false);
   }, [startListening, stopListening, voice?.provider]);

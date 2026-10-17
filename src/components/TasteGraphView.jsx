@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
-import { getTasteGraph, getTasteProfile, syncRetailerAccount, getProfileConnections, getTasteMemories, getProfileInvoices, invoiceDownloadUrl, cancelRetailerSync, disconnectRetailer, removeTasteMemory, reindexTasteMemories, beginGmailConnect, syncGmail, cancelGmailSync, disconnectGmail } from '../lib/api';
+import { getTasteGraph, getTasteProfile, syncRetailerAccount, getProfileConnections, getTasteMemories, getProfileInvoices, invoiceDownloadUrl, cancelRetailerSync, disconnectRetailer, removeTasteMemory, reindexTasteMemories, beginGmailConnect, syncGmail, cancelGmailSync, disconnectGmail, submitRetailerExtensionBatch, finishRetailerExtensionTab, cancelRetailerExtensionTab, cancelRetailerExtensionSync, disconnectRetailerExtension } from '../lib/api';
 import '../taste-graph.css';
 
 const RETAILER_CONFIG = {
@@ -68,7 +68,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
     };
   }, [loadData]);
 
-  const hasActiveSync = (profile?.connected_accounts || []).some(connection => ACTIVE_SYNC_STATES.has(connection.status));
+  const hasActiveSync = (profile?.connected_accounts || []).some(connection => ACTIVE_SYNC_STATES.has(connection.status) && connection.details?.connector !== 'extension-local');
   useEffect(() => {
     if (!hasActiveSync) return undefined;
     let disposed = false;
@@ -83,12 +83,70 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
     return () => {disposed=true;window.clearInterval(timer);};
   }, [hasActiveSync,loadData]);
 
+  useEffect(() => {
+    const setExtensionConnection = (provider, status, details) => {
+      setProfile(current => {
+        if (!current) return current;
+        const previous = (current.connected_accounts || []).find(connection => connection.provider === provider);
+        const connection = { provider, status, synced_orders_count: previous?.synced_orders_count || 0, details };
+        return { ...current, connected_accounts: [...(current.connected_accounts || []).filter(item => item.provider !== provider), connection] };
+      });
+    };
+    const onProgress = (event) => {
+      const detail = event.detail || {};
+      const provider = detail.provider;
+      if (!RETAILER_CONFIG[provider] || provider === 'instagram') return;
+      setExtensionConnection(provider, 'syncing', {
+        connector: 'extension-local', job_id: detail.job_id, pages: detail.pages || 0, orders: detail.orders || 0,
+        message: detail.message || `Reading ${provider} history in the retailer tab.`,
+      });
+    };
+    const onComplete = async (event) => {
+      const detail = event.detail || {};
+      const provider = detail.provider;
+      if (!RETAILER_CONFIG[provider] || provider === 'instagram') return;
+      try {
+        const result = await submitRetailerExtensionBatch(provider, detail.pages, detail.stop_reason);
+        await finishRetailerExtensionTab(detail.job_id).catch(() => {});
+        setProfile(current => current ? { ...current, connected_accounts: [...(current.connected_accounts || []).filter(item => item.provider !== provider), result.connection] } : current);
+        setSyncingProvider(null);
+        await loadData(false);
+      } catch (error) {
+        await finishRetailerExtensionTab(detail.job_id).catch(() => {});
+        setErrorMsg(`${provider} sync failed: ${error.message}`);
+        setExtensionConnection(provider, 'failed', { connector: 'extension-local', job_id: detail.job_id, message: error.message || `${provider} history could not be uploaded.` });
+        setSyncingProvider(null);
+      }
+    };
+    const onError = (event) => {
+      const detail = event.detail || {};
+      const provider = detail.provider;
+      if (!RETAILER_CONFIG[provider] || provider === 'instagram') return;
+      setErrorMsg(`${provider} sync failed: ${detail.error || 'The retailer tab could not complete the sync.'}`);
+      setExtensionConnection(provider, 'failed', { connector: 'extension-local', job_id: detail.job_id, message: detail.error || 'The retailer tab could not complete the sync.' });
+      setSyncingProvider(null);
+    };
+    const onExtensionMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== 'artha-extension') return;
+      if (event.data.type === 'PROGRESS') onProgress({ detail: event.data });
+      else if (event.data.type === 'COMPLETE_BATCH') onComplete({ detail: event.data });
+      else if (event.data.type === 'ERROR') onError({ detail: event.data });
+    };
+    window.addEventListener('message', onExtensionMessage);
+    return () => {
+      window.removeEventListener('message', onExtensionMessage);
+    };
+  }, [loadData]);
+
   // Handle retailer sync
   const handleSyncRetailer = async (provider) => {
     setSyncingProvider(provider);
     try {
-      await syncRetailerAccount(provider);
-      await loadData(false);
+      const result = await syncRetailerAccount(provider);
+      setProfile(current => current ? { ...current, connected_accounts: [...(current.connected_accounts || []).filter(item => item.provider !== provider), {
+        provider, status: 'syncing', synced_orders_count: connectionMap.get(provider)?.synced_orders_count || 0,
+        details: { connector: result.connector, job_id: result.job_id, message: `${RETAILER_CONFIG[provider]?.name || provider} opened in a retailer tab. Sign in there; Artha never receives your password.` },
+      }] } : current);
     } catch (err) {
       setErrorMsg(`Sync failed for ${provider}: ${err.message}`);
     } finally {
@@ -536,9 +594,19 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
   const depthScore = profile?.stats?.context_depth_score ?? 0;
   const connections = profile?.connected_accounts || [];
   const connectionMap = new Map(connections.map((c) => [c.provider.toLowerCase(), c]));
+  const gmailQueryState = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('gmail') : null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#F5F3ED] text-[#222A24]">
+      {gmailQueryState === 'connected' && (
+        <div className="taste-os-gmail-banner flex items-center justify-between gap-3 px-7 py-2 text-xs font-medium text-[#FFFEFA]">
+          <div className="flex items-center gap-2.5">
+            <span className="h-2 w-2 rounded-full bg-[#A3E5B9] animate-pulse" />
+            <span><strong>Gmail Connected:</strong> Actively syncing categorized <code>Shopping</code> receipts &amp; invoices into your Taste DNA (Mutual Funds, Credit Card Bills &amp; Job Applications excluded).</span>
+          </div>
+          <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[#A3E5B9]">Live Sync</span>
+        </div>
+      )}
       {/* Top Navigation & Status Bar */}
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[#2D4539] bg-[#1C3027] px-6 py-3.5 text-[#E9EEE7]">
         <div className="flex items-center gap-3">
@@ -546,14 +614,17 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
             <Icon name="network" size={22} className="text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-base font-semibold text-[#FFFEFA] tracking-tight font-serif">Shopping OS: Taste & Context Graph</h1>
-              <span className="rounded-full bg-[#243B31] px-2.5 py-0.5 text-xs font-medium text-[#A3E5B9] border border-[#3A5D4D]">
+              <span className="rounded-full bg-[#243B31] px-2.5 py-0.5 text-[11px] font-medium text-[#A3E5B9] border border-[#3A5D4D]">
                 Private Taste Memory
+              </span>
+              <span className="rounded-full bg-[#A94F32]/25 px-2.5 py-0.5 text-[11px] font-medium text-[#FCD4C7] border border-[#A94F32]/40">
+                Gmail: Shopping-Only Filter
               </span>
             </div>
             <p className="text-xs text-[#9EACA3]">
-              Retailer accounts read six months of order history; Gmail imports retailer receipts and invoice PDFs. Shared posts and saved products enrich your taste.
+              Retailer accounts read six months of order history; Gmail imports categorized shopping receipts &amp; PDFs while ignoring finance and job emails.
             </p>
           </div>
         </div>
@@ -636,8 +707,9 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
         </span>
         {Object.entries(RETAILER_CONFIG).map(([key, cfg]) => {
           const conn = connectionMap.get(key);
-          const isConnected = ['connected', 'synced', 'partial'].includes(conn?.status);
-          const isSyncing = syncingProvider === key || ACTIVE_SYNC_STATES.has(conn?.status);
+          const isInstagram = key === 'instagram';
+          const isConnected = !isInstagram && ['connected', 'synced', 'partial'].includes(conn?.status);
+          const isSyncing = !isInstagram && (syncingProvider === key || ACTIVE_SYNC_STATES.has(conn?.status));
 
           return (
             <div
@@ -651,9 +723,9 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: cfg.color }} />
               <span className="font-semibold text-[#222A24]">{cfg.name}</span>
               <span className="text-[11px] text-[#596159]">
-                {isSyncing ? conn?.status?.replaceAll('_',' ') || 'Opening' : key === 'instagram' && isConnected ? 'Connected' : isConnected ? `${conn.synced_orders_count || 0} orders` : conn?.status || 'Not connected'}
+                {isInstagram ? 'Public video links only' : isSyncing ? conn?.status?.replaceAll('_',' ') || 'Opening' : isConnected ? `${conn.synced_orders_count || 0} orders` : conn?.status || 'Not connected'}
               </span>
-              <button
+              {isInstagram ? <span className="text-[11px] text-[#596159]">Paste a public Reel URL in Discover</span> : <button
                 type="button"
                 onClick={() => handleSyncRetailer(key)}
                 disabled={isSyncing || !profile}
@@ -661,7 +733,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
               >
                 <Icon name="refresh" size={10} className={isSyncing ? 'animate-spin' : ''} />
                 {isSyncing ? 'In progress' : isConnected ? 'Resync' : 'Connect'}
-              </button>
+              </button>}
             </div>
           );
         })}
@@ -671,9 +743,12 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           const connected = Boolean(gmail && gmail.status !== 'disconnected');
           const isSyncing = syncingProvider === 'gmail' || ACTIVE_SYNC_STATES.has(gmail?.status);
           return (
-            <div className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition ${connected ? 'border-[#DED9CC] bg-[#FFFEFA] text-[#222A24] shadow-sm' : 'border-[#E5E1D7] bg-[#F1EFE8] text-[#596159]'}`}>
+            <div
+              title="Only scans your 'Shopping' label & verified retailer receipts (excludes Mutual Funds & Job Applications)"
+              className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition ${connected ? 'border-[#DED9CC] bg-[#FFFEFA] text-[#222A24] shadow-sm' : 'border-[#E5E1D7] bg-[#F1EFE8] text-[#596159]'}`}
+            >
               <span className="h-2 w-2 rounded-full bg-[#A94F32]" />
-              <span className="font-semibold text-[#222A24]">Gmail receipts</span>
+              <span className="font-semibold text-[#222A24]">Gmail (Shopping)</span>
               <span className="text-[11px] text-[#596159]">{isSyncing ? 'Syncing' : connected ? `${gmail.synced_orders_count || 0} orders` : 'Not connected'}</span>
               <button type="button" onClick={() => connected ? handleSyncGmail() : beginGmailConnect('/taste-graph')} disabled={isSyncing || !profile} className="taste-os-chip-btn">
                 <Icon name="refresh" size={10} className={isSyncing ? 'animate-spin' : ''} />
@@ -712,7 +787,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
             <div key={connection.provider} className="mb-2 flex flex-wrap items-center gap-2">
               <strong className="capitalize">{connection.provider}</strong>
               <span>{connection.details.message}</span>
-              {connection.details.cutoff && <span>From {connection.details.cutoff} · {connection.details.orders || 0} orders · {connection.details.invoices || 0} invoices · {connection.details.coverage_complete ? 'History checked' : 'Coverage incomplete'}</span>}
+              {connection.details.cutoff && <span>From {connection.details.cutoff} · {connection.details.orders || 0} orders · {connection.details.invoice_support === false ? 'invoice PDFs not included' : `${connection.details.invoices || 0} invoices`} · {connection.details.coverage_complete ? 'History checked' : 'Coverage incomplete'}</span>}
               {connection.provider === 'gmail' && connection.details.messages_scanned > 0 && <span>{connection.details.messages_scanned} emails checked · {connection.details.invoices || 0} invoice PDFs imported</span>}
               {(connection.details.missing_invoices > 0) && <span>{connection.details.missing_invoices} invoices unavailable</span>}
               {connection.details.log_file && <span className="basis-full break-all text-[11px] text-[#596159]">Debug log: <code>{connection.details.log_file}</code></span>}
@@ -721,10 +796,26 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
                 try {
                   if (connection.provider === 'gmail') {
                     await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelGmailSync() : disconnectGmail());
+                    await loadData(false);
+                  } else if (connection.details?.connector === 'extension-local') {
+                    if (ACTIVE_SYNC_STATES.has(connection.status)) {
+                      await cancelRetailerExtensionTab(connection.details.job_id);
+                      setProfile(current => current ? { ...current, connected_accounts: [...(current.connected_accounts || []).filter(item => item.provider !== connection.provider), {
+                        provider: connection.provider, status: 'cancelled', synced_orders_count: connection.synced_orders_count || 0,
+                        details: { connector: 'extension-local', message: `${connection.provider} history sync cancelled.` },
+                      }] } : current);
+                      setSyncingProvider(null);
+                    } else {
+                      await disconnectRetailerExtension(connection.provider);
+                      await loadData(false);
+                    }
+                  } else if (connection.details?.connector === 'chrome_extension') {
+                    await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelRetailerExtensionSync(connection.provider) : disconnectRetailerExtension(connection.provider));
+                    await loadData(false);
                   } else {
                     await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelRetailerSync(connection.provider) : disconnectRetailer(connection.provider));
+                    await loadData(false);
                   }
-                  await loadData(false);
                 } catch (err) {setErrorMsg(err.message);}
               }}>{ACTIVE_SYNC_STATES.has(connection.status) ? 'Cancel sync' : 'Disconnect'}</button>
             </div>

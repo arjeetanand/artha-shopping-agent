@@ -159,11 +159,61 @@ export function updateTasteProfile(preferences, stats = null) {
 }
 
 export function syncRetailerAccount(provider) {
-  return request('/profile/sync-account', {
-    method: 'POST',
-    body: JSON.stringify({ provider }),
+  if (['amazon', 'flipkart', 'myntra', 'ajio'].includes(provider)) return startRetailerExtensionSync(provider);
+  throw new Error('Instagram personal-account history is not available through Meta’s API. Paste a public video URL in Discover to save its style.');
+}
+
+function extensionMessage(type, responseType, details = {}, timeoutMs = 1500) {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => finish(new Error('The Artha retailer Chrome connector did not respond.')), timeoutMs);
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== 'artha-extension' || event.data?.type !== responseType) return;
+      finish(null, event.data);
+    };
+    const finish = (error, value) => {
+      window.clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    window.addEventListener('message', onMessage);
+    window.postMessage({ source: 'artha-portal', type, ...details }, window.location.origin);
   });
 }
+
+function retailerCutoff() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+  const year = Number(parts.year), month = Number(parts.month), day = Number(parts.day);
+  const index = year * 12 + month - 1 - 6;
+  const targetYear = Math.floor(index / 12), targetMonth = index % 12 + 1;
+  const targetDay = Math.min(day, new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate());
+  return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+}
+
+async function startRetailerExtensionSync(provider) {
+  try {
+    const ready = await extensionMessage('PING', 'READY');
+    if (!ready) throw new Error('Install the Artha retailer Chrome connector, then reload this portal.');
+    const jobId = `sync-${crypto.randomUUID().replaceAll('-', '')}`;
+    const result = await extensionMessage('START', 'START_RESULT', { job_id: jobId, provider, cutoff: retailerCutoff() }, 8000);
+    if (!result.ok || !result.started) throw new Error(result.error || 'Chrome could not open the retailer.');
+    return { job_id: jobId, provider, status: 'syncing', connector: 'extension-local' };
+  } catch (error) {
+    if (error.message.includes('did not respond')) throw new Error('Install the Artha retailer Chrome connector, then reload this portal.');
+    throw error;
+  }
+}
+
+export const submitRetailerExtensionBatch = (provider, pages, stop_reason) => request('/profile/retailer-extension/submit', {
+  method: 'POST', body: JSON.stringify({ provider, pages, stop_reason }),
+});
+
+export const cancelRetailerExtensionTab = (job_id) => extensionMessage('CANCEL', 'CANCEL_RESULT', { job_id });
+export const finishRetailerExtensionTab = (job_id) => extensionMessage('FINISH', 'FINISH_RESULT', { job_id });
+export const cancelRetailerExtensionSync = (provider) => request('/profile/retailer-extension/cancel', { method: 'POST', body: JSON.stringify({ provider }) });
+export const disconnectRetailerExtension = (provider) => request('/profile/retailer-extension/disconnect', { method: 'POST', body: JSON.stringify({ provider }) });
 
 export const syncGmail = () => request('/profile/gmail/sync', { method: 'POST', body: JSON.stringify({}) });
 export const cancelGmailSync = () => request('/profile/gmail/cancel', { method: 'POST', body: JSON.stringify({}) });
@@ -187,3 +237,27 @@ export const disconnectRetailer = (provider) => request('/profile/connections/di
 export const rememberProduct = (product) => request('/profile/memories', {method:'POST',body:JSON.stringify({product})});
 export const removeTasteMemory = (id) => request('/profile/memories/remove', {method:'POST',body:JSON.stringify({id})});
 export const reindexTasteMemories = () => request('/profile/memories/reindex', {method:'POST',body:JSON.stringify({})});
+
+export function getAssistantSession({ sessionId = '', reset = false } = {}) {
+  const params = new URLSearchParams();
+  if (sessionId) params.set('session_id', sessionId);
+  if (reset) params.set('reset', '1');
+  const qs = params.toString();
+  return request(`/assistant/session${qs ? `?${qs}` : ''}`);
+}
+
+export function sendAssistantTurn(payload) {
+  return request('/assistant/converse', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function confirmInstagramReference(payload) {
+  return request('/assistant/confirm-reference', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function resolveInstagramReference(payload) {
+  return request('/social/instagram/resolve', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function uploadInstagramReference(payload) {
+  return request('/social/instagram/upload', { method: 'POST', body: JSON.stringify(payload) });
+}

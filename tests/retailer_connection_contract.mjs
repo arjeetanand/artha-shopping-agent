@@ -3,18 +3,21 @@ import test from 'node:test';
 import { RETAILERS, parseFlipkartOrder, parseFlipkartOrderPage, parseOrderDate, parseOrderEvidence, parseMoney, retailerUrl, historyUrls } from '../backend/retailer_extract.mjs';
 
 test('retailer evidence preserves money, order date and multiple items', () => {
-  const order=parseOrderEvidence({
+  const snapshot={
     url:'https://www.amazon.in/gp/your-account/order-details?orderID=111-1234567-1234567',
     text:'Order placed\n17 October 2026\nOrder Total: ₹2,399.75\nDelivered',
     products:[{name:'Blue linen shirt',url:'https://www.amazon.in/dp/ABCDEFGHIJ',text:'Size: L\nColor: Blue',price:'₹1,299.50'},
               {name:'White cotton shirt',url:'https://www.amazon.in/dp/KLMNOPQRST',text:'Size: M',price:'₹1,100.25'}],
-  },'amazon');
+  };
+  const order=parseOrderEvidence(snapshot,'amazon');
+  const changedEvidence=parseOrderEvidence({...snapshot,products:[{...snapshot.products[0],name:'Different shirt'}]},'amazon');
   assert.equal(order.total,2399.75);
   assert.equal(order.order_date,'2026-10-17');
   assert.equal(order.items.length,2);
   assert.equal(order.items[0].size,'L');
   assert.equal(order.items[0].price,1299.50);
   assert.equal(order.evidence_hash.length,64);
+  assert.notEqual(order.evidence_hash,changedEvidence.evidence_hash);
 });
 
 test('a delivery date cannot silently become the order date',()=>{

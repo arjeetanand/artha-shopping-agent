@@ -43,8 +43,8 @@ def _gmail_redirect_uri() -> str:
         return configured
     default = _google_config()[2]
     if not default.endswith("/api/auth/google/callback"):
-        raise AuthError("Set GOOGLE_GMAIL_REDIRECT_URI to the registered Gmail OAuth callback.", 503)
-    return default.removesuffix("/api/auth/google/callback") + "/api/auth/gmail/callback"
+        raise AuthError("Set GOOGLE_GMAIL_REDIRECT_URI to a registered Google OAuth callback.", 503)
+    return default
 
 
 def google_configured() -> bool:
@@ -157,7 +157,7 @@ def begin_gmail_auth(user_id: str, next_path: str | None = None, app_origin: str
         "client_id": client_id,
         "redirect_uri": _gmail_redirect_uri(),
         "response_type": "code",
-        "scope": f"openid email profile {GMAIL_READONLY_SCOPE}",
+        "scope": f"openid email {GMAIL_READONLY_SCOPE}",
         "state": state,
         "code_challenge": _challenge(verifier),
         "code_challenge_method": "S256",

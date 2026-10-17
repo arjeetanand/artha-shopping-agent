@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Artha Retailer Connector",
+  "version": "0.2.0",
+  "description": "Read supported retailer order history after you sign in on the retailer site.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "http://localhost:5173/*",
+    "http://127.0.0.1:5173/*",
+    "http://localhost:5176/*",
+    "http://127.0.0.1:5176/*",
+    "https://www.amazon.in/*",
+    "https://www.flipkart.com/*",
+    "https://www.myntra.com/*",
+    "https://www.ajio.com/*"
+  ],
+  "background": { "service_worker": "service_worker.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5173/*", "http://127.0.0.1:5173/*", "http://localhost:5176/*", "http://127.0.0.1:5176/*"],
+      "js": ["portal_bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.amazon.in/gp/your-account/order-history*", "https://www.myntra.com/my/orders*", "https://www.ajio.com/my-account/orders*"],
+      "js": ["retailer_bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.flipkart.com/account/orders*"],
+      "js": ["flipkart_main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.flipkart.com/account/orders*"],
+      "js": ["flipkart_bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
