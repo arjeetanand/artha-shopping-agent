@@ -93,21 +93,28 @@ class AnakinClient:
         record_usage("anakin", "live_search", model="search", input_characters=len(query))
         return result
 
-    def scrape_inline(self, url: str) -> dict[str, Any]:
+    def scrape_inline(self, url: str, max_wait_seconds: int = 90) -> dict[str, Any]:
         if not self.configured:
             raise RuntimeError("Anakin is not configured")
+        deadline = time.monotonic() + max_wait_seconds
         result = _request_json(
             f"{ANAKIN_BASE_URL}/url-scraper/scrape",
             method="POST",
             payload={"url": url, "country": "in", "useBrowser": True, "generateJson": True},
             headers=self._headers(),
-            timeout=90,
+            timeout=max_wait_seconds,
         )
         job_id = result.get("id") if isinstance(result, dict) else None
         if result.get("status") == "processing" and job_id:
             for _ in range(20):
-                time.sleep(1.5)
-                result = _request_json(f"{ANAKIN_BASE_URL}/url-scraper/{job_id}", headers=self._headers(), timeout=30)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(1.5, remaining))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                result = _request_json(f"{ANAKIN_BASE_URL}/url-scraper/{job_id}", headers=self._headers(), timeout=max(1, min(30, int(remaining))))
                 if result.get("status") == "completed":
                     record_usage("anakin", "reference_scrape", model="url-scraper", input_characters=len(url))
                     return result

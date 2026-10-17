@@ -47,6 +47,59 @@ class Fragments:
 
 
 class SecurityBoundaryContracts(unittest.TestCase):
+    def test_social_reference_url_rejects_non_public_targets_and_redacts_query(self) -> None:
+        from backend.social import _public_reference_url
+
+        public_dns = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
+        with patch("backend.social.socket.getaddrinfo", return_value=public_dns):
+            self.assertEqual(
+                _public_reference_url("https://example.com/post?token=secret#section"),
+                ("https://example.com/post?token=secret#section", "https://example.com/post"),
+            )
+
+        for url in (
+            "file:///etc/passwd",
+            "http://localhost/",
+            "http://127.0.0.1/",
+            "https://example.com:8443/",
+            "https://user:secret@example.com/",
+            "https://example.com/" + ("a" * 2049),
+        ):
+            with self.subTest(url=url[:80]), self.assertRaises(ValueError):
+                _public_reference_url(url)
+
+        mixed_dns = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.2", 443)),
+        ]
+        with patch("backend.social.socket.getaddrinfo", return_value=mixed_dns):
+            with self.assertRaises(ValueError):
+                _public_reference_url("https://mixed.example/")
+
+    def test_social_theme_does_not_send_query_tokens_to_model(self) -> None:
+        from backend.social import extract_theme_from_url
+
+        model = SimpleNamespace(
+            provider="gemini",
+            preference="gemini",
+            gemini=SimpleNamespace(extract_brief=Mock(return_value={"theme": "minimal", "colors": ["black"]})),
+        )
+        dns = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
+        with (
+            patch("backend.social.socket.getaddrinfo", return_value=dns),
+            patch("backend.social.capture_social_page", return_value={
+                "success": True,
+                "title": "Look", "description": "Minimal outfit", "screenshot_base64": "aGVsbG8=", "mime_type": "image/jpeg",
+            }),
+            patch("backend.social.BriefModel", return_value=model),
+        ):
+            result = extract_theme_from_url("https://example.com/look?token=secret#private")
+
+        self.assertEqual(result["url"], "https://example.com/look")
+        prompt = model.gemini.extract_brief.call_args.args[0]
+        self.assertNotIn("secret", prompt)
+        self.assertNotIn("token", prompt)
+
     def test_production_session_cookie_cannot_disable_secure(self) -> None:
         from backend import auth
 
@@ -217,6 +270,112 @@ class SecurityBoundaryContracts(unittest.TestCase):
             self.assertEqual(post_voice("192.0.2.11"), [503])
             provider.speak.assert_not_called()
         capacity.release()
+
+    def test_social_theme_has_per_ip_and_concurrency_admission(self) -> None:
+        from backend import server
+
+        extractor = Mock(return_value={"theme": "minimal"})
+
+        def post_theme(client: str) -> list[int]:
+            result: list[int] = []
+            handler = server.Handler.__new__(server.Handler)
+            handler.path = "/api/social/theme"
+            handler._user = lambda: None
+            handler.client_address = (client, 1234)
+            handler._read_json = Mock(return_value={"url": "https://example.com/look"})
+            handler._send = lambda status, body: result.append(status)
+            server.Handler.do_POST(handler)
+            return result
+
+        with (
+            patch("backend.social.extract_theme_from_url", extractor),
+            patch.object(server, "_SOCIAL_REQUESTS_PER_MINUTE", 1),
+            patch.object(server, "_social_admission_lock", threading.Lock()),
+            patch.object(server, "_social_requests_by_client", {}),
+            patch.object(server, "_last_social_client_cleanup", 0.0),
+            patch.object(server, "_SOCIAL_CAPACITY", threading.BoundedSemaphore(1)),
+        ):
+            self.assertEqual(post_theme("192.0.2.30"), [200])
+            self.assertEqual(post_theme("192.0.2.30"), [429])
+            extractor.assert_called_once_with("https://example.com/look")
+
+        capacity = threading.BoundedSemaphore(1)
+        self.assertTrue(capacity.acquire(blocking=False))
+        with (
+            patch("backend.social.extract_theme_from_url", extractor),
+            patch.object(server, "_social_admission_lock", threading.Lock()),
+            patch.object(server, "_social_requests_by_client", {}),
+            patch.object(server, "_last_social_client_cleanup", 0.0),
+            patch.object(server, "_SOCIAL_CAPACITY", capacity),
+        ):
+            result: list[int] = []
+            handler = server.Handler.__new__(server.Handler)
+            handler.path = "/api/social/theme"
+            handler.client_address = ("192.0.2.31", 1234)
+            handler._read_json = Mock(side_effect=AssertionError("body read after capacity denial"))
+            handler._send = lambda status, body: result.append(status)
+            server.Handler.do_POST(handler)
+            self.assertEqual(result, [503])
+            handler._read_json.assert_not_called()
+        capacity.release()
+
+    def test_slng_voice_uses_paid_voice_admission(self) -> None:
+        from backend import server
+
+        provider = SimpleNamespace(
+            provider="slng",
+            status=Mock(return_value={"configured": True}),
+            speak=Mock(return_value=(b"audio", "audio/wav")),
+        )
+        response: list[int] = []
+        handler = server.Handler.__new__(server.Handler)
+        handler.path = "/api/voice/speak"
+        handler.client_address = ("192.0.2.14", 1234)
+        handler._read_json = Mock(return_value={"text": "hello"})
+        handler._send = lambda status, body: response.append(status)
+        handler._send_bytes = lambda status, data, content_type: response.append(status)
+
+        with (
+            patch.object(server, "VoiceService", return_value=provider),
+            patch.object(server, "reserve_global_voice_call", return_value=False) as reserve,
+            patch.object(server, "_voice_admission_lock", threading.Lock()),
+            patch.object(server, "_voice_requests_by_client", {}),
+            patch.object(server, "_last_voice_client_cleanup", 0.0),
+            patch.object(server, "_VOICE_CAPACITY", threading.BoundedSemaphore(1)),
+        ):
+            server.Handler.do_POST(handler)
+
+        self.assertEqual(response, [429])
+        reserve.assert_called_once()
+        provider.speak.assert_not_called()
+
+    def test_unconfigured_slng_voice_does_not_consume_paid_admission(self) -> None:
+        from backend import server
+
+        provider = SimpleNamespace(
+            provider="slng", status=Mock(return_value={"configured": False}), speak=Mock(),
+        )
+        response: list[int] = []
+        handler = server.Handler.__new__(server.Handler)
+        handler.path = "/api/voice/speak"
+        handler.client_address = ("192.0.2.15", 1234)
+        handler._read_json = Mock(return_value={"text": "hello"})
+        handler._send = lambda status, body: response.append(status)
+        handler._send_bytes = lambda status, data, content_type: response.append(status)
+
+        with (
+            patch.object(server, "VoiceService", return_value=provider),
+            patch.object(server, "reserve_global_voice_call", return_value=True) as reserve,
+            patch.object(server, "_voice_admission_lock", threading.Lock()),
+            patch.object(server, "_voice_requests_by_client", {}),
+            patch.object(server, "_last_voice_client_cleanup", 0.0),
+            patch.object(server, "_VOICE_CAPACITY", threading.BoundedSemaphore(1)),
+        ):
+            server.Handler.do_POST(handler)
+
+        self.assertEqual(response, [503])
+        reserve.assert_not_called()
+        provider.speak.assert_not_called()
 
     def test_global_paid_voice_budget_persists_across_database_instances(self) -> None:
         from datetime import datetime, timezone
@@ -492,7 +651,9 @@ class SecurityBoundaryContracts(unittest.TestCase):
 
         try:
             with patch.object(jobs, "run_search", side_effect=slow_search):
-                queued = jobs.submit_search({"text": "test"})
+                queued = jobs.submit_search({"text": "test", "user_id": "owner"})
+                self.assertIsNone(jobs.get_search_job(queued["job_id"], "different-user"))
+                self.assertIsNotNone(jobs.get_search_job(queued["job_id"], "owner"))
                 self.assertTrue(started.wait(1))
                 with self.assertRaises(RuntimeError):
                     jobs.submit_search({"text": "overflow"})

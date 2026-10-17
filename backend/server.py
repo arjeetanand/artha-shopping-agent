@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import sys
 import threading
@@ -18,7 +19,7 @@ if __package__ in {None, ""}:
     from backend.auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from backend.clients import AnakinClient, BriefModel
     from backend.db import db
-    from backend.settings import is_production
+    from backend.settings import is_production, setting
     from backend.usage import get_usage_summary, runtime_name
     from backend.voice import VoiceError, VoiceService
     from backend.workflow import create_purchase_plan, run_refinement, run_search
@@ -26,11 +27,14 @@ if __package__ in {None, ""}:
     from backend.payments import PaymentError, create_payment_order, payment_status, verify_payment
     from backend.jobs import allow_search_request, get_search_job, submit_search
     from backend.voice_limits import reserve_global_voice_call
+    from backend.profile import build_context_graph, get_or_create_profile, refresh_profile
+    from backend.connections import start_sync, list_connections, cancel_sync, disconnect, invoice_file
+    from backend.taste_memory import public_memories, remember_link, save_memories, reindex_memories
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from .clients import AnakinClient, BriefModel
     from .db import db
-    from .settings import is_production
+    from .settings import is_production, setting
     from .usage import get_usage_summary, runtime_name
     from .voice import VoiceError, VoiceService
     from .workflow import create_purchase_plan, run_refinement, run_search
@@ -38,24 +42,66 @@ else:
     from .payments import PaymentError, create_payment_order, payment_status, verify_payment
     from .jobs import allow_search_request, get_search_job, submit_search
     from .voice_limits import reserve_global_voice_call
+    from .profile import build_context_graph, get_or_create_profile, refresh_profile
+    from .connections import start_sync, list_connections, cancel_sync, disconnect, invoice_file
+    from .taste_memory import public_memories, remember_link, save_memories, reindex_memories
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SHOPPINGHELP_PORT", "8000"))
 _MAX_BODY_BYTES = 8_000_000
 _MAX_VOICE_BODY_BYTES = 16 * 1024
+_MAX_SOCIAL_BODY_BYTES = 16 * 1024
 _BODY_READ_TIMEOUT_SECONDS = 15
 _HEADER_READ_TIMEOUT_SECONDS = 10
 _SOCKET_IDLE_TIMEOUT_SECONDS = 5
 _MAX_ACTIVE_CONNECTIONS = 64
 # ponytail: per-process search-handler cap; use shared admission if the API scales to multiple workers.
 _SEARCH_REQUEST_CAPACITY = threading.BoundedSemaphore(8)
+_SOCIAL_REQUESTS_PER_MINUTE = 5
+_MAX_TRACKED_SOCIAL_CLIENTS = 4096
+_SOCIAL_CAPACITY = threading.BoundedSemaphore(2)
+_social_admission_lock = threading.Lock()
+_social_requests_by_client: dict[str, deque[float]] = {}
+_last_social_client_cleanup = 0.0
 _VOICE_REQUESTS_PER_MINUTE = 5
 _MAX_TRACKED_VOICE_CLIENTS = 4096
 _VOICE_CAPACITY = threading.BoundedSemaphore(2)
 _voice_admission_lock = threading.Lock()
 _voice_requests_by_client: dict[str, deque[float]] = {}
 _last_voice_client_cleanup = 0.0
+
+
+def _admit_social_request(client_ip: str) -> int | None:
+    """Limit expensive public-page captures by client and in-flight work."""
+    global _last_social_client_cleanup
+    now = time.monotonic()
+    with _social_admission_lock:
+        if now - _last_social_client_cleanup >= 60:
+            for ip, requests in list(_social_requests_by_client.items()):
+                while requests and now - requests[0] >= 60:
+                    requests.popleft()
+                if not requests:
+                    _social_requests_by_client.pop(ip, None)
+            _last_social_client_cleanup = now
+
+        requests = _social_requests_by_client.get(client_ip)
+        if requests is not None:
+            while requests and now - requests[0] >= 60:
+                requests.popleft()
+            if not requests:
+                _social_requests_by_client.pop(client_ip, None)
+                requests = None
+        if requests is None and len(_social_requests_by_client) >= _MAX_TRACKED_SOCIAL_CLIENTS:
+            return 429
+        if requests is not None and len(requests) >= _SOCIAL_REQUESTS_PER_MINUTE:
+            return 429
+
+        if requests is None:
+            requests = deque()
+            _social_requests_by_client[client_ip] = requests
+        requests.append(now)
+        return None if _SOCIAL_CAPACITY.acquire(blocking=False) else 503
 
 
 def _admit_paid_voice_request(client_ip: str) -> int | None:
@@ -202,11 +248,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _send_bytes(self, status: int, data: bytes, content_type: str) -> None:
+    def _send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "private, no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self._cors()
         self.end_headers()
         self.wfile.write(data)
@@ -269,6 +317,20 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError("Sign in with Google to save a private purchase plan.", 401)
         return user
 
+    def _profile_user_id(self) -> str:
+        user = self._user()
+        if user:
+            return user["id"]
+        raise ApiError("Sign in with Google to use a private taste profile.", 401)
+
+    def _local_connector_request(self) -> None:
+        if self.client_address[0] not in {"127.0.0.1", "::1"}:
+            raise ApiError("Account connection must be started from the local app.", 403)
+        origin = self.headers.get("Origin")
+        allowed = {setting("SHOPPINGHELP_APP_URL"), *setting("SHOPPINGHELP_CORS_ORIGIN").split(",")}
+        if origin and origin.rstrip("/") not in {value.rstrip("/") for value in allowed if value}:
+            raise ApiError("Account connection must be started from the app window.", 403)
+
     def _app_origin(self) -> str | None:
         referer = self.headers.get("Referer", "")
         parsed = urlparse(referer)
@@ -296,6 +358,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ok": True,
                         "google_configured": google_configured(),
                         "anakin_configured": AnakinClient().configured,
+                        "search_mode": "fixture" if setting("SHOPPINGHELP_SEARCH_MODE", "live").lower() in {"fixture", "sandbox", "mock"} else "live",
                         "ai": brief,
                         "voice": voice,
                         "payment": payment,
@@ -313,7 +376,8 @@ class Handler(BaseHTTPRequestHandler):
                 job_id = path.removeprefix("/api/agent/search/jobs/").strip()
                 if not job_id or "/" in job_id:
                     raise ApiError("Research job not found", 404)
-                job = get_search_job(job_id)
+                user = self._user()
+                job = get_search_job(job_id, user["id"] if user else "shopper-local")
                 if not job:
                     raise ApiError("Research job not found", 404)
                 self._send(200, job)
@@ -390,6 +454,38 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError("Order not found", 404)
                 self._send(200, {"order": get_order(order_id, user["id"])})
                 return
+            if path == "/api/profile/taste":
+                user_id = self._profile_user_id()
+                self._send(200, {**get_or_create_profile(user_id), "connected_accounts": list_connections(user_id)})
+                return
+            if path == "/api/profile/connections":
+                self._send(200, {"connections": list_connections(self._profile_user_id())})
+                return
+            if path == "/api/profile/memories":
+                self._send(200, {"memories": public_memories(self._profile_user_id())})
+                return
+            if path == "/api/profile/invoices":
+                self._send(200, {"invoices": db.list_retailer_invoices(self._profile_user_id())})
+                return
+            if path.startswith("/api/profile/invoices/"):
+                file = invoice_file(self._profile_user_id(), path.removeprefix("/api/profile/invoices/"))
+                if not file:
+                    raise ApiError("Invoice not found", 404)
+                self._send_bytes(200,file.read_bytes(),"application/pdf",{"Content-Disposition":"attachment; filename=invoice.pdf","X-Content-Type-Options":"nosniff"})
+                return
+            if path == "/api/profile/graph":
+                user_id = self._profile_user_id()
+                search_id = (query.get("search_id") or [""])[0]
+                brief = None
+                if search_id:
+                    saved = db.get_search(search_id)
+                    if saved and saved.get("intent", {}).get("_profile_user_id") == user_id:
+                        brief = saved.get("intent")
+                self._send(200, build_context_graph(user_id, active_brief=brief))
+                return
+            if path == "/api/profile/orders":
+                self._send(200, {"orders": [order for order in db.list_orders(self._profile_user_id()) if order.get("data_source") == "retailer_session"]})
+                return
             if path == "/api/voice/status":
                 self._send(200, VoiceService().status())
                 return
@@ -416,6 +512,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
         search_request_admitted = False
+        social_request_admitted = False
         voice_request_admitted = False
         try:
             if path in {"/api/agent/search/jobs", "/api/agent/search", "/api/agent/refine"}:
@@ -424,7 +521,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not _SEARCH_REQUEST_CAPACITY.acquire(blocking=False):
                     raise ApiError("Research service is busy; try again shortly.", 503)
                 search_request_admitted = True
-            payload = self._read_json(_MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_BODY_BYTES)
+            elif path == "/api/social/theme":
+                admission_error = _admit_social_request(self.client_address[0])
+                if admission_error:
+                    message = "Style analysis is busy; try again shortly." if admission_error == 503 else "Too many style analyses; try again later."
+                    raise ApiError(message, admission_error)
+                social_request_admitted = True
+            body_limit = _MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_SOCIAL_BODY_BYTES if path == "/api/social/theme" else _MAX_BODY_BYTES
+            payload = self._read_json(body_limit)
+            if path in {"/api/agent/search/jobs", "/api/agent/search", "/api/agent/refine"}:
+                user = self._user()
+                payload["user_id"] = user["id"] if user else "shopper-local"
+                if not user:
+                    payload["use_profile"] = False
             if path == "/api/agent/search/jobs":
                 self._send(202, submit_search(payload))
                 return
@@ -433,6 +542,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/agent/refine":
                 self._send(200, run_refinement(payload))
+                return
+            if path == "/api/social/theme":
+                try:
+                    from .social import extract_theme_from_url
+                except ImportError:
+                    from backend.social import extract_theme_from_url
+                url = str(payload.get("url") or "").strip()
+                if not url:
+                    raise ApiError("URL is required")
+                user = self._user()
+                result = extract_theme_from_url(url, user_id=user["id"]) if user else extract_theme_from_url(url)
+                if result.get("success") and user:
+                    result["memory"] = remember_link(user["id"], result)
+                    refresh_profile(user["id"])
+                self._send(200, result)
                 return
             if path == "/api/plans":
                 user = self._require_user()
@@ -478,6 +602,59 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError("Order not found", 404)
                 self._send(200, {"order": complete_refund(order_id, user["id"])})
                 return
+            if path == "/api/profile/taste":
+                user_id = self._profile_user_id()
+                preferences = payload.get("preferences") or payload
+                stats = payload.get("stats")
+                if not isinstance(preferences, dict) or (stats is not None and not isinstance(stats, dict)):
+                    raise ApiError("Preferences and stats must be objects", 400)
+                if stats is None:
+                    stats = get_or_create_profile(user_id)["stats"]
+                self._send(200, db.save_user_profile(user_id, preferences, stats))
+                return
+            if path == "/api/profile/sync-account":
+                user_id = self._profile_user_id()
+                self._local_connector_request()
+                provider = str(payload.get("provider") or "").strip()
+                if payload.get("orders") is not None:
+                    raise ApiError("Use Connect to read orders directly from your retailer account.", 400)
+                self._send(202, start_sync(user_id,provider))
+                return
+            if path in {"/api/profile/connections/cancel", "/api/profile/connections/disconnect"}:
+                user_id = self._profile_user_id()
+                self._local_connector_request()
+                provider = str(payload.get("provider") or "").strip()
+                (disconnect if path.endswith("disconnect") else cancel_sync)(user_id,provider)
+                self._send(200, {"success":True})
+                return
+            if path == "/api/profile/memories/reindex":
+                user_id = self._profile_user_id()
+                self._send(200, {"memories": reindex_memories(user_id)})
+                refresh_profile(user_id)
+                return
+            if path == "/api/profile/memories/remove":
+                user_id = self._profile_user_id()
+                memory_id = str(payload.get("id") or "")
+                if not db.delete_taste_memory(user_id,memory_id):
+                    raise ApiError("Memory not found",404)
+                refresh_profile(user_id)
+                self._send(200,{"success":True})
+                return
+            if path == "/api/profile/memories":
+                user_id = self._profile_user_id()
+                product = payload.get("product")
+                if not isinstance(product,dict) or not isinstance(product.get("name"),str) or not product["name"].strip():
+                    raise ApiError("A named product is required",400)
+                from hashlib import sha256
+                url = str(product.get("url") or "").strip()
+                from backend.social import _public_reference_url
+                _, safe_url = _public_reference_url(url)
+                attributes = {key:str(product[key])[:500] for key in ("name","brand","category","color","size") if product.get(key)}
+                memory = save_memories(user_id,[{"source_key":"like:"+sha256(safe_url.encode()).hexdigest(),"kind":"liked_product",
+                                       "source_url":safe_url,"document":". ".join(attributes.values()),"attributes":attributes}])[0]
+                refresh_profile(user_id)
+                self._send(201,{"memory":memory})
+                return
             if path == "/api/auth/logout":
                 logout(self.headers.get("Cookie"))
                 self._send(200, {"ok": True}, {"Set-Cookie": clear_session_cookie()})
@@ -490,7 +667,9 @@ class Handler(BaseHTTPRequestHandler):
                 if voice.provider == "browser":
                     self._send(200, {"provider": "browser", "text": str(payload.get("text") or "")[:1800]})
                     return
-                if voice.provider == "elevenlabs":
+                if voice.provider in {"elevenlabs", "slng"}:
+                    if voice.provider == "slng" and not voice.status()["configured"]:
+                        raise VoiceError("SLNG_API_KEY is required when VOICE_PROVIDER=slng.")
                     voice_text = str(payload.get("text") or "")
                     if not " ".join(voice_text.split())[:1800]:
                         raise ApiError("There is nothing to speak yet.")
@@ -522,11 +701,14 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             if search_request_admitted:
                 _SEARCH_REQUEST_CAPACITY.release()
+            if social_request_admitted:
+                _SOCIAL_CAPACITY.release()
             if voice_request_admitted:
                 _VOICE_CAPACITY.release()
 
 
 def main() -> None:
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         server = BoundedThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as err:

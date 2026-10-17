@@ -832,7 +832,7 @@ class AgenticFlowContracts(unittest.TestCase):
         self.assertNotEqual(enriched.get("research_status"), "complete")
 
     def test_research_checks_product_urls_before_listing_urls(self) -> None:
-        """Late product pages must get a direct check before the six-page cap is spent."""
+        """Late product pages must get a direct check before the four-page cap is spent."""
         from backend.workflow import ResearchAgent
 
         agent = ResearchAgent()
@@ -849,7 +849,7 @@ class AgenticFlowContracts(unittest.TestCase):
             for index in range(10)
         ]
 
-        def scrape(url: str) -> dict:
+        def scrape(url: str, max_wait_seconds: int = 90) -> dict:
             if "/products/" in url or "/p/" in url:
                 index = int(url.rsplit("-", 1)[-1])
                 return {"generatedJson": {"name": f"Option {index}", "price": 900}}
@@ -859,11 +859,11 @@ class AgenticFlowContracts(unittest.TestCase):
             enriched, event, source = agent.run(products, {"mode": "live"})
 
         checked = {call.args[0] for call in scraper.call_args_list}
-        self.assertEqual(source["research"], {"mode": "parallel_url_scrape", "attempted": 6, "completed": 2})
+        self.assertEqual(source["research"], {"mode": "parallel_url_scrape", "attempted": 4, "completed": 2})
         self.assertEqual(event["status"], "complete")
         self.assertEqual([product["id"] for product in enriched], [str(index) for index in range(10)])
         self.assertEqual({enriched[index]["research_status"] for index in (7, 9)}, {"complete"})
-        self.assertEqual(checked, {products[index]["url"] for index in (0, 1, 2, 3, 7, 9)})
+        self.assertEqual(checked, {products[index]["url"] for index in (0, 1, 7, 9)})
 
     def test_live_discovery_retries_for_product_pages_without_inventing_list_prices(self) -> None:
         from backend.workflow import ExtractionAgent, SearchAgent
@@ -872,7 +872,7 @@ class AgenticFlowContracts(unittest.TestCase):
         article = {"title": "Best office chairs 2026", "url": "https://review.example/blogs/best-chairs"}
         tracker = {"title": "Acme Ergo Chair price history", "url": "https://camelcamelcamel.com/product/B123"}
         wrong_item = {"title": "Ergonomic gaming mouse", "url": "https://shop.example/products/ergo-mouse"}
-        product = {"title": "Acme Ergo Chair", "url": "https://shop.example/products/acme-ergo-chair"}
+        product = {"title": "Acme Ergo Chair", "url": "https://shop.example/products/acme-ergo-chair", "snippet": "Price ₹9,000"}
         agent = SearchAgent()
         agent.anakin.api_key = "test"
         brief = {"category": "Office chair", "description": "An ergonomic office chair", "budget": 12000,
@@ -941,7 +941,7 @@ class AgenticFlowContracts(unittest.TestCase):
             brief = {"category": "Shopping", "description": description}
             self.assertEqual(_requested_product_noun(brief), noun)
             with self.subTest(noun=noun), patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(
-                agent.anakin, "search", return_value={"results": [{"title": f"Acme {noun}", "url": f"https://shop.example/products/{noun}"}]}
+                agent.anakin, "search", return_value={"results": [{"title": f"Acme {noun}", "url": f"https://shop.example/products/{noun}", "snippet": "Price ₹9,000"}]}
             ):
                 sources, _, _ = agent.run(brief, None)
             self.assertEqual(len(sources), 1)

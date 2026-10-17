@@ -6,25 +6,33 @@
   "scripts": {
     "start": "./run.sh",
     "dev": "vite",
-    "backend": "python3 backend/server.py",
+    "backend": ".venv/bin/python -u backend/server.py",
     "test:e2e": "python3 tests/e2e_local.py",
     "test:brief": "python3 tests/brief_fallback.py",
     "test:payments": "python3 tests/payment_adapter.py",
     "test:auth": "python3 tests/auth_contract.py",
     "test:location": "python3 tests/location_adapter.py",
     "test:agentic": "python3 tests/qa_agentic_flow.py && python3 tests/retailer_contracts.py && python3 tests/refinement_trust.py && python3 tests/test_price_history.py",
+    "test:webmcp": "node --test tests/agentic_commerce_contract.mjs",
+    "test:slng": "python3 tests/slng_voice_contract.py",
+    "test:security": "python3 tests/security_boundaries.py && node --test tests/social_ssrf_contract.mjs",
     "test:voice": "node tests/voice_call.mjs",
+    "test:profile": ".venv/bin/python -m unittest tests/test_profile_graph.py && node --test tests/retailer_connection_contract.mjs",
+    "test:retailer-browser": "node --test tests/retailer_browser_contract.mjs",
+    "test:search": "python3 -m unittest tests/test_live_search.py tests/test_outfit_search.py",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "playwright": "^1.64.1",
     "react": "latest",
     "react-dom": "latest",
     "three": "^0.186.0",
     "vite": "latest"
   },
   "devDependencies": {
-    "playwright": "^1.63.0"
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3"
   }
 }

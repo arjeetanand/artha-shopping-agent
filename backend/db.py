@@ -173,8 +173,58 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS price_observations_product_index
                 ON price_observations(product_key, observed_at);
+
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                    user_id TEXT PRIMARY KEY,
+                    preferences_json TEXT NOT NULL DEFAULT '{}',
+                    stats_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS account_connections (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    account_email TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'connected',
+                    synced_orders_count INTEGER NOT NULL DEFAULT 0,
+                    last_synced_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(user_id, provider)
+                );
+
+                CREATE TABLE IF NOT EXISTS taste_memories (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    source_key TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    source_url TEXT NOT NULL DEFAULT '',
+                    document TEXT NOT NULL,
+                    attributes_json TEXT NOT NULL DEFAULT '{}',
+                    embedding_json TEXT,
+                    embedding_model TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(user_id, source_key)
+                );
+                CREATE INDEX IF NOT EXISTS taste_memory_user_index ON taste_memories(user_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS retailer_invoices (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    retailer_order_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    extracted_text TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    UNIQUE(user_id, provider, retailer_order_id, sha256)
+                );
                 """
             )
+            connection_columns = {row[1] for row in connection.execute("PRAGMA table_info(account_connections)").fetchall()}
+            if "details_json" not in connection_columns:
+                connection.execute("ALTER TABLE account_connections ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'")
             order_columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()}
             migrations = {
                 "user_id": "TEXT",
@@ -341,6 +391,27 @@ class Database:
             source = {"mode": mode}
         return {"id": row["id"], "query": row["query"], "intent": intent, "trusted": bool(row["server_verified"]),
                 "workflow": workflow, "products": products, "source": source}
+
+    def get_latest_search(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=_SEARCH_RETENTION_DAYS)).isoformat(timespec="seconds")
+            row = connection.execute(
+                "SELECT id, query, intent_json, workflow_json, products_json, source_json, server_verified FROM searches WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1",
+                (cutoff,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            intent = json.loads(row["intent_json"])
+            workflow = json.loads(row["workflow_json"])
+            products = json.loads(row["products_json"])
+            source = json.loads(row["source_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(intent, dict) or not isinstance(workflow, list) or not isinstance(products, list):
+            return None
+        return {"id": row["id"], "query": row["query"], "intent": intent, "trusted": bool(row["server_verified"]),
+                "workflow": workflow, "products": products, "source": source or {}}
 
     def get_search_products(self, search_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -516,7 +587,7 @@ class Database:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO orders (id, user_id, plan_id, status, total, currency, payload_json, created_at, updated_at)
+                INSERT OR REPLACE INTO orders (id, user_id, plan_id, status, total, currency, payload_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -745,6 +816,126 @@ class Database:
             "by_provider": [row_dict(row) for row in by_provider],
             "recent": [row_dict(row) for row in recent],
         }
+
+    def get_user_profile(self, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT preferences_json, stats_json, updated_at FROM user_profiles WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": user_id,
+            "preferences": json.loads(row["preferences_json"]),
+            "stats": json.loads(row["stats_json"]),
+            "updated_at": row["updated_at"],
+        }
+
+    def save_user_profile(self, user_id: str, preferences: dict[str, Any], stats: dict[str, Any] | None = None) -> dict[str, Any]:
+        updated_at = now_iso()
+        stats_data = stats or {}
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO user_profiles (user_id, preferences_json, stats_json, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    preferences_json = excluded.preferences_json,
+                    stats_json = excluded.stats_json,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, json.dumps(preferences), json.dumps(stats_data), updated_at),
+            )
+        return {
+            "user_id": user_id,
+            "preferences": preferences,
+            "stats": stats_data,
+            "updated_at": updated_at,
+        }
+
+    def list_account_connections(self, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, provider, account_email, status, synced_orders_count, last_synced_at, created_at, details_json FROM account_connections WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [{**dict(row), "details": json.loads(row["details_json"])} for row in rows]
+
+    def save_account_connection(
+        self,
+        user_id: str,
+        provider: str,
+        account_email: str,
+        synced_orders_count: int = 0,
+        status: str = "connected",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = now_iso()
+        conn_id = f"conn-{provider}-{uuid.uuid4().hex[:6]}"
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO account_connections (id, user_id, provider, account_email, status, synced_orders_count, last_synced_at, created_at, details_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, provider) DO UPDATE SET
+                    account_email = excluded.account_email,
+                    status = excluded.status,
+                    synced_orders_count = excluded.synced_orders_count,
+                    last_synced_at = excluded.last_synced_at,
+                    details_json = excluded.details_json
+                """,
+                (conn_id, user_id, provider, account_email, status, synced_orders_count, now, now, json.dumps(details or {})),
+            )
+        return next(item for item in self.list_account_connections(user_id) if item["provider"] == provider)
+
+    def save_taste_memory(self, user_id: str, source_key: str, kind: str, document: str,
+                          attributes: dict[str, Any], source_url: str = "", embedding: list[float] | None = None,
+                          embedding_model: str = "") -> dict[str, Any]:
+        memory_id = "mem-" + hashlib.sha256(f"{user_id}:{source_key}".encode()).hexdigest()[:32]
+        timestamp = now_iso()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO taste_memories (id,user_id,source_key,kind,source_url,document,attributes_json,embedding_json,embedding_model,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(user_id,source_key) DO UPDATE SET
+                     kind=excluded.kind,source_url=excluded.source_url,document=excluded.document,
+                     attributes_json=excluded.attributes_json,embedding_json=excluded.embedding_json,
+                     embedding_model=excluded.embedding_model,updated_at=excluded.updated_at""",
+                (memory_id,user_id,source_key,kind,source_url,document,json.dumps(attributes),
+                 json.dumps(embedding) if embedding else None,embedding_model,timestamp,timestamp),
+            )
+        return {"id": memory_id, "kind": kind, "source_key": source_key, "embedding_status": "ready" if embedding else "pending"}
+
+    def list_taste_memories(self, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM taste_memories WHERE user_id=? ORDER BY updated_at DESC", (user_id,)).fetchall()
+        return [{**dict(row), "attributes": json.loads(row["attributes_json"]),
+                 "embedding": json.loads(row["embedding_json"]) if row["embedding_json"] else None} for row in rows]
+
+    def delete_taste_memory(self, user_id: str, memory_id: str) -> bool:
+        with self._connect() as connection:
+            return bool(connection.execute("DELETE FROM taste_memories WHERE user_id=? AND id=?", (user_id,memory_id)).rowcount)
+
+    def save_retailer_invoice(self, user_id: str, provider: str, retailer_order_id: str,
+                             relative_path: str, sha256: str, extracted_text: str = "") -> dict[str, Any]:
+        invoice_id = "inv-" + hashlib.sha256(f"{user_id}:{provider}:{retailer_order_id}:{sha256}".encode()).hexdigest()[:32]
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO retailer_invoices VALUES (?,?,?,?,?,?,?,?)",
+                (invoice_id,user_id,provider,retailer_order_id,relative_path,sha256,extracted_text[:200000],now_iso()),
+            )
+        return {"id": invoice_id, "provider": provider, "retailer_order_id": retailer_order_id}
+
+    def list_retailer_invoices(self, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT id,provider,retailer_order_id,created_at FROM retailer_invoices WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_retailer_invoice(self, user_id: str, invoice_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM retailer_invoices WHERE user_id=? AND id=?", (user_id,invoice_id)).fetchone()
+        return dict(row) if row else None
 
 
 db = Database()

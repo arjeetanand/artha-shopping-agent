@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { TalkDrawer } from './components/TalkDrawer';
+import { SocialThemeBar } from './components/SocialThemeBar';
+import { registerWebMCPCommerceTools } from './lib/webmcp';
+import { Card3D } from './components/Card3D';
+import { BagsPurchaseTracker, BagFolderCard, BagDetailModal, DEMO_BAGS } from './components/BagsPurchaseTracker';
+import { TasteGraphView } from './components/TasteGraphView';
+import { HowArthaWorks } from './components/HowArthaWorks';
 import {
   DEFAULT_INTENT,
   DEFAULT_RESULT,
@@ -18,10 +24,14 @@ import {
   completeRefund,
   createOrder,
   createPlan,
+  extractSocialTheme,
   getHealth,
   getOrders,
   getPlans,
   getSession,
+  getTasteMemories,
+  rememberProduct,
+  removeTasteMemory,
   getUsage,
   getVoiceStatus,
   requestReturn,
@@ -39,12 +49,20 @@ const MAX_REFERENCE_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_REFERENCE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const NAV_ITEMS = [
   { id: 'discover', label: 'Discover', icon: 'search' },
+  { id: 'taste-graph', label: 'Taste OS', icon: 'network' },
   { id: 'saved', label: 'Saved', icon: 'bookmark' },
   { id: 'plans', label: 'Purchase plans', icon: 'box' },
   { id: 'orders', label: 'Orders', icon: 'truck' },
   { id: 'usage', label: 'Usage', icon: 'chart' },
 ];
-const SECTION_TITLES = { discover: 'Discover', saved: 'Saved picks', plans: 'Purchase plans', orders: 'Orders & tracking', usage: 'Usage & runtime' };
+const SECTION_TITLES = {
+  discover: 'Discover',
+  'taste-graph': 'Shopping OS: Taste & Context Graph',
+  saved: 'Saved picks',
+  plans: 'Purchase plans',
+  orders: 'Orders & tracking',
+  usage: 'Usage & runtime',
+};
 
 function missionFromIntent(intent) {
   const mission = intent?.mission || {};
@@ -130,7 +148,7 @@ function clearPendingSearch() {
 
 function viewFromPath(pathname = '/') {
   const path = String(pathname).replace(/\/+$/, '') || '/';
-  return ({ '/saved': 'saved', '/plans': 'plans', '/orders': 'orders', '/usage': 'usage' })[path] || 'discover';
+  return ({ '/saved': 'saved', '/plans': 'plans', '/orders': 'orders', '/usage': 'usage', '/taste-graph': 'taste-graph' })[path] || 'discover';
 }
 
 function useDialogFocusTrap(open, dialogRef, initialRef, onClose) {
@@ -225,13 +243,17 @@ function Logo({ onClick }) {
   );
 }
 
-function NavRail({ activeView, onNavigate, onReset, health, planCount }) {
-  const live = health?.anakin_configured;
+function NavRail({ activeView, onNavigate, onReset, health, planCount, savedCount = 0, location }) {
+  const live = health?.search_mode === 'live' && health?.anakin_configured;
   const production = health?.environment === 'production';
   return (
     <aside className="nav-rail">
       <div className="nav-rail__top">
         <Logo onClick={onReset} />
+        <div className="nav-rail__location" title={`Delivery location context: ${location || 'Bangalore, 560001'}`}>
+          <Icon name="truck" size={12} />
+          <span>{location || 'Bangalore 560001'}</span>
+        </div>
       </div>
       <nav className="nav-links" aria-label="Primary navigation">
         {NAV_ITEMS.map((item) => (
@@ -244,7 +266,9 @@ function NavRail({ activeView, onNavigate, onReset, health, planCount }) {
           >
             <Icon name={item.icon} size={19} />
             <span>{item.label}</span>
+            {item.id === 'orders' ? <span className="nav-badge--sandbox">Sandbox</span> : null}
             {item.id === 'plans' && planCount > 0 ? <em>{planCount}</em> : null}
+            {item.id === 'saved' && savedCount > 0 ? <em>{savedCount}</em> : null}
           </button>
         ))}
       </nav>
@@ -253,7 +277,7 @@ function NavRail({ activeView, onNavigate, onReset, health, planCount }) {
           <span className={`connection-dot ${live ? 'is-live' : ''}`} />
           <div className="connection-status__text">
             <strong>{production ? 'Production API' : 'Local API'}</strong>
-            <small>{live ? 'Anakin live search' : 'Search provider not ready'} · {health?.ai?.provider === 'gemini' ? 'Gemini' : 'Ollama'}</small>
+            <small>{health?.search_mode === 'fixture' ? 'Demo catalog' : live ? 'Anakin live search' : 'Search provider not ready'} · {health?.ai?.provider === 'gemini' ? 'Gemini' : 'Ollama'}</small>
           </div>
         </div>
         <div className="nav-rail__rule" />
@@ -267,7 +291,7 @@ function NavRail({ activeView, onNavigate, onReset, health, planCount }) {
   );
 }
 
-function MobileNav({ activeView, onNavigate, planCount }) {
+function MobileNav({ activeView, onNavigate, planCount, savedCount = 0 }) {
   return (
     <nav className="mobile-nav" aria-label="Mobile navigation">
       {NAV_ITEMS.map((item) => (
@@ -281,6 +305,7 @@ function MobileNav({ activeView, onNavigate, planCount }) {
           <Icon name={item.icon} size={20} />
           <span>{item.id === 'plans' ? 'Plans' : item.label}</span>
           {item.id === 'plans' && planCount > 0 ? <em>{planCount}</em> : null}
+          {item.id === 'saved' && savedCount > 0 ? <em>{savedCount}</em> : null}
         </button>
       ))}
     </nav>
@@ -292,7 +317,7 @@ function AccountAvatar({ user }) {
   return <span className="account-avatar account-avatar--initials">{initials(user?.name)}</span>;
 }
 
-function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, onOpenTalk }) {
+function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, onOpenTalk, onOpenTasteGraph }) {
   return (
     <header className="top-header">
       <span className="mobile-brand" aria-label="Artha">ARTHA</span>
@@ -302,6 +327,15 @@ function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, on
         <span className="top-header__section">{SECTION_TITLES[activeView]}</span>
       </div>
       <div className="top-header__actions">
+        <button
+          type="button"
+          className={`talk-button taste-pill-button ${activeView === 'taste-graph' ? 'is-active' : ''}`}
+          onClick={onOpenTasteGraph}
+          aria-label="Open Shopping OS Taste & Context Graph"
+        >
+          <Icon name="network" size={16} />
+          <span>Taste OS</span>
+        </button>
         <button type="button" className="talk-button" onClick={onOpenTalk} aria-label="Talk to Artha">
           <Icon name="waveform" size={16} />
           <span>Talk to Artha</span>
@@ -329,19 +363,26 @@ function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, on
 }
 
 function ProductThumb({ product, small = false }) {
-  const position = `${Math.max(0, Math.min(2, Number(product.crop_index || 0))) * 50}% center`;
-  const image = String(product.image || '').trim();
-  const chairLike = /chair|desk|office|lumbar|ergonomic/i.test(`${product.name || ''} ${product.category || ''}`);
-  const fallback = chairLike ? '/assets/neutral-office-chair-fallback.png' : '/assets/editorial-outfit-triptych.png';
+  const [imageFailed, setImageFailed] = useState(false);
+  const rawImage = String(product.image || '').trim();
+  const image = /^https?:\/\//i.test(rawImage) && !['none', 'null', 'undefined'].includes(rawImage.toLowerCase()) && !rawImage.endsWith('/None') && !imageFailed ? rawImage : '';
+  const className = `product-thumb ${small ? 'product-thumb--small' : ''}`;
+  if (!image) {
+    return (
+      <span className={`${className} product-thumb--unavailable`} role="img" aria-label={`${product.name} photo unavailable`}>
+        <Icon name="image" size={small ? 16 : 28} />
+        {!small ? <small>Product photo unavailable</small> : null}
+      </span>
+    );
+  }
   return (
-    <span
-      className={`product-thumb ${small ? 'product-thumb--small' : ''} ${image ? '' : 'product-thumb--fallback'}`}
-      role="img"
-      aria-label={`${product.name} thumbnail`}
-      style={{
-        backgroundImage: `url(${image || fallback})`,
-        backgroundPosition: position,
-      }}
+    <img
+      className={className}
+      src={image}
+      alt={`${product.name} product photo`}
+      loading="lazy"
+      decoding="async"
+      onError={() => setImageFailed(true)}
     />
   );
 }
@@ -357,7 +398,7 @@ function SourceMark({ product }) {
   );
 }
 
-function VoiceInputButton({ onTranscript, onError }) {
+function VoiceInputButton({ onTranscript, onInterim, onError }) {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
 
@@ -374,23 +415,46 @@ function VoiceInputButton({ onTranscript, onError }) {
     const recognition = new Recognition();
     recognition.lang = 'en-IN';
     recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
     recognition.onerror = () => onError('I could not hear that clearly. Please try again or type your brief.');
-    recognition.onresult = (event) => onTranscript(event.results?.[0]?.[0]?.transcript || '');
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      if (interimTranscript && onInterim) {
+        onInterim(interimTranscript);
+      }
+      if (finalTranscript) {
+        onTranscript(finalTranscript);
+      }
+    };
     recognitionRef.current = recognition;
     recognition.start();
-  }, [isListening, onError, onTranscript]);
+  }, [isListening, onError, onInterim, onTranscript]);
 
   return (
     <button
       type="button"
-      className={`secondary-control ${isListening ? 'is-selected' : ''}`}
+      className={`secondary-control ${isListening ? 'is-selected voice-listening-pulse' : ''}`}
       onClick={begin}
       aria-pressed={isListening}
+      title={isListening ? 'Stop listening' : 'Speak brief with your voice'}
     >
-      <Icon name="mic" size={17} />
+      {isListening ? (
+        <span className="voice-wave" aria-hidden="true">
+          <span /><span /><span />
+        </span>
+      ) : (
+        <Icon name="mic" size={17} />
+      )}
       <span>{isListening ? 'Listening…' : 'Speak brief'}</span>
     </button>
   );
@@ -465,6 +529,13 @@ function Composer({
   onToast,
   onPickPrompt,
   onOpenTalk,
+  socialTheme,
+  onClearSocialTheme,
+  isExtractingTheme,
+  onAnalyzeUrl,
+  useProfile,
+  onToggleProfile,
+  onOpenTasteGraph,
 }) {
   const fileInputRef = useRef(null);
   const onFileChange = useCallback(
@@ -482,11 +553,16 @@ function Composer({
     [onReferenceChange, onToast],
   );
 
-  const canSearch = Boolean(query.trim() || postUrl.trim() || reference?.dataUrl);
+  const canSearch = Boolean(query.trim() || postUrl.trim() || reference?.dataUrl || socialTheme);
   const setMissionField = (field, value) => onMissionChange({ ...mission, [field]: value });
 
   return (
     <div className="composer-container">
+      <SocialThemeBar
+        theme={socialTheme}
+        isLoading={isExtractingTheme}
+        onClear={onClearSocialTheme}
+      />
       <form className="composer" onSubmit={onSearch}>
         <label className="sr-only" htmlFor="shopping-brief">
           {hasResults ? 'Follow-up preference' : 'Shopping brief'}
@@ -495,18 +571,18 @@ function Composer({
           id="shopping-brief"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={hasResults ? 'Ask a follow-up (e.g., show me options under ₹11,000 or make the delivery window tighter)…' : 'Describe what you want (e.g., Office-ready neutral look under ₹15,000, breathable linen shirts, leather loafers)…'}
+          placeholder={hasResults ? 'Ask a follow-up (e.g., show me options under ₹11,000 or make the delivery window tighter)…' : 'Describe what you need (e.g., a breathable linen shirt under ₹2,500 for a work trip)…'}
           rows={2}
         />
         <fieldset className="mission-brief">
             <legend>{hasResults ? 'Adjust your mission, then refine' : 'Mission brief'}</legend>
             <label>
               <span>Occasion</span>
-              <input value={mission.occasion} onChange={(event) => setMissionField('occasion', event.target.value)} placeholder="Wedding, work, dinner…" />
+              <input value={mission.occasion} onChange={(event) => setMissionField('occasion', event.target.value)} placeholder="Wedding, work, dinner, trip…" />
             </label>
             <label>
               <span>Budget</span>
-              <input value={mission.budget} onChange={(event) => setMissionField('budget', event.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="₹4,000" />
+              <input value={mission.budget} onChange={(event) => setMissionField('budget', event.target.value)} maxLength={40} placeholder="₹2,000 or 2k" />
             </label>
             <label>
               <span>Arrive by</span>
@@ -533,9 +609,37 @@ function Composer({
               <Icon name="link" size={16} />
               <span>Paste URL</span>
             </button>
+            <VoiceInputButton
+              onTranscript={(transcript) => {
+                setQuery((prev) => (prev ? `${prev} ${transcript}` : transcript));
+                onToast('Voice brief recorded.');
+              }}
+              onInterim={(interim) => {
+                setQuery(interim);
+              }}
+              onError={onToast}
+            />
             <button type="button" className="secondary-control talk-control" onClick={onOpenTalk}>
               <Icon name="waveform" size={16} />
               <span>Talk to Artha</span>
+            </button>
+            <button
+              type="button"
+              className={`secondary-control ${useProfile ? 'is-selected' : ''}`}
+              onClick={onToggleProfile}
+              title="Toggle automatic taste profile & delivery defaults from Shopping OS"
+            >
+              <Icon name="network" size={16} />
+              <span>{useProfile ? 'Taste OS Active' : 'Taste OS'}</span>
+            </button>
+            <button
+              type="button"
+              className="secondary-control"
+              onClick={onOpenTasteGraph}
+              title="Open full interactive Shopping OS Taste & Knowledge Graph"
+            >
+              <Icon name="spark" size={16} />
+              <span>Taste Graph</span>
             </button>
             <LocationButton location={location} onLocation={onLocation} onError={onToast} />
             <ReferenceChip reference={reference} onRemove={onRemoveReference} />
@@ -566,6 +670,17 @@ function Composer({
                 inputMode="url"
               />
             </label>
+            {postUrl?.trim() ? (
+              <button
+                type="button"
+                className="secondary-control"
+                onClick={onAnalyzeUrl}
+                disabled={isExtractingTheme}
+              >
+                <Icon name="spark" size={14} />
+                <span>{isExtractingTheme ? 'Analyzing…' : 'Inspect style'}</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
       </form>
@@ -598,7 +713,7 @@ function Composer({
   );
 }
 
-function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCount = 0, resultStatus = '', searchError = '', onOpenTalk }) {
+function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCount = 0, resultStatus = '', resultSourceMode = '', searchError = '', onOpenTalk }) {
   const stages = [
     { label: 'Lock mission', copy: 'Reading the deadline and hard constraints', indexes: [0, 1] },
     { label: 'Inspect sources', copy: 'Finding retailer and delivery evidence', indexes: [2, 3] },
@@ -634,7 +749,7 @@ function AgentStrip({ workflow, isSearching, searchStage, hasResults, resultCoun
           ? `${activeAgents[0].agent || 'Shopping agent'} · ${activeAgents[0].detail || 'Working now'}`
           : `${activeStageLabel} · Checking retailer pages for price, stock, delivery, and reviews…`
       : hasResults
-        ? `Decision ready · ${resultCount} product ${resultCount === 1 ? 'option' : 'options'}${hasWaitingCheck ? ' · some checks still need retailer confirmation' : ''}`
+        ? `Decision ready · ${resultCount} ${resultSourceMode === 'live' ? (resultCount === 1 ? 'retailer page' : 'retailer pages') : (resultCount === 1 ? 'product' : 'products')}${hasWaitingCheck ? ' · some checks still need retailer confirmation' : ''}`
         : finishedEmpty ? 'Research finished · no purchasable product pages found' : resultStatus === 'needs_clarification' ? 'One more detail needed before retailer research' : 'Ready when you are';
   return (
     <section
@@ -715,7 +830,7 @@ function ConversationTrail({ conversation }) {
   const latest = conversation[conversation.length - 1];
   return (
     <div className="conversation-trail" aria-live="polite">
-      <span className="conversation-trail__label">Follow-up kept research</span>
+      <span className="conversation-trail__label">Artha follow-up</span>
       <p>{latest?.text || 'The shortlist was refined from the existing evidence.'}</p>
     </div>
   );
@@ -741,11 +856,12 @@ function BriefSummary({ intent, show = true }) {
   const fields = [
     (mission.occasion || intent?.occasion) ? `Occasion: ${mission.occasion || intent.occasion}` : null,
     ...(intent?.must_have || []).slice(0, 2),
-    (mission.budget || intent?.budget) ? `Budget ${formatPrice(mission.budget || intent.budget)}` : null,
+    (mission.budget || intent?.budget) ? `Budget ${formatPrice(mission.budget || intent.budget)}${intent?.budget_scope === 'item' ? ' per item' : ''}` : null,
     (mission.arrive_by_date || intent?.arrive_by) ? `Arrival: ${mission.arrive_by_date || intent.arrive_by}` : null,
     (mission.pincode || intent?.pincode) ? `Pincode ${mission.pincode || intent.pincode}` : null,
-    (mission.color || intent?.color) ? `Colour: ${mission.color || intent.color}` : null,
-    (mission.size || intent?.size) ? `Size: ${mission.size || intent.size}` : null,
+    ...(intent?.items || []).map((item) => `${item.category}: ${(item.color_options || []).join('/')} ${item.size ? `size ${item.size}` : ''}`.trim()),
+    !intent?.items?.length && (mission.color || intent?.color) ? `Colour: ${mission.color || intent.color}` : null,
+    !intent?.items?.length && (mission.size || intent?.size) ? `Size: ${mission.size || intent.size}` : null,
     intent?.quantity > 1 ? `Quantity ${intent.quantity}` : null,
     intent?.brand ? `Preferred brand: ${intent.brand}` : null,
     intent?.location ? `Delivering to ${intent.location}` : null,
@@ -778,6 +894,11 @@ function LocationContext({ intent }) {
 
 function clarificationSuggestions(question) {
   const key = String(question?.key || '').toLowerCase();
+  if (key === 'shorts_size') return ['28', '30', '32', '34', '36'];
+  if (key === 'pants_size') return ['28', '30', '32', '34', '36'];
+  if (key === 'shirt_size') return ['S', 'M', 'L', 'XL'];
+  if (key === 'wearer') return ['Men', 'Women', 'Unisex'];
+  if (key === 'budget_scope') return ['Whole outfit', 'Per item'];
   if (key === 'color') return ['Red', 'Black', 'Blue', 'Neutral'];
   if (key === 'size') return ['S', 'M', 'L', 'XL'];
   if (key === 'delivery') return ['Within 3 days', 'Within 5 days', 'Within 7 days'];
@@ -787,21 +908,31 @@ function clarificationSuggestions(question) {
   return [];
 }
 
-function ClarificationNote({ intent, onAnswer, onEdit }) {
+function clarificationAnswer(key, value) {
+  const prefixes = { shirt_size: 'shirt size', shorts_size: 'shorts size', pants_size: 'pants size', wearer: 'for', budget_scope: 'budget for', budget: 'budget', location: 'deliver to', pincode: 'pincode', color: 'color', size: 'size' };
+  if (key === 'delivery' && /^\d+(?:\s+days?)?$/i.test(value.trim())) return `within ${parseInt(value, 10)} days`;
+  return `${prefixes[key] || ''} ${value}`.trim();
+}
+
+function ClarificationNote({ intent, onAnswer, onEdit, isSearching }) {
+  const [answers, setAnswers] = useState({});
   const questions = Array.isArray(intent?.clarifications) ? intent.clarifications : [];
+  const answerText = (values) => questions.filter((question) => values[question.key]?.trim()).map((question) => clarificationAnswer(question.key, values[question.key])).join('; ');
   if (!questions.length) return null;
   return (
     <aside className="clarification-note" aria-label="Details Artha would like to confirm">
       <span className="section-kicker">A few details to sharpen this search</span>
       <strong>{questions.length === 1 ? questions[0].question : `I need ${questions.length} details before I search.`}</strong>
+      <form onSubmit={(event) => { event.preventDefault(); const text = answerText(answers); if (text) onAnswer(text); }}>
       <div className="clarification-note__questions">
         {questions.map((question) => (
           <div className="clarification-note__question" key={question.key || question.question}>
             <span>{question.question}</span>
+            <input aria-label={question.question} value={answers[question.key] || ''} onChange={(event) => setAnswers((current) => ({ ...current, [question.key]: event.target.value }))} placeholder={question.key === 'delivery' ? 'Within 5 days' : 'Your answer'} maxLength={120} disabled={isSearching} />
             {onAnswer && clarificationSuggestions(question).length ? (
               <div className="clarification-note__chips" aria-label={`Quick answers for ${question.question}`}>
                 {clarificationSuggestions(question).map((suggestion) => (
-                  <button type="button" key={suggestion} onClick={() => onAnswer(suggestion)}>
+                  <button type="button" key={suggestion} disabled={isSearching} onClick={() => onAnswer(answerText({ ...answers, [question.key]: suggestion }))}>
                     {suggestion}
                   </button>
                 ))}
@@ -810,66 +941,43 @@ function ClarificationNote({ intent, onAnswer, onEdit }) {
           </div>
         ))}
       </div>
-      <small>Artha has paused retailer research until these constraints are clear. Reply in the brief above, or use a quick answer.</small>
+      <button type="submit" className="primary-button" disabled={isSearching || !answerText(answers)}>{isSearching ? 'Checking answers…' : 'Continue search'}</button>
+      </form>
+      <small>Answer here or use a quick answer. Artha starts retailer research once the required details are clear.</small>
       <button type="button" className="quiet-action clarification-note__edit" onClick={onEdit}>Edit shopping brief <Icon name="arrow" size={14} /></button>
     </aside>
   );
 }
 
 function HeroVisual() {
-  const visualRef = useRef(null);
-
-  useEffect(() => {
-    const node = visualRef.current;
-    if (!node || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
-    const supportsPointer = window.matchMedia('(pointer: fine)').matches;
-    if (!supportsPointer) return undefined;
-    let frame = null;
-    const reset = () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        node.style.setProperty('--hero-tilt-x', '0deg');
-        node.style.setProperty('--hero-tilt-y', '0deg');
-        node.style.setProperty('--hero-shift-x', '0px');
-        node.style.setProperty('--hero-shift-y', '0px');
-      });
-    };
-    const move = (event) => {
-      const rect = node.getBoundingClientRect();
-      const x = (event.clientX - rect.left) / rect.width - 0.5;
-      const y = (event.clientY - rect.top) / rect.height - 0.5;
-      if (frame) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        node.style.setProperty('--hero-tilt-x', `${y * -4}deg`);
-        node.style.setProperty('--hero-tilt-y', `${x * 5}deg`);
-        node.style.setProperty('--hero-shift-x', `${x * 10}px`);
-        node.style.setProperty('--hero-shift-y', `${y * 10}px`);
-      });
-    };
-    node.addEventListener('pointermove', move, { passive: true });
-    node.addEventListener('pointerleave', reset, { passive: true });
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      node.removeEventListener('pointermove', move);
-      node.removeEventListener('pointerleave', reset);
-    };
-  }, []);
-
   return (
-    <div ref={visualRef} className="hero-visual" aria-hidden="true">
-      <div className="hero-visual__frame">
-        <div className="hero-visual__image" />
-        <div className="hero-visual__wash" />
-        <span className="hero-visual__index">01 — 03</span>
-        <span className="hero-visual__caption">The everyday edit</span>
-        <span className="hero-visual__rule" />
+    <Card3D maxTilt={7} scale={1.02} glare={true} className="hero-visual__card-wrapper">
+      <div className="hero-visual hero-visual--folder">
+        <div className="hero-visual__tab" aria-hidden="true">
+          <span className="hero-visual__tab-inner">Curated Look</span>
+        </div>
+        <div className="hero-visual__stickers" aria-hidden="true">
+          <span className="hero-visual__sticker hero-visual__sticker--1">✨</span>
+          <span className="hero-visual__sticker hero-visual__sticker--2">👔</span>
+          <span className="hero-visual__sticker hero-visual__sticker--3">👞</span>
+        </div>
+        <div className="hero-visual__frame">
+          <img
+            className="hero-visual__image"
+            src="/assets/editorial-outfit-triptych.png"
+            alt="A linen shirt, relaxed trousers and leather loafers in a neutral palette"
+          />
+          <div className="hero-visual__wash" />
+          <span className="hero-visual__index">THE EVERYDAY EDIT</span>
+          <span className="hero-visual__caption">Three pieces. One considered look.</span>
+        </div>
+        <div className="hero-visual__retailers" aria-hidden="true">
+          <span className="hero-visual__retailer-badge" style={{ backgroundColor: '#1C3027' }}>Zara</span>
+          <span className="hero-visual__retailer-badge" style={{ backgroundColor: '#A94F32' }}>FabIndia</span>
+          <span className="hero-visual__retailer-badge" style={{ backgroundColor: '#026AA7' }}>Uniqlo</span>
+        </div>
       </div>
-      <div className="hero-visual__ticket">
-        <strong>3</strong>
-        <span>pieces<br />worth keeping</span>
-      </div>
-      <div className="hero-visual__stamp">SOURCE<br />LINKED</div>
-    </div>
+    </Card3D>
   );
 }
 
@@ -955,11 +1063,15 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
   const colors = Array.isArray(product.colors) ? product.colors : [];
 
   return (
-    <article
-      className={`product-card ${selected ? 'is-selected' : ''} ${focused ? 'is-focused' : ''}`}
+    <Card3D
+      className={`product-card product-card--folder ${selected ? 'is-selected' : ''} ${focused ? 'is-focused' : ''}`}
       style={{ '--motion-index': motionIndex }}
       onMouseEnter={() => onFocus(product.id)}
+      maxTilt={6}
     >
+      <div className="product-card__tab" aria-hidden="true">
+        <span className="product-card__tab-inner">{product.seller || 'Verified Option'}</span>
+      </div>
       <div className="product-card__media">
         <ProductThumb product={product} />
         <div className="product-card__badges">
@@ -1056,7 +1168,7 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
           </div>
         </div>
       </div>
-    </article>
+    </Card3D>
   );
 }
 
@@ -1071,6 +1183,15 @@ function RecommendationBanner({ product, onInspect, onOpenTalk }) {
         <p>{sanitizeSnippet(product.description)} Artha ranked it first because the trade-offs line up best with your constraints.</p>
         <div className="decision-banner__reasons">
           {reasons.map((reason) => <span key={reason}>{reason}</span>)}
+        </div>
+        <div className="honest-tradeoff-box">
+          <span className="honest-tradeoff-box__label">
+            <Icon name="info" size={13} /> Honest Trade-off
+          </span>
+          <p>
+            {product.tradeoff ||
+              'Checked retailer offers match your size, price, and deadline constraints. Verify return policy and fabric care instructions before checkout.'}
+          </p>
         </div>
       </div>
       <div className="decision-banner__actions">
@@ -1090,6 +1211,7 @@ function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenT
   if (!decision) return <RecommendationBanner product={products[0]} onInspect={onInspect} onOpenTalk={onOpenTalk} />;
   const product = products.find((item) => item.id === decision.recommended_product_id);
   const fallback = products.find((item) => item.id === decision.fallback_product_id);
+  const outfit = Array.isArray(decision.recommended_product_ids) ? products.filter((item) => decision.recommended_product_ids.includes(item.id)) : [];
   const isNoFit = decision.status === 'no_safe_fit';
   const isBuyNow = decision.status === 'buy_now';
   const title = isNoFit ? 'No safe fit' : isBuyNow ? 'Buy now' : 'Verify before buying';
@@ -1100,14 +1222,28 @@ function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenT
     && retailerUrl(lowerOffer.source_url) !== retailerUrl(product.url);
 
   return (
-    <aside className={`decision-banner mission-decision mission-decision--${decision.status}`} aria-label="Artha decision">
+    <Card3D className={`decision-banner mission-decision mission-decision--${decision.status}`} maxTilt={4} aria-label="Artha decision">
       <div className="decision-banner__copy">
         <span className="decision-banner__eyebrow"><Icon name={isNoFit ? 'info' : isBuyNow ? 'checkCircle' : 'shield'} size={13} /> Artha decision</span>
-        <strong>{title}{product ? ` · ${sanitizeTitle(product.name)}` : ''}</strong>
+        <strong>{title}{outfit.length > 1 ? ` · ${outfit.length}-piece outfit` : product ? ` · ${sanitizeTitle(product.name)}` : ''}</strong>
+        {outfit.length > 1 ? <p>{outfit.map((item) => <a key={item.id} href={retailerUrl(item.url)} target="_blank" rel="noopener noreferrer">{sanitizeTitle(item.name)} <Icon name="external" size={12} />{' '}</a>)}</p> : null}
         <p>{isNoFit ? decision.mission_change || 'Try changing one hard constraint and search again.' : isBuyNow ? 'Every hard constraint is supported by the checked retailer evidence.' : 'One or more purchase facts still need confirmation on the retailer page.'}</p>
         {decision.checked_at ? <small className="mission-decision__time">Decision updated {observedTime(decision.checked_at)}</small> : null}
         <div className="decision-banner__reasons">
           {reasons.map((reason) => <span key={reason}>{reason}</span>)}
+        </div>
+        <div className="honest-tradeoff-box">
+          <span className="honest-tradeoff-box__label">
+            <Icon name="info" size={13} /> Honest Trade-off
+          </span>
+          <p>
+            {decision.tradeoff ||
+              (isNoFit
+                ? decision.mission_change || 'No retailer option satisfies all constraints simultaneously. Relaxing budget or delivery deadline unlocks candidate matches.'
+                : isBuyNow
+                ? 'Best overall constraint balance. Check retailer delivery cutoffs and size chart measurements on the merchant page.'
+                : 'One or more claims still require live confirmation at the retailer website before completing purchase.')}
+          </p>
         </div>
         {cheaperElsewhere ? (
           <p className="mission-decision__fallback">
@@ -1122,7 +1258,7 @@ function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenT
         ) : null}
       </div>
       <div className="decision-banner__actions">
-        {product ? <strong>{formatPrice(productTotal(product))}</strong> : null}
+        {product ? <strong>{formatPrice(outfit.length > 1 ? decision.total : productTotal(product))}</strong> : null}
         {product ? (
           <button type="button" className="primary-button" onClick={() => onOpenProduct(product)} disabled={!product.url}>
             <Icon name="external" size={14} /> {action}
@@ -1131,7 +1267,7 @@ function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenT
         {product ? <button type="button" className="text-button" onClick={() => onInspect(product)}>What Artha checked <Icon name="shield" size={13} /></button> : null}
         <button type="button" className="text-button" onClick={onOpenTalk}>{isNoFit ? 'Adjust this mission' : 'Talk through the decision'} <Icon name="arrow" size={13} /></button>
       </div>
-    </aside>
+    </Card3D>
   );
 }
 
@@ -1297,6 +1433,8 @@ function SummaryPanel({
   showCheckout,
 }) {
   const total = selectedProducts.reduce((sum, product) => sum + productTotal(product), 0);
+  const budgetNum = Number(intent?.budget || intent?.mission?.budget || 0) * (intent?.budget_scope === 'item' ? intent.items?.length || 1 : 1);
+  const headroom = budgetNum > 0 && selectedProducts.length ? budgetNum - total : null;
   const live = sourceMode === 'live';
   const awaitingSearch = sourceMode === 'idle';
 
@@ -1304,12 +1442,12 @@ function SummaryPanel({
     <aside className="summary-panel" aria-label="Purchase plan summary">
       <div className="summary-panel__header">
         <div className="summary-panel__title-wrap">
-          <h2>Your shortlist</h2>
+          <h2>Purchase plan</h2>
           <span className="item-count-badge">
             {selectedProducts.length} {selectedProducts.length === 1 ? 'item' : 'items'}
           </span>
         </div>
-          <small className="summary-panel__sub">Keep the options worth a closer look.</small>
+          <small className="summary-panel__sub">Only selected products appear here. Add or remove options on their cards.</small>
       </div>
 
       <div className="summary-items">
@@ -1320,6 +1458,17 @@ function SummaryPanel({
               <div className="summary-item__info">
                 <strong title={product.name}>{sanitizeTitle(product.name)}</strong>
                 <small>{product.seller}{product.quantity > 1 ? ` · ${product.quantity} units` : ''}</small>
+                {product.url ? (
+                  <a
+                    href={product.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="summary-item__handoff"
+                  >
+                    <span>Handoff to {product.seller || 'retailer'}</span>
+                    <Icon name="external" size={11} />
+                  </a>
+                ) : null}
               </div>
               <div className="summary-item__right">
                 <b>{formatPrice(productTotal(product))}</b>
@@ -1346,15 +1495,23 @@ function SummaryPanel({
       </div>
 
       <div className="summary-calc">
+        {headroom !== null ? (
+          <div className={`summary-headroom ${headroom < 0 ? 'is-over' : ''}`}>
+            <span>{headroom >= 0 ? 'Budget headroom' : 'Over budget'}</span>
+            <strong>
+              {formatPrice(Math.abs(headroom))} {headroom >= 0 ? 'under budget' : 'above budget'}
+            </strong>
+          </div>
+        ) : null}
         <div className="summary-calc__row">
           <span>Items subtotal</span>
-          <strong className="summary-calc__amount">{formatPrice(total)}</strong>
+          <strong className="summary-calc__amount">{selectedProducts.length ? formatPrice(total) : '—'}</strong>
         </div>
         <div className="summary-delivery">
           <Icon name="truck" size={16} />
           <div className="summary-delivery__copy">
-            <strong>{intent?.arrive_by || 'Delivery timing to confirm'}</strong>
-            <small>{intent?.location ? `Delivering to ${intent.location}` : 'Add a delivery city for better results'}</small>
+            <strong>{intent?.arrive_by ? `Requested: ${intent.arrive_by}` : 'Delivery timing to confirm'}</strong>
+            <small>{intent?.location ? `Delivering to ${intent.location}` : intent?.pincode ? `Delivery pincode ${intent.pincode}` : 'Add a delivery city for better results'}</small>
           </div>
         </div>
         <small className="summary-calc__note">Known item prices and any confirmed shipping. Confirm the final total at the retailer.</small>
@@ -1418,6 +1575,7 @@ function LegendRow({ icon, title, detail }) {
 
 function DiscoverView({
   result,
+  health,
   paymentProvider,
   query,
   setQuery,
@@ -1459,8 +1617,26 @@ function DiscoverView({
   onSelectAll,
   onClearSelection,
   onRemoveSelectedItem,
+  socialTheme,
+  onClearSocialTheme,
+  isExtractingTheme,
+  onAnalyzeUrl,
+  useProfile,
+  onToggleProfile,
+  onOpenTasteGraph,
 }) {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
+  const [homeInspectBag, setHomeInspectBag] = useState(null);
+
+  const handleBagResearch = useCallback((bag) => {
+    if (bag.briefQuery) {
+      setQuery(bag.briefQuery);
+      onSearch(bag.briefQuery);
+      const briefInput = document.getElementById('shopping-brief');
+      if (briefInput) briefInput.focus();
+    }
+  }, [onSearch, setQuery]);
+
   const resultsRef = useRef(null);
   const discoverRef = useRef(null);
   const lastScrolledSearchRef = useRef(null);
@@ -1496,6 +1672,7 @@ function DiscoverView({
     const frame = window.requestAnimationFrame(() => {
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       resultsRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+      if (result.status === 'needs_clarification') resultsRef.current?.querySelector('.clarification-note input')?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [isSearching, result.products.length, result.search_id, result.status]);
@@ -1505,23 +1682,20 @@ function DiscoverView({
       <section className="main-column">
         <div className="hero-copy">
           <div className="hero-copy__intro">
-            <h1 aria-label="Good buys. Better reasons.">
-              <span className="hero-word hero-word--1">Good</span>{' '}
-              <span className="hero-word hero-word--2">buys.</span>
+            <span className="hero-eyebrow">A little more thought in every buy</span>
+            <h1 aria-label="Find what fits. Know why.">
+              <span>Find what fits.</span>
               <br />
-              <em>
-                <span className="hero-word hero-word--3">Better</span>
-                <br />
-                <span className="hero-word hero-word--4">reasons.</span>
-              </em>
+              <em>Know why.</em>
             </h1>
             <p>
-              Describe your style. Artha finds the strongest retailer options and makes comparison feel simple.
+              Tell Artha what you need. Compare real retailer options, prices, and trade-offs in one thoughtful shortlist.
             </p>
             <div className="hero-copy__note">
               <span className="hero-copy__note-dot" />
-              <span>Research that leaves the final call with you.</span>
+              <span aria-label="Search mode">{health?.search_mode === 'fixture' ? 'Demo catalog · sample products' : health?.anakin_configured && health?.search_mode === 'live' ? 'Live retailer search · confirm at checkout' : health?.search_mode ? 'Search provider not ready' : 'Checking search connection…'}</span>
             </div>
+            <a className="hero-copy__how-link" href="#how-artha-works">How Artha works <Icon name="arrow" size={14} /></a>
           </div>
           <HeroVisual />
         </div>
@@ -1547,6 +1721,10 @@ function DiscoverView({
           onToast={onToast}
           onPickPrompt={onPickPrompt}
           onOpenTalk={onOpenTalk}
+          socialTheme={socialTheme}
+          onClearSocialTheme={onClearSocialTheme}
+          isExtractingTheme={isExtractingTheme}
+          onAnalyzeUrl={onAnalyzeUrl}
         />
 
         <AgentStrip
@@ -1555,6 +1733,7 @@ function DiscoverView({
           searchStage={searchStage}
           hasResults={result.products.length > 0}
           resultCount={result.products.length}
+          resultSourceMode={result.source?.mode}
           resultStatus={result.status}
           searchError={searchError}
           onOpenTalk={onOpenTalk}
@@ -1567,8 +1746,8 @@ function DiscoverView({
           onInspect={onInspect}
         />
 
-        <section ref={resultsRef} className="results-section js-reveal" aria-labelledby="results-heading">
-          <ClarificationNote intent={result.status === 'needs_clarification' ? result.intent : null} onAnswer={onQuickAnswer} onEdit={() => document.getElementById('shopping-brief')?.focus()} />
+        <section ref={resultsRef} className={`results-section js-reveal${result.search_id ? ' is-visible' : ''}`} aria-labelledby="results-heading">
+          <ClarificationNote key={result.search_id} intent={result.status === 'needs_clarification' ? result.intent : null} isSearching={isSearching} onAnswer={onQuickAnswer} onEdit={() => document.getElementById('shopping-brief')?.focus()} />
           <div className="results-toolbar">
             <div className="results-heading">
               <h2 id="results-heading">{result.products.length ? 'Your mission decision' : result.status === 'needs_clarification' ? 'Complete the brief to search' : zeroResult ? 'No product match yet' : 'Build your live shortlist'}</h2>
@@ -1587,19 +1766,59 @@ function DiscoverView({
           {priceProduct ? <PriceDesk product={priceProduct} /> : null}
 
           {!result.products.length ? (
-            <div className="empty-state results-empty-state">
-              <span className="empty-state__icon">
-                <Icon name="search" size={24} />
-              </span>
-              <h2>{result.status === 'needs_clarification' ? 'Answer the questions above to start.' : zeroResult ? 'No purchasable product page found.' : 'Live sources will appear here.'}</h2>
-              <p>{result.status === 'needs_clarification' ? 'Once the constraints are clear, Artha will search and verify the relevant retailer sources.' : zeroResult ? 'Artha excluded articles and category pages. Try a more specific product name, another retailer, or a wider budget and search again.' : 'Describe what you want, add a reference image, or paste a public product or post URL to start a verified search.'}</p>
-              {zeroResult ? <button type="button" className="secondary-button" onClick={() => document.getElementById('shopping-brief')?.focus()}>Edit brief and retry <Icon name="arrow" size={15} /></button> : null}
-            </div>
+            result.status === 'needs_clarification' ? (
+              <div className="empty-state results-empty-state">
+                <span className="empty-state__icon">
+                  <Icon name="search" size={24} />
+                </span>
+                <h2>Answer the questions above to start.</h2>
+                <p>Once the constraints are clear, Artha will search and verify the relevant retailer sources.</p>
+              </div>
+            ) : zeroResult ? (
+              <div className="empty-state results-empty-state">
+                <span className="empty-state__icon">
+                  <Icon name="search" size={24} />
+                </span>
+                <h2>No purchasable product page found.</h2>
+                <p>Artha excluded articles and category pages. Try a more specific product name, another retailer, or a wider budget and search again.</p>
+                <button type="button" className="secondary-button" onClick={() => document.getElementById('shopping-brief')?.focus()}>
+                  Edit brief and retry <Icon name="arrow" size={15} />
+                </button>
+              </div>
+            ) : (
+              <section className="home-bags-showcase" aria-labelledby="home-bags-title">
+                <div className="home-bags-showcase__header">
+                  <div className="home-bags-showcase__title-wrap">
+                    <span className="section-kicker">
+                      <Icon name="spark" size={13} /> Curated Starter Missions
+                    </span>
+                    <h2 id="home-bags-title">Explore Popular Shopping Bags</h2>
+                    <p>
+                      Browse pre-researched bags across top retailers, inspect verified prices, or launch an instant research mission with Artha.
+                    </p>
+                  </div>
+                  <span className="home-bags-showcase__hint">
+                    Tap &ldquo;View Bag&rdquo; to inspect or &ldquo;Research&rdquo; to run Artha
+                  </span>
+                </div>
+
+                <div className="bags-tracker__shelf bags-tracker__shelf--grid">
+                  {DEMO_BAGS.map((bag) => (
+                    <BagFolderCard
+                      key={bag.id}
+                      bag={bag}
+                      onInspect={(b) => setHomeInspectBag(b)}
+                      onResearch={handleBagResearch}
+                    />
+                  ))}
+                </div>
+              </section>
+            )
           ) : (
             <section className="source-explorer" aria-label="Retailer product shortlist">
               <div className="source-explorer__heading">
-                <div><span className="section-kicker">The shortlist</span><h3>{result.products.length} product {result.products.length === 1 ? 'option' : 'options'} to compare</h3></div>
-                <span>Source links and trade-offs on every card</span>
+                <div><span className="section-kicker">The shortlist</span><h3>{result.source?.mode === 'live' ? `${result.products.length} retailer ${result.products.length === 1 ? 'page' : 'pages'} found` : `${result.products.length} sample ${result.products.length === 1 ? 'product' : 'products'}`}</h3></div>
+                <span>{result.source?.mode === 'live' ? `${result.products.filter((product) => Boolean(product.lowest_current_offer)).length} current ${result.products.filter((product) => Boolean(product.lowest_current_offer)).length === 1 ? 'price' : 'prices'} checked · other prices are marked for retailer confirmation` : 'Source links and trade-offs on every card'}</span>
               </div>
               <div className="source-explorer__content">
                 <div className="results-controls">
@@ -1636,6 +1855,7 @@ function DiscoverView({
             </section>
           )}
         </section>
+        <HowArthaWorks />
       </section>
 
       <SummaryPanel
@@ -1681,6 +1901,15 @@ function DiscoverView({
           </div>
         </div>
       ) : null}
+
+      {homeInspectBag && (
+        <BagDetailModal
+          bag={homeInspectBag}
+          onClose={() => setHomeInspectBag(null)}
+          onToast={onToast}
+          onResearch={handleBagResearch}
+        />
+      )}
     </div>
   );
 }
@@ -1742,7 +1971,7 @@ function CheckoutSheet({ products, intent, isSubmitting, onClose, onConfirm }) {
           <span>Total</span>
           <strong>{formatPrice(total)}</strong>
           <span>Delivery</span>
-          <strong>{intent?.arrive_by || 'Confirm with retailer'}</strong>
+          <strong>{intent?.arrive_by ? `Requested: ${intent.arrive_by}` : 'Confirm with retailer'}</strong>
           <span>Location</span>
           <strong>{intent?.location || 'Your delivery location'}</strong>
         </div>
@@ -1930,7 +2159,9 @@ function AccountLoading() {
   );
 }
 
-function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn }) {
+function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn, onToast }) {
+  const [selectedPlanDetail, setSelectedPlanDetail] = useState(null);
+
   if (isSessionLoading) {
     return (
       <div className="page-stack">
@@ -1939,50 +2170,37 @@ function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn }) {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="page-stack">
-        <SignInPrompt onSignIn={onSignIn} />
-      </div>
-    );
-  }
-
   return (
     <div className="page-stack">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">Saved Shortcuts</span>
-          <h1>
-            Purchase plans,
-            <br />
-            kept private.
-          </h1>
-          <p>Review your shortlist, compare final tallies, and click retailer links when you’re ready to order.</p>
-        </div>
-        <button type="button" className="primary-button" onClick={onDiscover}>
-          <Icon name="plus" size={16} />
-          <span>New search</span>
-        </button>
-      </div>
-      {plans.length ? (
-        <div className="plans-list">
-          {plans.map((plan) => (
-            <PlanCard key={plan.id} plan={plan} />
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <span className="empty-state__icon">
-            <Icon name="box" size={26} />
-          </span>
-          <h2>No purchase plans yet.</h2>
-          <p>Select verified products from your search results, then save your first deliberate plan.</p>
-          <button type="button" className="primary-button empty-state__btn" onClick={onDiscover}>
-            <span>Start discovering</span>
-            <Icon name="arrow" size={16} />
+      {!user ? (
+        <div className="plans-guest-banner">
+          <div className="plans-guest-banner__info">
+            <span className="plans-guest-banner__dot" />
+            <span>Viewing demonstration purchase bags. Sign in with Google to sync and save your private research plans.</span>
+          </div>
+          <button type="button" className="secondary-button" onClick={onSignIn}>
+            <Icon name="user" size={14} />
+            <span>Sign in to save</span>
           </button>
         </div>
-      )}
+      ) : null}
+
+      <BagsPurchaseTracker
+        plans={plans}
+        onDiscover={onDiscover}
+        onOpenPlan={(plan) => setSelectedPlanDetail(plan)}
+        onToast={onToast}
+      />
+
+      {selectedPlanDetail ? (
+        <div className="plans-detail-drawer" style={{ marginTop: 32 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h3>Detailed Retailer Breakdown</h3>
+            <button type="button" className="text-button" onClick={() => setSelectedPlanDetail(null)}>Close table</button>
+          </div>
+          <PlanCard plan={selectedPlanDetail} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2120,6 +2338,17 @@ function OrdersView({ user, isSessionLoading, orders, onDiscover, onCancel, onAd
           <Icon name="arrow" size={16} />
         </button>
       </div>
+
+      <div className="sandbox-notice-banner" role="note">
+        <Icon name="info" size={18} />
+        <div>
+          <strong>Local Development Sandbox</strong>
+          <span>
+            Real purchases happen on retailer websites. Orders, shipments, and tracking events shown below are simulated local mock states for developer verification.
+          </span>
+        </div>
+      </div>
+
       {orders.length ? (
         <div className="orders-list">
           {orders.map((order) => (
@@ -2182,6 +2411,7 @@ function usageProviderName(provider) {
     gemini: 'Gemini',
     kokoro: 'Kokoro',
     elevenlabs: 'ElevenLabs',
+    slng: 'SLNG',
   }[provider] || provider || 'Unknown provider';
 }
 
@@ -2447,6 +2677,13 @@ function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntime
           </div>
         )}
       </section>
+
+      <aside className="billing-transparency-note" role="note">
+        <Icon name="shield" size={16} />
+        <span>
+          <strong>Billing Transparency:</strong> Metered token totals reflect reported counts from upstream AI APIs (Gemini/Ollama). Web scraping and local speech synthesis are unmetered local operations.
+        </span>
+      </aside>
     </div>
   );
 }
@@ -2497,7 +2734,18 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [talkOpen, setTalkOpen] = useState(false);
   const [toast, setToast] = useState('');
+  const [socialTheme, setSocialTheme] = useState(null);
+  const [isExtractingTheme, setIsExtractingTheme] = useState(false);
+  const [useProfile, setUseProfile] = useState(true);
+  const [tasteMemories, setTasteMemories] = useState([]);
   const audioRef = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!user?.id) {setTasteMemories([]);return undefined;}
+    getTasteMemories().then(data => {if (active) setTasteMemories(data.memories || []);}).catch(() => {});
+    return () => {active=false;};
+  }, [user?.id]);
 
   const selectedProducts = useMemo(
     () => result.products.filter((product) => selectedIds.includes(product.id)),
@@ -2617,6 +2865,8 @@ export default function App() {
     setQuery('');
     setMission(missionFromIntent({}));
     setPostUrl('');
+    setSocialTheme(null);
+    setIsExtractingTheme(false);
     setLocation(null);
     setShowPostUrl(false);
     setReference(null);
@@ -2626,13 +2876,37 @@ export default function App() {
     setFocusedId('');
   }, []);
 
+  const handleAnalyzeUrl = useCallback(
+    async (targetUrl) => {
+      const url = (targetUrl || postUrl || '').trim();
+      if (!url) return null;
+      setIsExtractingTheme(true);
+      setToast('Inspecting Instagram/web style with Playwright…');
+      try {
+        const data = await extractSocialTheme(url);
+        if (data && data.success) {
+          setSocialTheme(data);
+          setToast(data.memory ? `Saved to your taste: ${data.theme}` : `Theme identified: ${data.theme}. Sign in to remember it.`);
+          return data;
+        }
+        setToast(data?.error || 'Could not extract theme from this URL.');
+      } catch (err) {
+        setToast(err.message || 'Theme extraction failed.');
+      } finally {
+        setIsExtractingTheme(false);
+      }
+      return null;
+    },
+    [postUrl],
+  );
+
   const handleSearchWithPayload = useCallback(
     async (text, url, ref, options = {}) => {
       if (isSearching) {
         if (options.throwOnError) throw new Error('The current research is still running. Ask again when it finishes.');
         return null;
       }
-      if (!text?.trim() && !url?.trim() && !ref?.dataUrl) return null;
+      if (!text?.trim() && !url?.trim() && !ref?.dataUrl && !socialTheme) return null;
       setIsSearching(true);
       setSearchStage(0);
       setSearchError('');
@@ -2651,14 +2925,17 @@ export default function App() {
               search_id: result.search_id,
               text: text.trim(),
               mission,
+              use_profile: useProfile,
             })
           : await runAgentSearchAsync({
-              text: text?.trim() || 'Find products that match this reference.',
+              text: text?.trim() || (socialTheme ? `Find products matching ${socialTheme.theme}` : 'Find products that match this reference.'),
               post_url: url?.trim() || null,
+              style_context: socialTheme ? `${socialTheme.theme}. Colors: ${(socialTheme.colors || []).join(', ')}. Style: ${(socialTheme.style_tags || []).join(', ')}.` : null,
               image_name: ref?.name || null,
               reference_image: referencePayload(ref),
               location_coordinates: location,
               mission,
+              use_profile: useProfile,
             }, (job) => {
               if (Array.isArray(job?.workflow) && job.workflow.length) {
                 setResult((current) => ({ ...current, workflow: job.workflow }));
@@ -2701,7 +2978,7 @@ export default function App() {
         setIsSearching(false);
       }
     },
-    [isSearching, location, mission, result],
+    [isSearching, location, mission, result, socialTheme, useProfile],
   );
 
   const handleSearch = useCallback(
@@ -2768,12 +3045,51 @@ export default function App() {
         setFocusedId(fastest.id);
         return `${sanitizeTitle(fastest.name)} has the quickest stated delivery among checked results: ${fastest.delivery_label || `${fastest.delivery_days} days`}. Verify the promise for your pincode at the retailer.`;
       }
+      if (/\b(buy|order|checkout|purchase)\b/i.test(spoken) && !question && !/\b(why|before|history|where|how|can|could|track|cancel|refund|return)\b/i.test(spoken)) {
+        if (!products.length) {
+          return 'There are no researched products in your shortlist to checkout yet. Describe what you are looking for first.';
+        }
+        if (!user) {
+          return 'Please sign in with Google so your order and tracking timeline can be recorded to your account.';
+        }
+        const targetProduct = currentPick || products[0];
+        const purchasePayload = {
+          confirmed: true,
+          search_id: result.search_id,
+          products: [targetProduct],
+          intent: result.intent,
+          location: result.intent?.location || location,
+        };
+        try {
+          const body = await createOrder(purchasePayload);
+          setOrders((current) => [body.order, ...current.filter((o) => o.id !== body.order.id)]);
+          setToast(`Agentic Checkout: Order ${body.order.id} placed in your local tracker.`);
+          return {
+            text: `Agentic Checkout complete! I've placed order #${body.order.id} for ${sanitizeTitle(targetProduct.name)} (${formatPrice(targetProduct.price)}). Tracking is now active in Orders.`,
+            order: body.order,
+          };
+        } catch (err) {
+          return `Could not complete checkout: ${err?.message || 'Unknown error'}.`;
+        }
+      }
+      const urlMatch = spoken.match(/https?:\/\/[^\s]+/i);
+      let detectedTheme = socialTheme;
+      if (urlMatch) {
+        setPostUrl(urlMatch[0]);
+        setShowPostUrl(true);
+        const extracted = await handleAnalyzeUrl(urlMatch[0]);
+        if (extracted?.success) detectedTheme = extracted;
+      } else if (/\b(instagram|insta|friend'?s?\s*(?:post|profile|page|feed))\b/i.test(spoken)) {
+        setShowPostUrl(true);
+      }
+
       const explicitNew = /^(?:start |do )?(?:a )?new search\b/i.test(spoken);
-      const forceNew = explicitNew || /^(?:find|search for|shop for|look for|i (?:want|need|am looking for))\b/i.test(spoken);
-      const brief = explicitNew ? spoken.replace(/^(?:start |do )?(?:a )?new search\b[: ,]*/i, '').trim() : spoken;
+      const forceNew = explicitNew || /^(?:find|search for|shop for|look for|i (?:want|need|am looking for)|check|hey)\b/i.test(spoken);
+      let brief = explicitNew ? spoken.replace(/^(?:start |do )?(?:a )?new search\b[: ,]*/i, '').trim() : spoken;
+      brief = brief.replace(/^(?:hey\s+(?:artha\s+)?)?(?:check\s+out\s+|check\s+put\s+|check\s+)/i, '').trim();
       if (!brief) return 'Tell me what product you want to search for.';
       setQuery(brief);
-      const body = await handleSearchWithPayload(brief, forceNew ? '' : postUrl, forceNew ? null : reference, { throwOnError: true, forceNew });
+      const body = await handleSearchWithPayload(brief, forceNew ? (urlMatch ? urlMatch[0] : '') : postUrl, forceNew ? null : reference, { throwOnError: true, forceNew });
       if (body?.status === 'needs_clarification') {
         const questions = body.intent?.clarifications || body.clarifications || [];
         return questions.length
@@ -2781,13 +3097,25 @@ export default function App() {
           : 'I need a little more detail before searching.';
       }
       const nextDecision = body?.intent?.decision;
-      const pick = body?.products?.find((product) => product.id === nextDecision?.recommended_product_id);
+      const pick = body?.products?.find((product) => product.id === nextDecision?.recommended_product_id) || body?.products?.[0];
       if (nextDecision?.status === 'no_safe_fit') return `No safe fit clears this mission yet. ${nextDecision.mission_change || 'Try adjusting one hard constraint.'}`;
       if (nextDecision?.status === 'verify_before_buy') return `${sanitizeTitle(pick?.name)} is the current recommendation. Before buying, verify: ${(nextDecision.blocking_risks || []).join(', ')}.`;
-      if (nextDecision?.status === 'buy_now') return `${sanitizeTitle(pick?.name)} now clears the mission. The retailer handoff is ready below.`;
+      if (nextDecision?.status === 'buy_now') {
+        const seller = pick?.seller ? ` from ${pick.seller}` : '';
+        const deadline = body?.intent?.arrive_by ? ` Requested arrival: ${body.intent.arrive_by}.` : '';
+        const themeMention = detectedTheme?.theme ? ` Matches your ${detectedTheme.theme} style.` : '';
+        return `${sanitizeTitle(pick?.name)} now clears the mission${seller}.${deadline}${themeMention} The retailer handoff is ready below.`;
+      }
+      if (pick) {
+        const seller = pick.seller || 'retailer';
+        const price = formatPrice(pick.price);
+        const deadline = body?.intent?.arrive_by ? ` Requested arrival: ${body.intent.arrive_by}.` : '';
+        const themeMention = detectedTheme?.theme ? ` Matches the ${detectedTheme.theme} style.` : '';
+        return `Found ${body?.products?.length || 0} options across Flipkart, Amazon, Myntra, and Ajio. Top match: ${sanitizeTitle(pick.name)} for ${price} from ${seller}.${deadline}${themeMention}`;
+      }
       return 'I updated the mission using the completed research.';
     },
-    [handleSearchWithPayload, postUrl, reference, result, user],
+    [handleAnalyzeUrl, handleSearchWithPayload, postUrl, reference, result, socialTheme, user],
   );
 
   const handleQuickAnswer = useCallback(
@@ -2803,12 +3131,27 @@ export default function App() {
   }, []);
 
   const toggleSaved = useCallback(
-    (id) => {
+    async (id) => {
       const wasSaved = savedIds.includes(id);
+      const product = result.products.find(item => item.id === id);
+      if (user && product?.url) {
+        try {
+          const url = new URL(product.url);
+          const safeUrl = `${url.origin}${url.pathname}`;
+          const memory = tasteMemories.find(item => item.kind === 'liked_product' && item.source_url === safeUrl);
+          if (wasSaved && memory) {
+            await removeTasteMemory(memory.id);
+            setTasteMemories(current => current.filter(item => item.id !== memory.id));
+          } else if (!wasSaved) {
+            const data = await rememberProduct(product);
+            setTasteMemories(current => [...current.filter(item => item.id !== data.memory.id), {...data.memory,kind:'liked_product',source_url:safeUrl}]);
+          }
+        } catch (error) {setToast(error.message || 'Could not update your taste memory.');return;}
+      }
       setSavedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
-      setToast(wasSaved ? 'Removed from saved picks.' : 'Saved for later.');
+      setToast(wasSaved ? 'Removed from saved picks and taste memory.' : user ? 'Saved to your taste memory.' : 'Saved locally. Sign in to teach Artha your taste.');
     },
-    [savedIds],
+    [savedIds,result.products,tasteMemories,user],
   );
 
   const handleSelectAll = useCallback(() => {
@@ -2858,6 +3201,48 @@ export default function App() {
       handleSavePlan();
     }
   }, [handleSavePlan, isSavingPlan, postAuthAction, selectedProducts.length, user?.id]);
+
+  useEffect(() => {
+    const cleanup = registerWebMCPCommerceTools({
+      onSearch: async ({ query: q }) => {
+        return handleSearchWithPayload(q, '', null, { forceNew: true });
+      },
+      onGetPlan: async () => {
+        return {
+          search_id: result.search_id,
+          intent: result.intent,
+          decision: result.intent?.decision,
+          products: result.products,
+        };
+      },
+      onCheckout: async ({ productId } = {}) => {
+        const products = result.products || [];
+        const decision = result.intent?.decision;
+        const target = productId
+          ? products.find((p) => p.id === productId)
+          : products.find((p) => p.id === decision?.recommended_product_id) || products[0];
+        if (!target) {
+          throw new Error('No product available to checkout in current shortlist.');
+        }
+        if (!user) {
+          throw new Error('User must be signed in to execute agentic checkout.');
+        }
+        const purchasePayload = {
+          confirmed: true,
+          search_id: result.search_id,
+          products: [target],
+          intent: result.intent,
+          location: result.intent?.location || location,
+        };
+        const body = await createOrder(purchasePayload);
+        setOrders((current) => [body.order, ...current.filter((o) => o.id !== body.order.id)]);
+        setToast(`WebMCP Agentic Checkout: Order ${body.order.id} confirmed.`);
+        return body.order;
+      },
+    });
+
+    return cleanup;
+  }, [handleSearchWithPayload, location, result, user]);
 
   const handleStartCheckout = useCallback(() => {
     if (!selectedProducts.length) {
@@ -3015,6 +3400,7 @@ export default function App() {
     activeView === 'discover' ? (
       <DiscoverView
         result={result}
+        health={health}
         paymentProvider={health.payment_configured && health.payment_provider === 'sandbox' ? 'sandbox' : 'disabled'}
         query={query}
         setQuery={setQuery}
@@ -3056,6 +3442,31 @@ export default function App() {
         onSelectAll={handleSelectAll}
         onClearSelection={handleClearSelection}
         onRemoveSelectedItem={handleRemoveSelectedItem}
+        socialTheme={socialTheme}
+        onClearSocialTheme={() => setSocialTheme(null)}
+        isExtractingTheme={isExtractingTheme}
+        onAnalyzeUrl={() => handleAnalyzeUrl()}
+        useProfile={useProfile}
+        onToggleProfile={() => setUseProfile((current) => !current)}
+        onOpenTasteGraph={() => setActiveView('taste-graph')}
+      />
+    ) : activeView === 'taste-graph' ? (
+      <TasteGraphView
+        onClose={() => setActiveView('discover')}
+        onSignIn={() => startSignIn('/taste-graph')}
+        searchId={result.search_id}
+        onApplyToSearch={(tastePrefs) => {
+          setUseProfile(true);
+          if (tastePrefs) {
+            const vibe = (tastePrefs.vibes && tastePrefs.vibes[0]) || '';
+            const size = (tastePrefs.sizes && tastePrefs.sizes.top) || '';
+            const addr = (tastePrefs.addresses && tastePrefs.addresses[0]) || {};
+            const city = addr.city || '';
+            const pin = addr.pincode || '';
+            setQuery(`Look for ${vibe ? `${vibe} ` : ''}clothes${size ? ` in size ${size}` : ''}${city ? ` delivered to ${city}` : ''}${pin ? ` ${pin}` : ''}`);
+          }
+          setActiveView('discover');
+        }}
       />
     ) : activeView === 'saved' ? (
       <SavedView
@@ -3098,6 +3509,7 @@ export default function App() {
         plans={plans}
         onDiscover={startNewSearch}
         onSignIn={() => startSignIn('/plans')}
+        onToast={setToast}
       />
     );
 
@@ -3111,6 +3523,8 @@ export default function App() {
         onReset={startNewSearch}
         health={health}
         planCount={plans.length}
+        savedCount={savedIds.length}
+        location={location || result?.intent?.location}
       />
       <main className="main-content" id="main-content">
         <TopHeader
@@ -3120,10 +3534,11 @@ export default function App() {
           onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
           onSignOut={handleSignOut}
           onOpenTalk={() => setTalkOpen(true)}
+          onOpenTasteGraph={() => setActiveView(activeView === 'taste-graph' ? 'discover' : 'taste-graph')}
         />
         {view}
       </main>
-      <MobileNav activeView={activeView} onNavigate={setActiveView} planCount={plans.length} />
+      <MobileNav activeView={activeView} onNavigate={setActiveView} planCount={plans.length} savedCount={savedIds.length} />
       {authOpen ? (
         <AuthSheet
           onClose={() => {
@@ -3153,8 +3568,13 @@ export default function App() {
         open={talkOpen}
         onClose={() => setTalkOpen(false)}
         onAsk={handleTalkAsk}
+        onOpenOrders={() => {
+          setTalkOpen(false);
+          setActiveView('orders');
+        }}
         onToast={setToast}
         workflow={result.workflow}
+        voice={voice}
       />
       <Toast message={toast} />
       </div>

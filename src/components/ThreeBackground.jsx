@@ -2,18 +2,20 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
 /**
- * ThreeBackground — animated particle field canvas.
+ * ThreeBackground — Animated Ambient 3D Spatial Field
  *
- * Renders a fixed, full-viewport canvas at z-index: -1 behind all content.
- * Features:
- *   - Floating particle field with subtle connecting lines between close particles
- *   - Mouse-reactive camera tilt (gentle parallax, not jarring)
- *   - AdditiveBlending for a soft neon glow on particles
- *   - Respects prefers-reduced-motion: static render only when motion is reduced
- *   - Cleans up renderer, geometry, and material on unmount
+ * Renders a fixed, full-viewport 3D canvas behind all UI at z-index: 0:
+ * - Floating particle constellation with subtle neural connectivity lines
+ * - Smooth mouse-reactive camera parallax
+ * - Responds to live agent research status (subtle acceleration & aura pulse when searching)
+ * - Low-power WebGL configuration (devicePixelRatio capped, no heavy post-processing)
+ * - Respects prefers-reduced-motion: static snapshot render only
+ * - Complete resource disposal on unmount
  */
-export function ThreeBackground() {
+export function ThreeBackground({ isSearching = false, hasResults = false }) {
   const canvasRef = useRef(null);
+  const stateRef = useRef({ isSearching, hasResults });
+  stateRef.current = { isSearching, hasResults };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -35,34 +37,34 @@ export function ThreeBackground() {
     // ── Scene & Camera ────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 80;
+    camera.position.z = 85;
 
     // ── Particle Geometry ─────────────────────────────────────────────────────
-    const PARTICLE_COUNT = window.innerWidth < 768 ? 280 : 520;
+    const PARTICLE_COUNT = window.innerWidth < 768 ? 220 : 440;
     const positions = new Float32Array(PARTICLE_COUNT * 3);
     const colors = new Float32Array(PARTICLE_COUNT * 3);
     const sizes = new Float32Array(PARTICLE_COUNT);
 
-    // Color palette — deep tones that read on a light background
+    // Palette: Coral (#EE5A3B), Cobalt (#2D5BD1), Violet (#7C3AED), Emerald (#287E5D)
     const palette = [
-      new THREE.Color(0x0694D6), // deep cyan
-      new THREE.Color(0x7C3AED), // indigo-violet
-      new THREE.Color(0x059669), // emerald
-      new THREE.Color(0x2563EB), // royal blue
+      new THREE.Color(0xee5a3b),
+      new THREE.Color(0x2d5bd1),
+      new THREE.Color(0x7c3aed),
+      new THREE.Color(0x287e5d),
     ];
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const i3 = i * 3;
-      positions[i3]     = (Math.random() - 0.5) * 200;
-      positions[i3 + 1] = (Math.random() - 0.5) * 180;
-      positions[i3 + 2] = (Math.random() - 0.5) * 100;
+      positions[i3]     = (Math.random() - 0.5) * 220;
+      positions[i3 + 1] = (Math.random() - 0.5) * 190;
+      positions[i3 + 2] = (Math.random() - 0.5) * 110;
 
       const color = palette[Math.floor(Math.random() * palette.length)];
       colors[i3]     = color.r;
       colors[i3 + 1] = color.g;
       colors[i3 + 2] = color.b;
 
-      sizes[i] = Math.random() * 1.8 + 0.4;
+      sizes[i] = Math.random() * 1.6 + 0.4;
     }
 
     const particleGeo = new THREE.BufferGeometry();
@@ -71,10 +73,10 @@ export function ThreeBackground() {
     particleGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
     const particleMat = new THREE.PointsMaterial({
-      size: 1.1,
+      size: 1.2,
       vertexColors: true,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.28,
       blending: THREE.NormalBlending,
       depthWrite: false,
       sizeAttenuation: true,
@@ -84,8 +86,7 @@ export function ThreeBackground() {
     scene.add(particles);
 
     // ── Connection Lines ──────────────────────────────────────────────────────
-    // Thin lines between nearby particles — builds the "network mesh" feel
-    const LINE_THRESHOLD = 28;
+    const LINE_THRESHOLD = 26;
     const linePositions = [];
     const lineColors = [];
 
@@ -102,7 +103,6 @@ export function ThreeBackground() {
         if (dist < LINE_THRESHOLD) {
           linePositions.push(ax, ay, az, pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]);
           const alpha = 1 - dist / LINE_THRESHOLD;
-          // Blend start/end colors, dim by distance
           lineColors.push(
             col[i * 3] * alpha, col[i * 3 + 1] * alpha, col[i * 3 + 2] * alpha,
             col[j * 3] * alpha, col[j * 3 + 1] * alpha, col[j * 3 + 2] * alpha,
@@ -118,7 +118,7 @@ export function ThreeBackground() {
     const lineMat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.18,
+      opacity: 0.12,
       blending: THREE.NormalBlending,
       depthWrite: false,
     });
@@ -142,24 +142,25 @@ export function ThreeBackground() {
 
     const animate = () => {
       rafId = requestAnimationFrame(animate);
-      time += 0.0012;
+      const { isSearching: searching } = stateRef.current;
+      time += searching ? 0.0028 : 0.0009;
 
       if (!prefersReducedMotion) {
-        // Slow drift of the entire particle cloud
-        particles.rotation.y = time * 0.06;
-        particles.rotation.x = Math.sin(time * 0.04) * 0.08;
+        particles.rotation.y = time * 0.08;
+        particles.rotation.x = Math.sin(time * 0.05) * 0.07;
         lines.rotation.y = particles.rotation.y;
         lines.rotation.x = particles.rotation.x;
 
-        // Smooth camera parallax towards mouse
-        targetCam.x += (mouse.x * 4 - targetCam.x) * 0.03;
-        targetCam.y += (-mouse.y * 3 - targetCam.y) * 0.03;
+        // Camera parallax towards mouse
+        targetCam.x += (mouse.x * 5 - targetCam.x) * 0.025;
+        targetCam.y += (-mouse.y * 4 - targetCam.y) * 0.025;
         camera.position.x = targetCam.x;
         camera.position.y = targetCam.y;
         camera.lookAt(scene.position);
 
-        // Gentle opacity pulse
-        particleMat.opacity = 0.28 + Math.sin(time * 1.2) * 0.06;
+        // Opacity breathing
+        particleMat.opacity = searching ? 0.42 + Math.sin(time * 4) * 0.08 : 0.24 + Math.sin(time * 1.5) * 0.05;
+        lineMat.opacity = searching ? 0.22 : 0.12;
       }
 
       renderer.render(scene, camera);
@@ -167,7 +168,7 @@ export function ThreeBackground() {
 
     animate();
 
-    // ── Resize Handler ────────────────────────────────────────────────────────
+    // ── Resize ────────────────────────────────────────────────────────────────
     const onResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
@@ -191,6 +192,7 @@ export function ThreeBackground() {
   return (
     <canvas
       ref={canvasRef}
+      className="three-bg-canvas"
       aria-hidden="true"
       style={{
         position: 'fixed',

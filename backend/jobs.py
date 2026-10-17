@@ -124,6 +124,7 @@ def submit_search(payload: dict[str, Any]) -> dict[str, Any]:
                 _jobs.pop(oldest_job_id, None)
             now = time.time()
             _jobs[job_id] = {
+                "user_id": str(queued_payload.get("user_id") or "shopper-local"),
                 "status": "queued",
                 "workflow": initial_workflow(),
                 "created_at": now,
@@ -141,7 +142,9 @@ def submit_search(payload: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
-def get_search_job(job_id: str) -> dict[str, Any] | None:
+def get_search_job(job_id: str, user_id: str | None = None) -> dict[str, Any] | None:
     with _lock:
         _cleanup_locked()
+        if user_id is not None and _jobs.get(job_id, {}).get("user_id") != user_id:
+            return None
         return _snapshot_locked(job_id)

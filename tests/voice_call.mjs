@@ -6,7 +6,7 @@ const vite = await createServer({ server: { host: '127.0.0.1', port: 0 } });
 await vite.listen();
 const browser = await chromium.launch({
   headless: true,
-  ...(process.env.SHOPPINGHELP_CHROME_PATH ? { executablePath: process.env.SHOPPINGHELP_CHROME_PATH } : {}),
+  ...(process.env.SHOPPINGHELP_CHROME_PATH ? { executablePath: process.env.SHOPPINGHELP_CHROME_PATH } : { channel: 'chrome' }),
 });
 
 try {
@@ -70,6 +70,8 @@ try {
     }
     const body = path === '/api/health'
       ? { ok: true, voice: { provider: 'browser', ready: true }, payment: { provider: 'sandbox' }, payment_provider: 'sandbox' }
+      : path === '/api/voice/status'
+        ? { provider: 'slng', label: 'SLNG voice', model: 'aura-2-thalia-en', configured: true, ready: true }
       : path === '/api/auth/session'
         ? { authenticated: true, user: { id: 'user-test', name: 'Shopper' } }
       : path === '/api/orders'
@@ -89,6 +91,7 @@ try {
   await page.getByLabel('Purchase plan summary').getByText('Delivery timing to confirm').waitFor();
   assert.equal(await page.getByLabel('Purchase plan summary').getByText('Delivering to Bengaluru').count(), 0);
   await page.getByRole('button', { name: 'Talk to Artha' }).first().click();
+  await page.getByText('Mic: browser speech recognition · Reply: SLNG voice (aura-2-thalia-en)').waitFor();
   await page.getByRole('button', { name: 'Start call' }).click();
   await page.waitForFunction(() => Boolean(window.__recognition));
   await page.evaluate(() => window.__recognition.emit('Find me a chair'));

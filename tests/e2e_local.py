@@ -86,6 +86,7 @@ def main() -> None:
         wait_for_health(port, process)
         status, health = request(port, "/api/health")
         assert status == 200 and health["payment_provider"] == "sandbox" and health["payment_configured"] is True
+        assert health["search_mode"] == "fixture"
         status, search = request(
             port,
             "/api/agent/search",

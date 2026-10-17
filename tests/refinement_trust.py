@@ -65,6 +65,24 @@ class RefinementTrustTests(unittest.TestCase):
                 "intent": self.intent, "products": [self.product],
             })
 
+    def test_refinement_cannot_reuse_another_users_taste(self) -> None:
+        intent = {**self.intent, "_search_user_id": "alice", "_profile_user_id": "alice",
+                  "taste_context": {"memories": [{"id": "private-memory"}]}}
+        self.database.save_search(self.search_id, "A blue shirt", intent, [], products=[self.product])
+        with self.assertRaisesRegex(ValueError, "account"):
+            run_refinement({"search_id": self.search_id, "text": "Prefer breathable", "user_id": "bob"})
+        result = run_refinement({"search_id": self.search_id, "text": "Prefer breathable", "user_id": "alice", "use_profile": False})
+        self.assertNotIn("taste_context", result["intent"])
+
+    def test_refinement_refreshes_retrieval_for_current_query(self) -> None:
+        intent = {**self.intent, "_search_user_id": "alice", "_profile_user_id": "alice"}
+        self.database.save_search(self.search_id, "A blue shirt", intent, [], products=[self.product])
+        with patch("backend.taste_memory.retrieve_memories", return_value={"memories": [], "mode": "empty"}) as retrieve:
+            result = run_refinement({"search_id": self.search_id, "text": "Prefer breathable", "user_id": "alice", "use_profile": True})
+        self.assertEqual(retrieve.call_args.args[0], "alice")
+        self.assertIn("Prefer breathable", retrieve.call_args.args[1])
+        self.assertEqual(result["intent"]["taste_context"]["mode"], "empty")
+
     def test_plan_uses_saved_product_fields(self) -> None:
         plan = create_purchase_plan({
             "search_id": self.search_id,

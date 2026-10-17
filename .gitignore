@@ -23,3 +23,7 @@ dist/
 .DS_Store
 Thumbs.db
 .agents/
+
+# Never commit local authenticated browser sessions or private invoice copies.
+.private/
+playwright/.auth/

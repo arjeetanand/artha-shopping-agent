@@ -1,0 +1,128 @@
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "./components/TasteGraphView.jsx";
+
+/* Taste OS Editorial Theme Component Styling */
+.taste-os-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 12px;
+  border: 1px solid #3A5D4D;
+  background: #243B31;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #E9EEE7;
+  transition: all 160ms ease;
+  cursor: pointer;
+}
+.taste-os-btn-secondary:hover:not(:disabled) {
+  background: #2D4539;
+  border-color: #4B7563;
+}
+.taste-os-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.taste-os-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: #A94F32;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 160ms ease;
+  cursor: pointer;
+}
+.taste-os-btn-primary:hover {
+  background: #8E3F27;
+}
+
+.taste-os-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid #3A5D4D;
+  background: transparent;
+  padding: 8px;
+  color: #9EACA3;
+  transition: all 160ms ease;
+  cursor: pointer;
+}
+.taste-os-btn-icon:hover {
+  background: #243B31;
+  color: #FFFEFA;
+}
+
+.taste-os-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  border-radius: 6px;
+  background: #F1EFE8;
+  border: 1px solid #DED9CC;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #A94F32;
+  transition: all 140ms ease;
+  cursor: pointer;
+}
+.taste-os-chip-btn:hover:not(:disabled) {
+  background: #FFF0EB;
+  border-color: #FCD4C7;
+}
+.taste-os-chip-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.taste-os-filter-pill {
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  text-transform: capitalize;
+  color: #596159;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 140ms ease;
+  cursor: pointer;
+}
+.taste-os-filter-pill:hover {
+  background: rgba(222, 217, 204, 0.6);
+  color: #222A24;
+}
+.taste-os-filter-pill.is-active {
+  background: #A94F32;
+  color: #FFFFFF;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(169, 79, 50, 0.2);
+}
+
+.taste-os-reset-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 4px;
+  color: #596159;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 140ms ease;
+  cursor: pointer;
+}
+.taste-os-reset-btn:hover {
+  background: rgba(222, 217, 204, 0.6);
+  color: #222A24;
+}
+

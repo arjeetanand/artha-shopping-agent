@@ -20,6 +20,15 @@ else
   exit 1
 fi
 
+# Invoice text is parsed locally; install its runtime in the project virtual environment.
+if [ ! -f ".venv/bin/python" ]; then
+  "$PYTHON_BIN" -m venv .venv
+fi
+PYTHON_BIN=".venv/bin/python"
+if ! "$PYTHON_BIN" -c 'import pypdf' >/dev/null 2>&1; then
+  "$PYTHON_BIN" -m pip install -r backend/requirements.txt
+fi
+
 # 2. Check for .env file
 if [ ! -f ".env" ]; then
   if [ -f ".env.example" ]; then
@@ -38,44 +47,52 @@ if [ ! -d "node_modules" ]; then
   npm install
 fi
 
-# 4. Read configured ports from .env
-BACKEND_PORT=$(grep -E "^SHOPPINGHELP_PORT=" .env | cut -d'=' -f2 | tr -d ' "\r\n' || echo "")
+# 4. Read configured ports from the environment or .env
+BACKEND_PORT="${SHOPPINGHELP_PORT:-$(grep -E '^SHOPPINGHELP_PORT=' .env | cut -d'=' -f2 | tr -d ' "\r\n' || echo "")}"
 if [ -z "$BACKEND_PORT" ]; then
   BACKEND_PORT=8001
 fi
 
-APP_URL=$(grep -E "^SHOPPINGHELP_APP_URL=" .env | cut -d'=' -f2 | tr -d ' "\r\n' || echo "")
-FRONTEND_PORT=$(echo "$APP_URL" | grep -oE ':[0-9]+' | tr -d ':' || echo "")
+if [ -n "${SHOPPINGHELP_APP_URL:-}" ]; then
+  APP_URL="$SHOPPINGHELP_APP_URL"
+elif [ -n "${SHOPPINGHELP_FRONTEND_PORT:-}" ]; then
+  APP_URL="http://127.0.0.1:$SHOPPINGHELP_FRONTEND_PORT"
+else
+  APP_URL=$(grep -E '^SHOPPINGHELP_APP_URL=' .env | cut -d'=' -f2 | tr -d ' "\r\n' || echo "")
+fi
+FRONTEND_PORT="${SHOPPINGHELP_FRONTEND_PORT:-$(echo "$APP_URL" | grep -oE ':[0-9]+' | tr -d ':' || echo "")}"
 if [ -z "$FRONTEND_PORT" ]; then
   FRONTEND_PORT=5176
 fi
+if [ -z "$APP_URL" ]; then
+  APP_URL="http://127.0.0.1:$FRONTEND_PORT"
+fi
 
 export SHOPPINGHELP_PORT="$BACKEND_PORT"
+export SHOPPINGHELP_APP_URL="$APP_URL"
 export SHOPPINGHELP_API_TARGET="http://127.0.0.1:$BACKEND_PORT"
+ALLOWED_ORIGINS="${SHOPPINGHELP_CORS_ORIGIN:-$(grep -E '^SHOPPINGHELP_CORS_ORIGIN=' .env | cut -d'=' -f2 | tr -d ' "\r\n' || echo "")}"
+case ",$ALLOWED_ORIGINS," in
+  *",$APP_URL,"*) ;;
+  *) ALLOWED_ORIGINS="${ALLOWED_ORIGINS:+$ALLOWED_ORIGINS,}$APP_URL" ;;
+esac
+export SHOPPINGHELP_CORS_ORIGIN="$ALLOWED_ORIGINS"
 
-# 5. Clean up any stale processes occupying configured ports
-free_port() {
+# 5. Leave other services alone and fail clearly when a configured port is busy
+check_port() {
   local port="$1"
   local desc="$2"
   local pids
   pids=$(lsof -a -ti -i :"$port" -sTCP:LISTEN 2>/dev/null || true)
   if [ -n "$pids" ]; then
-    echo "⚠️  Port $port ($desc) is already in use by PID(s): $pids"
-    echo "🧹 Terminating stale process on port $port..."
-    kill $pids 2>/dev/null || true
-    sleep 0.5
-    local remaining
-    remaining=$(lsof -a -ti -i :"$port" -sTCP:LISTEN 2>/dev/null || true)
-    if [ -n "$remaining" ]; then
-      kill -9 $remaining 2>/dev/null || true
-      sleep 0.5
-    fi
-    echo "✅ Port $port freed."
+    echo "❌ Port $port ($desc) is already in use by PID(s): $pids"
+    echo "   Set SHOPPINGHELP_PORT and SHOPPINGHELP_FRONTEND_PORT to free ports."
+    exit 1
   fi
 }
 
-free_port "$BACKEND_PORT" "backend"
-free_port "$FRONTEND_PORT" "frontend"
+check_port "$BACKEND_PORT" "backend"
+check_port "$FRONTEND_PORT" "frontend"
 
 # 6. Clean termination on Ctrl+C (SIGINT) or kill (SIGTERM)
 cleanup() {

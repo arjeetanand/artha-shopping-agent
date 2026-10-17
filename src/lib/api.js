@@ -50,6 +50,10 @@ export function refineAgentSearch(payload) {
   return request('/agent/refine', { method: 'POST', body: JSON.stringify(payload) });
 }
 
+export function extractSocialTheme(url) {
+  return request('/social/theme', { method: 'POST', body: JSON.stringify({ url }) });
+}
+
 export function getPlans() {
   return request('/plans');
 }
@@ -122,3 +126,37 @@ export async function speakText(text) {
   if (contentType.startsWith('audio/')) return { provider: 'server', blob: await response.blob() };
   return response.json();
 }
+
+export function getTasteProfile() {
+  return request('/profile/taste');
+}
+
+export function updateTasteProfile(preferences, stats = null) {
+  return request('/profile/taste', { method: 'POST', body: JSON.stringify({ preferences, stats }) });
+}
+
+export function syncRetailerAccount(provider) {
+  return request('/profile/sync-account', {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  });
+}
+
+export function getTasteGraph(searchId = '') {
+  const query = searchId ? `?search_id=${encodeURIComponent(searchId)}` : '';
+  return request(`/profile/graph${query}`);
+}
+
+export function getProfileOrders() {
+  return request('/profile/orders');
+}
+
+export const getProfileConnections = () => request('/profile/connections');
+export const getTasteMemories = () => request('/profile/memories');
+export const getProfileInvoices = () => request('/profile/invoices');
+export const invoiceDownloadUrl = (id) => `${API_BASE}/profile/invoices/${encodeURIComponent(id)}`;
+export const cancelRetailerSync = (provider) => request('/profile/connections/cancel', {method:'POST',body:JSON.stringify({provider})});
+export const disconnectRetailer = (provider) => request('/profile/connections/disconnect', {method:'POST',body:JSON.stringify({provider})});
+export const rememberProduct = (product) => request('/profile/memories', {method:'POST',body:JSON.stringify({product})});
+export const removeTasteMemory = (id) => request('/profile/memories/remove', {method:'POST',body:JSON.stringify({id})});
+export const reindexTasteMemories = () => request('/profile/memories/reindex', {method:'POST',body:JSON.stringify({})});

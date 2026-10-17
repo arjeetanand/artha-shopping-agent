@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { speakText } from '../lib/api';
+import { formatPrice, sanitizeTitle } from '../data';
 
 const SUGGESTIONS = [
   'Why did you rank these first?',
   'Show me a cheaper alternative',
-  'Can anything arrive faster?',
+  'Buy recommended item',
   'Where is my delivery?',
 ];
 
@@ -26,9 +27,9 @@ const DRAWER_STYLES = `
     width: min(100%, 460px);
     height: 100%;
     overflow: hidden;
-    color: #0f172a;
-    background: #f8fafc;
-    box-shadow: -18px 0 52px rgba(15, 23, 42, 0.18);
+    color: var(--ink);
+    background: var(--bg-app);
+    box-shadow: -18px 0 52px rgba(28, 48, 39, 0.18);
     animation: talk-drawer-slide-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
@@ -37,12 +38,47 @@ const DRAWER_STYLES = `
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 20px;
-    padding: 26px 24px 22px;
+    gap: 16px;
+    padding: 24px 22px 20px;
+    color: var(--rail-text);
+    background: var(--rail-bg);
+    border-bottom: 1px solid var(--rail-border);
+  }
+
+  .talk-drawer__header-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+  }
+
+  .talk-drawer__orb-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .talk-drawer__voice-mark {
+    display: grid;
+    width: 78px;
+    height: 78px;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
     color: #fff;
-    background:
-      radial-gradient(circle at 88% 14%, rgba(99, 213, 255, 0.26), transparent 34%),
-      linear-gradient(135deg, #0c1524 0%, #16263f 100%);
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .talk-drawer__voice-mark--active {
+    color: #fff;
+    background: var(--primary);
+    animation: talk-drawer-voice-pulse 1.2s ease-in-out infinite alternate;
+  }
+
+  @keyframes talk-drawer-voice-pulse {
+    to { transform: scale(1.06); }
   }
 
   .talk-drawer__eyebrow {
@@ -50,7 +86,7 @@ const DRAWER_STYLES = `
     align-items: center;
     gap: 8px;
     margin: 0 0 8px;
-    color: #86ddff;
+    color: var(--rail-muted);
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.14em;
@@ -62,14 +98,14 @@ const DRAWER_STYLES = `
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #63d5ff;
-    box-shadow: 0 0 0 4px rgba(99, 213, 255, 0.12), 0 0 12px rgba(99, 213, 255, 0.8);
+    background: var(--emerald);
+    box-shadow: 0 0 0 4px rgba(40, 126, 93, 0.2);
   }
 
   .talk-drawer__title {
     margin: 0;
     color: #fff;
-    font-family: Georgia, 'Times New Roman', serif;
+    font-family: var(--serif);
     font-size: 30px;
     font-weight: 400;
     letter-spacing: -0.04em;
@@ -79,7 +115,7 @@ const DRAWER_STYLES = `
   .talk-drawer__subtitle {
     max-width: 300px;
     margin: 10px 0 0;
-    color: #c8d8f0;
+    color: var(--rail-muted);
     font-size: 13px;
     line-height: 1.5;
   }
@@ -109,9 +145,9 @@ const DRAWER_STYLES = `
     gap: 8px;
     min-height: 42px;
     padding: 0 24px;
-    border-bottom: 1px solid #e2e8f0;
-    color: #64748b;
-    background: #fff;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-secondary);
+    background: var(--surface-subtle);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.01em;
@@ -119,7 +155,7 @@ const DRAWER_STYLES = `
 
   .talk-drawer__status-icon {
     display: inline-flex;
-    color: #0694d6;
+    color: var(--primary);
   }
 
   .talk-drawer__messages {
@@ -131,13 +167,13 @@ const DRAWER_STYLES = `
     overflow-y: auto;
     padding: 24px;
     overscroll-behavior: contain;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: var(--line-strong) transparent;
     scrollbar-width: thin;
   }
 
   .talk-drawer__welcome {
     margin: 0 0 2px;
-    color: #64748b;
+    color: var(--ink-secondary);
     font-size: 12px;
     line-height: 1.55;
   }
@@ -161,29 +197,27 @@ const DRAWER_STYLES = `
     height: 28px;
     border-radius: 9px;
     color: #fff;
-    background: linear-gradient(135deg, #0694d6, #7c3aed);
-    box-shadow: 0 4px 12px rgba(6, 148, 214, 0.2);
+    background: var(--rail-bg);
   }
 
   .talk-drawer__bubble {
     max-width: 84%;
     padding: 12px 14px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--line);
     border-radius: 15px 15px 15px 4px;
-    color: #334155;
-    background: #fff;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    color: var(--ink);
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
     font-size: 13px;
     line-height: 1.55;
     white-space: pre-wrap;
   }
 
   .talk-drawer__message-row--user .talk-drawer__bubble {
-    border-color: #0694d6;
+    border-color: var(--primary);
     border-radius: 15px 15px 4px 15px;
     color: #fff;
-    background: #0694d6;
-    box-shadow: 0 5px 14px rgba(6, 148, 214, 0.18);
+    background: var(--primary);
   }
 
   .talk-drawer__message-tools {
@@ -196,7 +230,7 @@ const DRAWER_STYLES = `
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    color: #64748b;
+    color: var(--muted);
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.04em;
@@ -204,7 +238,7 @@ const DRAWER_STYLES = `
   }
 
   .talk-drawer__speak:hover {
-    color: #0694d6;
+    color: var(--primary);
   }
 
   .talk-drawer__typing {
@@ -212,16 +246,16 @@ const DRAWER_STYLES = `
     align-items: center;
     gap: 4px;
     padding: 13px 15px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--line);
     border-radius: 15px 15px 15px 4px;
-    background: #fff;
+    background: var(--surface);
   }
 
   .talk-drawer__typing span {
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: #94a3b8;
+    background: var(--faint);
     animation: talk-drawer-bounce 900ms ease-in-out infinite;
   }
 
@@ -238,10 +272,10 @@ const DRAWER_STYLES = `
   .talk-drawer__suggestion {
     min-height: 44px;
     padding: 8px 10px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--line);
     border-radius: 999px;
-    color: #334155;
-    background: rgba(255, 255, 255, 0.7);
+    color: var(--ink);
+    background: var(--surface);
     font-size: 11px;
     font-weight: 700;
     line-height: 1.2;
@@ -250,15 +284,15 @@ const DRAWER_STYLES = `
   }
 
   .talk-drawer__suggestion:hover {
-    border-color: #0694d6;
-    color: #0572a5;
-    background: #effaff;
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-light);
   }
 
   .talk-drawer__composer {
     padding: 16px 24px 22px;
-    border-top: 1px solid #e2e8f0;
-    background: #fff;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
   }
 
   .talk-drawer__input-wrap {
@@ -266,16 +300,16 @@ const DRAWER_STYLES = `
     align-items: flex-end;
     gap: 8px;
     padding: 7px 7px 7px 14px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--line-strong);
     border-radius: 14px;
-    background: #f8fafc;
+    background: var(--surface-subtle);
     transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
   }
 
   .talk-drawer__input-wrap:focus-within {
-    border-color: #0694d6;
-    background: #fff;
-    box-shadow: 0 0 0 3px rgba(6, 148, 214, 0.12);
+    border-color: var(--primary);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px var(--primary-ring);
   }
 
   .talk-drawer__input {
@@ -287,13 +321,13 @@ const DRAWER_STYLES = `
     border: 0;
     outline: 0;
     resize: none;
-    color: #0f172a;
+    color: var(--ink);
     background: transparent;
     font-size: 13px;
     line-height: 1.4;
   }
 
-  .talk-drawer__input::placeholder { color: #94a3b8; }
+  .talk-drawer__input::placeholder { color: var(--faint); }
 
   .talk-drawer__icon-button,
   .talk-drawer__send {
@@ -308,32 +342,32 @@ const DRAWER_STYLES = `
   }
 
   .talk-drawer__icon-button {
-    color: #64748b;
+    color: var(--muted);
   }
 
   .talk-drawer__icon-button:hover:not(:disabled) {
-    color: #0694d6;
-    background: #e6f8ff;
+    color: var(--primary);
+    background: var(--primary-light);
   }
 
   .talk-drawer__icon-button--listening {
     color: #fff;
-    background: #e85555;
-    box-shadow: 0 0 0 4px rgba(232, 85, 85, 0.13);
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-ring);
   }
 
   .talk-drawer__icon-button--listening:hover:not(:disabled) {
     color: #fff;
-    background: #d94040;
+    background: var(--primary-hover);
   }
 
   .talk-drawer__send {
     color: #fff;
-    background: #0f172a;
+    background: var(--primary);
   }
 
   .talk-drawer__send:hover:not(:disabled) {
-    background: #0694d6;
+    background: var(--primary-hover);
     transform: translateY(-1px);
   }
 
@@ -383,11 +417,13 @@ const DRAWER_STYLES = `
   .talk-drawer__call-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #b7dfc8; border-radius: 12px; background: #e9f7ef; }
   .talk-drawer__call-card strong { display: inline-flex; align-items: center; gap: 6px; color: #173d30; font-size: 11px; }
   .talk-drawer__call-card p { margin: 4px 0 0; color: #6a7a73; font-size: 10px; line-height: 1.4; }
+  .talk-drawer__call-card small { display: block; margin-top: 5px; color: #456358; font-size: 10px; line-height: 1.4; }
   .talk-drawer__call-card button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: #1d7657; color: #fff; font-size: 10px; font-weight: 800; }
   .talk-drawer__call-card button:hover:not(:disabled) { background: #155b43; }
   .talk-drawer__call-card--active { background: #173d30; border-color: #173d30; }
   .talk-drawer__call-card--active strong { color: #fff; }
-  .talk-drawer__call-card--active p { color: #c8e4d4; }
+  .talk-drawer__call-card--active p,
+  .talk-drawer__call-card--active small { color: #c8e4d4; }
   .talk-drawer__call-card--active button { background: #fff; color: #173d30; }
   .talk-drawer__call-card--active button:hover:not(:disabled) { background: #dcf4e5; }
   .talk-drawer__call-orb { width: 13px; height: 13px; flex: 0 0 auto; border-radius: 50%; background: #9fe4be; box-shadow: 0 0 0 5px rgba(159, 228, 190, .16); }
@@ -410,15 +446,90 @@ const DRAWER_STYLES = `
   .talk-drawer__send { background: #173d30; }
   .talk-drawer__send:hover:not(:disabled) { background: #1d7657; }
   .talk-drawer__hint { color: #8b9c94; }
+  .talk-drawer__order-card {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border: 1px solid #b7dfc8;
+    border-radius: 12px;
+    background: #f4faf6;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .talk-drawer__order-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 800;
+    color: #173d30;
+  }
+  .talk-drawer__order-card-header span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .talk-drawer__order-badge {
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    background: #c8f0d7;
+    color: #173d30;
+  }
+  .talk-drawer__order-card-body {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .talk-drawer__order-card-body strong {
+    display: block;
+    font-size: 11px;
+    color: #173d30;
+  }
+  .talk-drawer__order-card-body p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: #33453e;
+    line-height: 1.4;
+  }
+  .talk-drawer__order-price {
+    font-size: 13px;
+    font-weight: 800;
+    color: #173d30;
+    flex-shrink: 0;
+  }
+  .talk-drawer__order-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: #1d7657;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    border: none;
+    transition: background 160ms ease;
+  }
+  .talk-drawer__order-action:hover {
+    background: #155b43;
+  }
   @media (prefers-reduced-motion: reduce) { .talk-drawer__call-orb--listening { animation: none; } }
   @media (max-width: 520px) { .talk-drawer__call-card { align-items: flex-start; flex-direction: column; } .talk-drawer__call-card button { width: 100%; justify-content: center; } }
 `;
 
-function createMessage(role, text) {
+function createMessage(role, text, metadata = {}) {
   return {
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     text,
+    ...metadata,
   };
 }
 
@@ -429,6 +540,7 @@ function getSpeechRecognition() {
 
 function getReplyText(reply) {
   if (typeof reply === 'string') return reply.trim();
+  if (reply && typeof reply === 'object' && reply.text) return String(reply.text).trim();
   if (reply === null || reply === undefined) return '';
   return String(reply).trim();
 }
@@ -475,7 +587,7 @@ function useDrawerFocusTrap(open, dialogRef, initialRef, onClose) {
   }, [dialogRef, initialRef, open]);
 }
 
-export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initialPrompt = '' }) {
+export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initialPrompt = '', voice, onOpenOrders }) {
   const titleId = useId();
   const descriptionId = useId();
   const inputId = useId();
@@ -618,10 +730,13 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initi
     setIsThinking(true);
 
     try {
-      const reply = getReplyText(await onAsk(text));
+      const rawReply = await onAsk(text);
+      const isObj = rawReply && typeof rawReply === 'object';
+      const reply = getReplyText(rawReply);
       const assistantMessage = createMessage(
         'assistant',
         reply || 'I could not find a clear answer for that yet. Try asking about ranking, price, speed, or delivery.',
+        isObj && rawReply.order ? { order: rawReply.order } : {}
       );
       if (!mountedRef.current) return;
       setMessages((current) => [...current, assistantMessage]);
@@ -781,12 +896,19 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initi
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="talk-drawer__header">
-          <div>
-            <p className="talk-drawer__eyebrow"><span className="talk-drawer__live-dot" />Shopping copilot</p>
-            <h2 className="talk-drawer__title" id={titleId}>Talk to Artha</h2>
-            <p className="talk-drawer__subtitle" id={descriptionId}>
-              Describe what you need. Artha will research, compare, and explain the next step.
-            </p>
+          <div className="talk-drawer__header-main">
+            <div>
+              <p className="talk-drawer__eyebrow"><span className="talk-drawer__live-dot" />Shopping copilot</p>
+              <h2 className="talk-drawer__title" id={titleId}>Talk to Artha</h2>
+              <p className="talk-drawer__subtitle" id={descriptionId}>
+                Describe what you need. Artha will research, compare, and explain the next step.
+              </p>
+            </div>
+            <div className="talk-drawer__orb-container">
+              <div className={`talk-drawer__voice-mark ${isListening || callActive || speakingMessageId ? 'talk-drawer__voice-mark--active' : ''}`} aria-hidden="true">
+                <Icon name="waveform" size={30} />
+              </div>
+            </div>
           </div>
           <button
             ref={closeButtonRef}
@@ -821,6 +943,7 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initi
             <div>
               <strong><span className={`talk-drawer__call-orb ${isListening ? 'talk-drawer__call-orb--listening' : ''}`} aria-hidden="true" /> {callActive ? 'Voice call in progress' : 'In-app voice call'}</strong>
               <p>{callActive ? (isThinking ? 'Researching your request…' : speakingMessageId ? 'Speaking the answer…' : 'Listening for your next request…') : getSpeechRecognition() ? 'Speak your brief. Artha listens, researches, and talks back.' : 'Voice calls need a browser with speech recognition. Text chat works here.'}</p>
+              <small>Mic: browser speech recognition · Reply: {voice?.label || 'Browser voice'}{voice?.provider === 'slng' && voice?.model ? ` (${voice.model})` : ''}</small>
             </div>
             <button type="button" onClick={toggleCall} disabled={!callActive && !getSpeechRecognition()} aria-pressed={callActive}>
               <Icon name={callActive ? 'close' : 'mic'} size={14} /> {callActive ? 'End call' : 'Start call'}
@@ -831,6 +954,30 @@ export function TalkDrawer({ open, onClose, onAsk, onToast, workflow = [], initi
               {message.role === 'assistant' ? <span className="talk-drawer__avatar" aria-hidden="true"><Icon name="spark" size={15} strokeWidth={2} /></span> : null}
               <div className="talk-drawer__bubble-wrap">
                 <div className="talk-drawer__bubble">{message.text}</div>
+                {message.order ? (
+                  <div className="talk-drawer__order-card">
+                    <div className="talk-drawer__order-card-header">
+                      <span><Icon name="check" size={13} /> Agentic Checkout Confirmed</span>
+                      <span className="talk-drawer__order-badge">{message.order.status || 'placed'}</span>
+                    </div>
+                    <div className="talk-drawer__order-card-body">
+                      <div>
+                        <strong>Order #{message.order.id}</strong>
+                        <p>{message.order.products?.[0]?.name ? sanitizeTitle(message.order.products[0].name) : 'Selected Item'}</p>
+                      </div>
+                      <span className="talk-drawer__order-price">{formatPrice(message.order.total || message.order.products?.[0]?.price || 0)}</span>
+                    </div>
+                    {onOpenOrders ? (
+                      <button
+                        type="button"
+                        className="talk-drawer__order-action"
+                        onClick={onOpenOrders}
+                      >
+                        View in Orders &amp; Tracking &rarr;
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {message.role === 'assistant' ? (
                   <div className="talk-drawer__message-tools">
                     <button

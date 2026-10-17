@@ -26,6 +26,7 @@ KOKORO_MODEL_REPO = "hexgrad/Kokoro-82M"
 KOKORO_SAMPLE_RATE = 24_000
 MAX_KOKORO_TEXT_CHARS = 1_200
 KOKORO_WARMUP_TEXT = "Artha is ready to read your purchase plan clearly."
+SLNG_TTS_MODEL = "aura-2-thalia-en"
 _KOKORO_LOCK = RLock()
 _KOKORO_WARMED: set[tuple[str, str, str, float, str]] = set()
 
@@ -157,6 +158,8 @@ class VoiceService:
         self.api_key = setting("ELEVENLABS_API_KEY")
         self.voice_id = setting("ELEVENLABS_VOICE_ID")
         self.model_id = setting("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
+        self.slng_api_key = setting("SLNG_API_KEY")
+        self.slng_api_base_url = setting("SLNG_API_BASE_URL", "https://api.slng.ai").rstrip("/") or "https://api.slng.ai"
 
     @property
     def configured(self) -> bool:
@@ -178,6 +181,8 @@ class VoiceService:
             return "browser"
         if self.preference in {"kokoro", "local-kokoro", "studio"}:
             return "kokoro" if _kokoro_dependencies() is not None else "kokoro-unavailable"
+        if self.preference == "slng":
+            return "slng"
         if self.preference == "elevenlabs":
             return "elevenlabs" if self.configured else "unconfigured"
         if is_production():
@@ -193,6 +198,8 @@ class VoiceService:
             label = "Local Kokoro voice"
         elif provider == "kokoro-unavailable":
             label = "Local Kokoro voice unavailable"
+        elif provider == "slng":
+            label = "SLNG voice" if self.slng_api_key else "SLNG voice not configured"
         elif provider == "unconfigured":
             label = "ElevenLabs voice not configured"
         elif requested_local in {"kokoro", "local-kokoro", "studio"}:
@@ -202,17 +209,25 @@ class VoiceService:
         return {
             "provider": provider,
             "label": label,
-            "model": self.model_id if provider == "elevenlabs" else (KOKORO_MODEL_REPO if provider == "kokoro" else "browser-speech"),
-            "configured": provider not in {"unconfigured", "kokoro-unavailable"},
+            "model": (
+                SLNG_TTS_MODEL if provider == "slng" else
+                self.model_id if provider == "elevenlabs" else
+                KOKORO_MODEL_REPO if provider == "kokoro" else "browser-speech"
+            ),
+            "configured": bool(self.slng_api_key) if provider == "slng" else provider not in {"unconfigured", "kokoro-unavailable"},
             "local": provider in {"browser", "kokoro", "kokoro-unavailable"},
             "requested_local_provider": requested_local,
-            "ready": provider != "kokoro" or bool(_KOKORO_WARMED),
+            "ready": bool(self.slng_api_key) if provider == "slng" else provider != "kokoro" or bool(_KOKORO_WARMED),
         }
 
     def warm(self) -> dict[str, object]:
         provider = self.provider
         if provider == "kokoro":
             return {"provider": provider, "warmed": _kokoro_warm(), "ready": True}
+        if provider == "slng":
+            if not self.slng_api_key:
+                raise VoiceError("SLNG_API_KEY is required when VOICE_PROVIDER=slng.")
+            return {"provider": provider, "warmed": False, "ready": True}
         if provider == "browser":
             return {"provider": provider, "warmed": False, "ready": True}
         if provider == "unconfigured":
@@ -220,16 +235,43 @@ class VoiceService:
         raise VoiceError("Kokoro local voice is unavailable. Install backend/requirements-kokoro.txt and restart the app.")
 
     def speak(self, text: str) -> tuple[bytes, str]:
-        if self.provider == "browser":
+        provider = self.provider
+        if provider == "browser":
             raise VoiceError("Local browser voice is selected; speech is synthesized in the browser.")
-        if self.provider == "kokoro":
+        if provider == "kokoro":
             normalized = " ".join((text or "").split())
             audio = _kokoro_audio(normalized)
             record_usage("kokoro", "voice_synthesis", model=KOKORO_MODEL_REPO, input_characters=len(normalized), output_bytes=len(audio))
             return audio, "audio/wav"
-        if self.provider == "kokoro-unavailable":
+        if provider == "kokoro-unavailable":
             raise VoiceError("Kokoro local voice is unavailable. Install backend/requirements-kokoro.txt and restart the app.")
-        if self.provider != "elevenlabs":
+        if provider == "slng":
+            text = " ".join((text or "").split())
+            if not text:
+                raise VoiceError("There is nothing to speak yet.")
+            if not self.slng_api_key:
+                raise VoiceError("SLNG_API_KEY is required when VOICE_PROVIDER=slng.")
+            request = urllib.request.Request(
+                f"{self.slng_api_base_url}/v1/tts/deepgram/aura:2",
+                data=json.dumps({"model": SLNG_TTS_MODEL, "text": text}).encode("utf-8"),
+                headers={"Authorization": f"Bearer {self.slng_api_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=45) as response:
+                    audio = response.read()
+                    if not audio:
+                        raise VoiceError("SLNG returned no audio.")
+                    record_usage("slng", "voice_synthesis", model=SLNG_TTS_MODEL, input_characters=len(text), output_bytes=len(audio))
+                    content_type = response.headers.get_content_type() if response.headers.get("Content-Type") else "audio/mpeg"
+                    return audio, content_type
+            except urllib.error.HTTPError as error:
+                if error.code in {401, 403}:
+                    raise VoiceError("SLNG rejected the configured API key.") from error
+                raise VoiceError("SLNG could not synthesize speech right now.") from error
+            except urllib.error.URLError as error:
+                raise VoiceError("SLNG could not synthesize speech right now.") from error
+        if provider != "elevenlabs":
             raise VoiceError("ElevenLabs is required in production but its API key or voice ID is missing.")
         text = " ".join((text or "").split())[:1800]
         if not text:

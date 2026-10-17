@@ -208,11 +208,11 @@ class PriceHistoryContracts(unittest.TestCase):
         brief = {"budget": 5000, "arrive_by_days": 5, "quantity": 1, "must_have": [], "nice_to_have": []}
         results = [
             {"title": "Acme Model X Chair", "url": "https://b.example/products/chair",
-             "generatedJson": {"pageType": "productDetail", "name": "Acme Model X Chair", "price": 3500}},
+             "generatedJson": {"pageType": "productDetail", "name": "Acme Model X Chair", "price": 3500, "currency": "INR"}},
             {"title": "Acme Model X Chair", "url": "https://b.example/products/chair-sale",
-             "generatedJson": {"pageType": "productDetail", "name": "Acme Model X Chair", "price": 3400}},
+             "generatedJson": {"pageType": "productDetail", "name": "Acme Model X Chair", "price": 3400, "currency": "INR"}},
             {"title": "Acme Model X Chair", "url": "https://c.example/products/chair",
-             "generatedJson": {"pageType": "productDetail", "name": "Acme Model X Chair", "price": 1000}},
+             "generatedJson": {"pageType": "productDetail", "name": "Acme Model X Chair", "price": 1000, "currency": "INR"}},
         ]
         scraped = {}
         for url, price, gtin in ((results[0]["url"], 3500, "5901234123457"),
@@ -224,7 +224,7 @@ class PriceHistoryContracts(unittest.TestCase):
             }
         source = {"mode": "live"}
         with patch.object(AnakinClient, "search", return_value={"results": results}) as search, \
-             patch.object(AnakinClient, "scrape_inline", side_effect=lambda url: scraped[url]) as scrape:
+             patch.object(AnakinClient, "scrape_inline", side_effect=lambda url, **kwargs: scraped[url]) as scrape:
             other_offers = _targeted_cross_store_offers([original], brief, source)
         search.assert_called_once()
         self.assertIn("5901234123457", search.call_args.args[0])

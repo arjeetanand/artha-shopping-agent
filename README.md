@@ -13,6 +13,7 @@ This is a research and retailer handoff flow with a clearly labeled local order 
 - **Ollama** is selected by default in local development for brief extraction.
 - **Gemini** is selected by default when `APP_ENV=production`; it can analyze reference images as well as text.
 - **Kokoro** is the preferred local voice when the optional local voice environment is installed, with browser SpeechSynthesis as a fallback. **ElevenLabs** is selected by default in production.
+- **SLNG** can provide server-side Aura 2 text-to-speech while browser speech recognition handles microphone input; the API key stays on the Python server.
 - **Usage & runtime** keeps a persistent SQLite ledger of provider-reported AI tokens, plus clearly marked unmetered Anakin search and server voice activity. The UI can filter the ledger by local or production runtime without pretending to switch the running deployment.
 
 ## Run locally
@@ -24,8 +25,14 @@ The easiest way to start both the Python backend and the Vite frontend together:
 # or: npm start
 ```
 
+Taste OS: sign in with Google, open **Taste OS**, and click **Connect** beside a retailer. Complete retailer login and OTP in the separate Chrome window. The connector reads the last six calendar months of visible order history, downloads available invoice PDFs, and reports missing invoices or incomplete pagination. It never substitutes sample purchases. This requires running the app on your desktop with Chrome installed; hosted deployments need a separate local connector.
+
+Amazon Business uses a separate year selector; the connector selects it explicitly because Amazon can ignore the date in the URL. Confirm you signed into the account containing your purchases. An empty Business account cannot supply personal-account orders. The browser regression test is `npm run test:retailer-browser`.
+
+Connect Instagram to read shared posts that require login. Sharing a readable post saves its analyzed style as a personal memory. Saving a product also teaches the profile; removing that saved product removes its preference memory. Real semantic vectors use the configured Gemini embedding API, or an installed Ollama embedding model. Unavailable embeddings remain explicitly pending, with keyword retrieval until reindexing succeeds. Invoice PDFs, extracted invoice text, and browser sessions stay in the private OS user-data directory; embedding requests contain product or style descriptions.
+
 This single command:
-1. Automatically detects `.venv` (or falls back to `python3`).
+1. Creates or uses `.venv` and installs the backend requirements when missing.
 2. Creates `.env` from `.env.example` if not present.
 3. Installs frontend dependencies if `node_modules/` is missing.
 4. Reads configured ports from `.env`.
@@ -39,6 +46,7 @@ If you prefer running services in separate terminals:
 ```bash
 # Terminal 1: Backend
 python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt
 .venv/bin/python -m pip install -r backend/requirements-kokoro.txt  # optional local voice
 SHOPPINGHELP_PORT=8001 .venv/bin/python backend/server.py
 
@@ -89,6 +97,12 @@ npm run test:auth
 
 The browser voice-call loop can be checked with `npm run test:voice` after installing Playwright Chromium. To use an existing Chrome binary, set `SHOPPINGHELP_CHROME_PATH` to its executable path.
 
+The SLNG HTTP TTS request contract is covered offline with mocked responses:
+
+```bash
+npm run test:slng
+```
+
 The permissioned location adapter can be exercised offline with mocked Maps responses; it verifies nearby-store parsing and coordinate non-persistence:
 
 ```bash
@@ -113,6 +127,12 @@ The flow uses authorization-code OAuth with PKCE. It verifies the Google user id
 
 Set `ANAKIN_API_KEY`. The browser calls the Python API; only Python calls Anakin. Search results are marked **Live source** and keep their source URLs. A pasted product or post URL is first sent through Anakin's URL scraper and contributes context to the retailer search.
 
+Discovery uses category-specific store queries and requires an India storefront or INR evidence before accepting a source. The search introduction labels live search and the demo catalog separately. Products with unknown prices stay unselected. If the scraper groups the main item with recommendations, Artha can recover its price and unavailable-stock status from a single Product JSON-LD object on the same product page; listing pages and redirects do not qualify.
+
+Run the offline live-search contracts with `npm run test:search`.
+
+The budget field accepts INR amounts such as `2000`, `₹2,000`, `2k`, and `2.5k`. Explicit shorts-and-shirt outfits keep each piece's color and size separately. Artha asks for missing sizes, wearer, delivery timing, and whether the budget covers the outfit or each item. Answers can be submitted together in the follow-up form. A complete outfit is selected only when both pieces have known prices and fit the confirmed budget; missing retailer evidence remains flagged.
+
 ### Delivery location
 
 The composer keeps the typed delivery city as the source of truth. **Use my location** requests approximate browser coordinates only after an explicit click; coordinates are validated, used for optional geocoding and nearby-store context, and never persisted. In production, set `GOOGLE_MAPS_API_KEY` and leave `GOOGLE_MAPS_PLACES_ENABLED=1` if you want Google Maps to resolve a permissioned location into a delivery city and return nearby store signals relevant to the category. The UI labels that context as approximate and does not treat a nearby store as proof of inventory. Set `GOOGLE_MAPS_PLACES_ENABLED=0` to keep geocoding without Places calls. If permission is denied or Maps is unavailable, Artha keeps the city the shopper typed.
@@ -132,7 +152,15 @@ Reference images are limited to PNG, JPEG, WebP, or GIF and 4 MB. They are sent 
 
 ### Voice
 
-`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. For production, set `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and optionally `ELEVENLABS_MODEL_ID`. The ElevenLabs key remains on the Python server; only audio bytes return to the browser. If server voice fails, the call visibly switches to browser speech while keeping the answer in the transcript.
+`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. Set `VOICE_PROVIDER=slng` with `SLNG_API_KEY` to send spoken replies through SLNG Aura 2; `SLNG_API_BASE_URL` defaults to `https://api.slng.ai`. The Python server posts normalized answer text to `/v1/tts/deepgram/aura:2` with model `aura-2-thalia-en`, then returns audio bytes to the browser. The key stays on the Python server. If server voice fails, the call visibly switches to browser speech while keeping the answer in the transcript. The Talk drawer shows the microphone and reply providers so the stack is clear during a demo.
+
+For the hackathon demo, add your SLNG key to the ignored `.env`, then run a deterministic shopping scenario with SLNG voice output:
+
+```bash
+SHOPPINGHELP_PORT=8011 SHOPPINGHELP_FRONTEND_PORT=5186 SHOPPINGHELP_APP_URL=http://127.0.0.1:5186 SHOPPINGHELP_SEARCH_MODE=fixture VOICE_PROVIDER=slng npm start
+```
+
+Open `http://127.0.0.1:5186`, search for “I need an office chair under ₹12,000 with good back support delivered to Bangalore within 5 days,” then open **Talk to Artha** and start the voice call. Ask why the chair ranked first and whether anything can arrive faster. The microphone uses browser speech recognition; Artha’s existing shopping agents handle the request; SLNG’s `aura-2-thalia-en` TTS speaks the answer. Fixture mode keeps product evidence repeatable and offline. Retailer checkout remains a clearly labeled sandbox/handoff. This demo does not claim measured latency or cost savings; capture those from actual SLNG calls before presenting them.
 
 The **Start call** control in Talk to Artha uses the browser's SpeechRecognition microphone permission, submits each spoken turn to the same research and refinement flow as typed requests, reads the answer through the configured voice service, and listens for the next turn. Browsers without SpeechRecognition retain typed chat. The call transcript remains visible and **End call** stops listening and playback.
 
@@ -158,7 +186,7 @@ KOKORO_DEVICE=auto
 3. **Location agent** uses the typed city/pincode or an explicitly permissioned browser location, with optional Google Maps geocoding and nearby-store context; raw coordinates are never persisted.
 4. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context. Provider-neutral retailer and delivery contracts live in `backend/retailers.py`; dedicated marketplace adapters can be added without changing ranking or UI code.
 5. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, variant, and price information as needing retailer confirmation.
-6. **Research agent** checks up to six discovery pages, then up to four exact-item pages from other retailer sites when product identity is strong enough. It uses direct-page details ahead of search snippets, records price mismatches, and keeps empty or failed checks visibly unverified. Fixture mode uses deterministic catalog evidence without network calls.
+6. **Research agent** checks up to four discovery pages in parallel, then up to four exact-item pages from other retailer sites when product identity is strong enough. Each page check has a 45-second time budget. It uses direct-page details ahead of search snippets, records price mismatches, and keeps empty or failed checks visibly unverified. Fixture mode uses deterministic catalog evidence without network calls.
 7. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
 8. **Decision agent** ranks by fit, seller signals, budget, delivery, stock, color, size, and evidence, then applies an evidence gate. It returns `buy_now`, `verify_before_buy`, or `no_safe_fit`; unknown or conflicting price, delivery, stock, color, or size can never produce `buy_now`.
 9. **Purchase-plan service** persists only an authenticated user's selected, linked products in local SQLite.
