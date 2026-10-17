@@ -1,12 +1,14 @@
 import { transcribeAudio } from './api';
 import { encodeWav } from './wav';
 
-export function supportsSlngRecording() {
+export function supportsLocalWavRecording() {
   return typeof window !== 'undefined' && Boolean(window.AudioWorkletNode && window.AudioContext && navigator.mediaDevices?.getUserMedia);
 }
 
-// Match the existing recognition callbacks so both microphone controls share one recorder.
-export class SlngRecognition {
+export const supportsSlngRecording = supportsLocalWavRecording;
+
+// Records 16kHz mono PCM WAV in the browser and transcribes via /api/voice/transcribe on 127.0.0.1.
+export class LocalWavRecognition {
   async start(track) {
     this.cancelled = false;
     this.controller = new AbortController();
@@ -100,3 +102,5 @@ export class SlngRecognition {
     if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => {});
   }
 }
+
+export const SlngRecognition = LocalWavRecognition;

@@ -1,13 +1,15 @@
-"""Mocked contract checks for the opt-in SLNG text-to-speech provider."""
+"""Contract checks for local voice (Whisper STT + Kokoro/macOS TTS) and legacy SLNG fallback."""
 
 from __future__ import annotations
 
-import json
 import base64
+import io
+import json
 import os
 import sys
-import urllib.error
 import unittest
+import urllib.error
+import wave
 from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -18,7 +20,52 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-class SlngVoiceContract(unittest.TestCase):
+def _sample_wav_b64() -> str:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        wf.writeframes(b"\x00\x00" * 1600)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+class LocalAndSlngVoiceContract(unittest.TestCase):
+    def test_default_voice_status_is_local_and_verifies_browser_speech_is_not_local(self) -> None:
+        from backend.voice import VoiceService
+
+        with patch.dict(os.environ, {"VOICE_PROVIDER": "local", "LOCAL_VOICE_PROVIDER": "kokoro"}, clear=False):
+            status = VoiceService().status()
+            self.assertTrue(status["local"])
+            self.assertTrue(status["stt_local"])
+            self.assertFalse(status["browser_speech_is_local"])
+            self.assertIn(status["provider"], {"kokoro", "macos_say", "browser"})
+            self.assertIn("not assumed to be local", str(status["processing_note"]))
+
+    def test_local_transcription_uses_local_whisper_without_slng_key(self) -> None:
+        from backend.voice import VoiceService
+
+        wav_b64 = _sample_wav_b64()
+        with patch.dict(os.environ, {"VOICE_PROVIDER": "local", "SLNG_API_KEY": ""}, clear=False), patch(
+            "backend.voice._transcribe_local_wav", return_value=("I am going to Goa and want to buy a T-shirt", "faster-whisper:base.en")
+        ) as local_stt, patch("backend.voice.urllib.request.urlopen") as urlopen, patch("backend.voice.record_usage"):
+            transcript = VoiceService().transcribe(wav_b64, "audio/wav")
+            self.assertEqual(transcript, "I am going to Goa and want to buy a T-shirt")
+            local_stt.assert_called_once()
+            urlopen.assert_not_called()
+
+    def test_local_speak_synthesizes_wav_audio_locally(self) -> None:
+        from backend.voice import VoiceService
+
+        with patch.dict(os.environ, {"VOICE_PROVIDER": "macos_say", "SLNG_API_KEY": "", "ELEVENLABS_API_KEY": ""}, clear=False), patch(
+            "backend.voice.record_usage"
+        ):
+            voice = VoiceService()
+            audio, content_type = voice.speak("What are you looking for today, Arjeet?")
+            self.assertEqual(content_type, "audio/wav")
+            self.assertTrue(audio.startswith(b"RIFF"))
+            self.assertGreater(len(audio), 44)
+
     def test_slng_transcription_contract(self) -> None:
         from backend.voice import VoiceService
 
@@ -41,7 +88,7 @@ class SlngVoiceContract(unittest.TestCase):
         from backend.voice import VoiceService
 
         for audio, mime in [("", "audio/webm"), ("!invalid!", "audio/webm"), ("YQ==", "text/html"), ("YQ==" * 800_000, "audio/webm")]:
-            with self.subTest(mime=mime, length=len(audio)), patch.dict(os.environ, {"SLNG_API_KEY": "test-key"}), patch("backend.voice.urllib.request.urlopen") as urlopen:
+            with self.subTest(mime=mime, length=len(audio)), patch.dict(os.environ, {"VOICE_PROVIDER": "slng", "SLNG_API_KEY": "test-key"}), patch("backend.voice.urllib.request.urlopen") as urlopen:
                 with self.assertRaises(ValueError):
                     VoiceService().transcribe(audio, mime)
                 urlopen.assert_not_called()

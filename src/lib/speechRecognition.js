@@ -1,9 +1,22 @@
-import { SlngRecognition, supportsSlngRecording } from './slngRecognition';
+import { LocalWavRecognition, SlngRecognition, supportsLocalWavRecording, supportsSlngRecording } from './slngRecognition';
+
+export function isLocalRecorderVoice(voice) {
+  if (!voice) return false;
+  if (voice.provider === 'browser') return false;
+  return Boolean(voice.stt_local || ['kokoro', 'macos_say', 'local', 'slng'].includes(voice.provider));
+}
 
 export function getSpeechRecognition(voice) {
   if (typeof window === 'undefined') return null;
+  // Browser SpeechRecognition (webkitSpeechRecognition in Chrome/Edge) streams audio
+  // to remote cloud speech servers unless on-device packs are explicitly installed.
+  // When local voice is active, record 16kHz mono PCM WAV in the browser and transcribe
+  // locally via POST /api/voice/transcribe (Whisper on 127.0.0.1).
+  if (isLocalRecorderVoice(voice)) {
+    if (supportsLocalWavRecording()) return LocalWavRecognition;
+  }
   if (voice?.provider === 'slng') return supportsSlngRecording() ? SlngRecognition : null;
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || (supportsLocalWavRecording() ? LocalWavRecognition : null);
 }
 
 export async function requestMicrophone() {
@@ -37,7 +50,7 @@ export function speechErrorMessage(error) {
     return 'The microphone is busy or could not be opened. Close other apps using it, then try again.';
   }
   if (code === 'network') {
-    return 'The browser speech service could not be reached. Check your internet connection and try again.';
+    return 'The browser speech service could not be reached. Switch to local Whisper recording or type your request.';
   }
   if (code === 'no-speech') {
     return 'No speech was detected. Try again and speak closer to the microphone.';
