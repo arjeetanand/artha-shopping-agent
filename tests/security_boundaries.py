@@ -47,6 +47,28 @@ class Fragments:
 
 
 class SecurityBoundaryContracts(unittest.TestCase):
+    def test_transcription_uses_paid_admission_and_bounded_body(self) -> None:
+        from backend import server
+
+        provider = SimpleNamespace(slng_api_key="test-key", transcribe=Mock(return_value="office chair"))
+        handler = server.Handler.__new__(server.Handler)
+        handler.path = "/api/voice/transcribe"
+        handler.client_address = ("192.0.2.20", 1234)
+        handler._read_json = Mock(return_value={"audio": "YQ==", "content_type": "audio/webm"})
+        handler._send = Mock()
+        with patch.object(server, "VoiceService", return_value=provider), patch.object(server, "_admit_paid_voice_request", return_value=429):
+            server.Handler.do_POST(handler)
+        handler._read_json.assert_called_once_with(3_000_000)
+        self.assertEqual(handler._send.call_args.args[0], 429)
+        provider.transcribe.assert_not_called()
+
+        capacity = threading.BoundedSemaphore(1)
+        capacity.acquire()
+        with patch.object(server, "VoiceService", return_value=provider), patch.object(server, "_admit_paid_voice_request", return_value=None), patch.object(server, "_VOICE_CAPACITY", capacity):
+            server.Handler.do_POST(handler)
+        handler._send.assert_called_with(200, {"text": "office chair", "provider": "slng"})
+        self.assertTrue(capacity.acquire(blocking=False), "Transcription must release in-flight capacity")
+
     def test_social_reference_url_rejects_non_public_targets_and_redacts_query(self) -> None:
         from backend.social import _public_reference_url
 

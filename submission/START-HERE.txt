@@ -1,0 +1,45 @@
+LATEST PLAYBACK WORKAROUND
+Use artha-demo-captioned.mp4: 2:30, visible captions, intentionally silent.
+Voice-over is optional under the requirements you supplied.
+The software player renders it; the Mac system playback/audio problem remains.
+Double-click WATCH-DEMO.command to reopen it using the installed software player.
+
+ARTHA — SOLO SUBMISSION FOR ARJEET ANAND
+
+Participant: Arjeet Anand
+Entry: Solo
+Project: Artha — Your AI Shopping Research Agent
+Form: https://forms.gle/CKYCKRbkj6wejQ7t8
+
+PLAYBACK
+If the app preview stalls, download artha-demo.mp4 and open it in QuickTime.
+Use artha-demo.webm as an alternate format for browser playback.
+
+FILES
+artha-demo.mp4 — verified 2:30 prototype video, 6.8 MB, with synthetic narration; separate captions file.
+PROJECT-DESCRIPTION.txt — 125-word description to paste into the form.
+LINKEDIN-POST.txt — draft; attach the final video before publishing.
+X-POST.txt — draft; attach the final video before publishing.
+VIDEO-NARRATION.txt — narration transcript.
+artha-demo-captions.srt — optional scene captions.
+SUBMISSION-PACK.txt — full script, answers, and final checklist.
+
+VIDEO DISCLOSURE
+The recording uses the app's labeled sample catalog in an isolated browser.
+It shows the actual shopping, evidence, and typed follow-up interfaces.
+Voice-over is synthetic macOS Samantha narration. No live microphone call,
+retailer purchase, live market quote, or personal account is demonstrated.
+
+STILL REQUIRED
+1. Upload the MP4 to the host accepted by the form; test viewer access.
+2. Confirm GitHub repository exists and is publicly accessible:
+   https://github.com/arjeetanand/artha-shopping-agent
+   An unauthenticated GitHub API check returned 404; public status is unconfirmed.
+3. Publish the LinkedIn and X drafts with the video, after reviewing the wording.
+4. Paste the real video URL and published post permalinks into the form.
+5. Enter your registered email/phone and other actual required details.
+6. Submit inside the organizer's stated 3:30–4:30 PM window and save the receipt.
+   The deadline date and timezone have not been independently confirmed.
+
+No uploads, social posts, repository visibility changes, or form submission
+have been performed. Pre-existing project source changes were left in place.

@@ -1,5 +1,8 @@
-export function getSpeechRecognition() {
+import { SlngRecognition, supportsSlngRecording } from './slngRecognition';
+
+export function getSpeechRecognition(voice) {
   if (typeof window === 'undefined') return null;
+  if (voice?.provider === 'slng') return supportsSlngRecording() ? SlngRecognition : null;
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 

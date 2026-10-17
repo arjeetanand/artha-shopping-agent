@@ -1,8 +1,10 @@
-"""Voice output with a local Kokoro path and an ElevenLabs production path."""
+"""Voice output through SLNG, ElevenLabs, local Kokoro, or browser speech."""
 
 from __future__ import annotations
 
 import io
+import base64
+import binascii
 import json
 import os
 import sys
@@ -159,7 +161,41 @@ class VoiceService:
         self.voice_id = setting("ELEVENLABS_VOICE_ID")
         self.model_id = setting("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
         self.slng_api_key = setting("SLNG_API_KEY")
-        self.slng_api_base_url = setting("SLNG_API_BASE_URL", "https://api.slng.ai").rstrip("/") or "https://api.slng.ai"
+        self.slng_api_base_url = setting("SLNG_API_BASE_URL", "https://in.api.slng.ai").rstrip("/") or "https://in.api.slng.ai"
+
+    def transcribe(self, audio: str, content_type: str) -> str:
+        if not isinstance(audio, str) or not audio or len(audio) > 2_800_000:
+            raise ValueError("Record a voice message of up to 30 seconds.")
+        if not isinstance(content_type, str) or content_type.split(";", 1)[0] not in {"audio/webm", "audio/ogg", "audio/mp4", "audio/wav", "audio/mpeg"}:
+            raise ValueError("Unsupported voice recording format.")
+        try:
+            decoded = base64.b64decode(audio, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ValueError("Invalid voice recording.") from error
+        if not decoded or len(decoded) > 2_000_000:
+            raise ValueError("The voice recording is empty or too large.")
+        if not self.slng_api_key:
+            raise VoiceError("SLNG_API_KEY is required for voice transcription.")
+        request = urllib.request.Request(
+            f"{self.slng_api_base_url}/v1/stt/slng/deepgram/nova:3-en",
+            data=json.dumps({"audio": audio, "language": "en"}).encode(),
+            headers={"Authorization": f"Bearer {self.slng_api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = json.loads(response.read(1_000_000))
+            text = body["results"]["channels"][0]["alternatives"][0]["transcript"]
+            if not isinstance(text, str):
+                raise ValueError("Invalid transcript")
+        except urllib.error.HTTPError as error:
+            if error.code in {401, 403}:
+                raise VoiceError("SLNG rejected the configured API key.") from error
+            raise VoiceError("SLNG could not transcribe this recording. Please try again.") from error
+        except (urllib.error.URLError, TimeoutError, ValueError, KeyError, IndexError, TypeError) as error:
+            raise VoiceError("SLNG could not transcribe this recording. Please try again.") from error
+        record_usage("slng", "voice_transcription", model="nova-3", output_bytes=len(text.encode()))
+        return text.strip()[:4000]
 
     @property
     def configured(self) -> bool:
@@ -253,7 +289,7 @@ class VoiceService:
                 raise VoiceError("SLNG_API_KEY is required when VOICE_PROVIDER=slng.")
             request = urllib.request.Request(
                 f"{self.slng_api_base_url}/v1/tts/deepgram/aura:2",
-                data=json.dumps({"model": SLNG_TTS_MODEL, "text": text}).encode("utf-8"),
+                data=json.dumps({"model": SLNG_TTS_MODEL, "text": text, "encoding": "linear16", "container": "wav"}).encode("utf-8"),
                 headers={"Authorization": f"Bearer {self.slng_api_key}", "Content-Type": "application/json"},
                 method="POST",
             )
@@ -263,7 +299,7 @@ class VoiceService:
                     if not audio:
                         raise VoiceError("SLNG returned no audio.")
                     record_usage("slng", "voice_synthesis", model=SLNG_TTS_MODEL, input_characters=len(text), output_bytes=len(audio))
-                    content_type = response.headers.get_content_type() if response.headers.get("Content-Type") else "audio/mpeg"
+                    content_type = response.headers.get_content_type() if response.headers.get("Content-Type") else "audio/wav"
                     return audio, content_type
             except urllib.error.HTTPError as error:
                 if error.code in {401, 403}:

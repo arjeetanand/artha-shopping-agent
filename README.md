@@ -13,7 +13,7 @@ This is a research and retailer handoff flow with a clearly labeled local order 
 - **Ollama** is selected by default in local development for brief extraction.
 - **Gemini** is selected by default when `APP_ENV=production`; it can analyze reference images as well as text.
 - **Kokoro** is the preferred local voice when the optional local voice environment is installed, with browser SpeechSynthesis as a fallback. **ElevenLabs** is selected by default in production.
-- **SLNG** can provide server-side Aura 2 text-to-speech while browser speech recognition handles microphone input; the API key stays on the Python server.
+- **SLNG** provides Nova 3 speech transcription and Aura 2 spoken replies. The browser records the microphone directly; the API key stays on the Python server.
 - **Usage & runtime** keeps a persistent SQLite ledger of provider-reported AI tokens, plus clearly marked unmetered Anakin search and server voice activity. The UI can filter the ledger by local or production runtime without pretending to switch the running deployment.
 
 ## Run locally
@@ -152,17 +152,30 @@ Reference images are limited to PNG, JPEG, WebP, or GIF and 4 MB. They are sent 
 
 ### Voice
 
-`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. Set `VOICE_PROVIDER=slng` with `SLNG_API_KEY` to send spoken replies through SLNG Aura 2; `SLNG_API_BASE_URL` defaults to `https://api.slng.ai`. The Python server posts normalized answer text to `/v1/tts/deepgram/aura:2` with model `aura-2-thalia-en`, then returns audio bytes to the browser. The key stays on the Python server. If server voice fails, the call visibly switches to browser speech while keeping the answer in the transcript. The Talk drawer shows the microphone and reply providers so the stack is clear during a demo.
+`VOICE_PROVIDER=auto` uses `LOCAL_VOICE_PROVIDER` during development and ElevenLabs in production. Set `LOCAL_VOICE_PROVIDER=kokoro` for the local studio voice, or `browser` for zero-install development. Set `VOICE_PROVIDER=slng` with `SLNG_API_KEY` to send spoken replies through SLNG Aura 2; `SLNG_API_BASE_URL` defaults to `https://in.api.slng.ai`. SLNG retired the global `api.slng.ai` gateway: update existing `.env` files to a [supported regional gateway](https://docs.slng.ai/api-reference/text-to-speech/deepgram/deepgram-aura-2/aura-2-http). The Python server posts normalized answer text to `/v1/tts/deepgram/aura:2` with model `aura-2-thalia-en` and explicitly requests 24 kHz linear PCM in a WAV container for browser playback. The key stays on the Python server. If server voice fails, the call switches to browser speech with a visible notice while keeping the answer in the transcript.
 
 For the hackathon demo, add your SLNG key to the ignored `.env`, then run a deterministic shopping scenario with SLNG voice output:
 
 ```bash
-SHOPPINGHELP_PORT=8011 SHOPPINGHELP_FRONTEND_PORT=5186 SHOPPINGHELP_APP_URL=http://127.0.0.1:5186 SHOPPINGHELP_SEARCH_MODE=fixture VOICE_PROVIDER=slng npm start
+npm run demo:voice
 ```
 
-Open `http://127.0.0.1:5186`, search for “I need an office chair under ₹12,000 with good back support delivered to Bangalore within 5 days,” then open **Talk to Artha** and start the voice call. Ask why the chair ranked first and whether anything can arrive faster. The microphone uses browser speech recognition; Artha’s existing shopping agents handle the request; SLNG’s `aura-2-thalia-en` TTS speaks the answer. Fixture mode keeps product evidence repeatable and offline. Retailer checkout remains a clearly labeled sandbox/handoff. This demo does not claim measured latency or cost savings; capture those from actual SLNG calls before presenting them.
+Open the frontend address printed by the startup script in Chrome or Edge, then choose **Talk to Artha → Start call** and allow microphone access. You can begin the search entirely by voice:
 
-The **Start call** control in Talk to Artha uses the browser's SpeechRecognition microphone permission, submits each spoken turn to the same research and refinement flow as typed requests, reads the answer through the configured voice service, and listens for the next turn. Browsers without SpeechRecognition retain typed chat. The call transcript remains visible and **End call** stops listening and playback.
+1. “Find me an office chair.” Artha asks for budget, delivery city, and deadline.
+2. “Under twelve thousand rupees, delivered to Bangalore within five days.” Artha fetches and ranks the fixture products.
+3. “Why did you rank it first?” Artha explains the recommendation from the existing evidence.
+4. “Can anything arrive faster?” Artha compares the stated delivery times.
+
+With SLNG selected, both **Speak brief** and **Start call** capture raw microphone samples with an AudioWorklet and send a WAV recording to `/api/voice/transcribe`. The server uses SLNG Nova 3 English at `/v1/stt/slng/deepgram/nova:3-en`; browser SpeechRecognition is not used. Speak in English and pause for about 1.2 seconds, or press **Send voice** in the call to submit manually. A turn lasts at most 30 seconds; no detected microphone audio ends the call with an explanation after 10 seconds. The microphone stops while the recording is transcribed. Recordings are sent to SLNG for transcription and are not saved to disk. SLNG speaks the answer, and the call resumes listening afterward. End the call when finished.
+
+Microphone samples are mixed to mono, resampled to 16 kHz, and encoded directly as PCM WAV. Voice input uses neither MediaRecorder nor decodeAudioData, so browser recording-codec support cannot trigger an audio-decode failure. The worklet outputs silence to avoid playing the microphone back through the speakers. In the Talk drawer, **Send voice** submits the recognized request to the shopping agent even without starting a continuous call. Transcription status clears when recording finishes; failures stay visible inside the drawer, and stalled uploads time out after 40 seconds. Server failure logs include only recording format, exception class, and provider HTTP status, never recording contents or the API key.
+
+Fixture mode uses deterministic brief parsing and a local sample catalog, with no LLM or live retailer search. The products and delivery estimates are demo data. Use `npm start` with `SHOPPINGHELP_SEARCH_MODE=live` for live retailer research. **End call** or closing the drawer cancels recording, pending transcription, and playback. Typed questions also work in the same drawer.
+
+On macOS, `npm run test:voice:live` generates a synthetic spoken shopping brief with SLNG, converts it to a WAV with the built-in `afconvert`, and supplies that audio to Chrome's test microphone. It verifies actual PCM capture, SLNG transcription, product search, and SLNG WAV playback with browser speech recognition, MediaRecorder, and audio decoding disabled, then checks two typed follow-ups. It incurs one STT and four TTS requests; no transcript events are mocked. Physical microphone selection and OS permission still need a manual check. `npm run test:voice` covers PCM encoding, worklet capture, manual send, transcription errors, cancellation, and browser voice fallback offline. `npm run test:slng` checks the provider contracts. The server allows ten combined STT/TTS requests per IP per minute (five spoken turns) and 120 globally per rolling hour. Transcription failures stop the call with an explanation; reply synthesis failures use browser voice with a notice.
+
+Other voice providers retain browser SpeechRecognition for input. The call transcript stays visible, and every spoken turn uses the same research and refinement flow as typed requests. Use Chrome or Edge if microphone recording is unavailable in an embedded browser.
 
 The local Kokoro configuration is:
 

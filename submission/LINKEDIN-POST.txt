@@ -1,0 +1,23 @@
+I built Artha, an AI shopping research assistant that turns a shopping brief
+into a source-linked purchase plan.
+
+The problem I wanted to solve: finding a product is easy; comparing budget,
+preferences, delivery, and incomplete retailer information takes far more work.
+
+With Artha, a shopper can describe what they need, inspect a ranked shortlist,
+check the supporting sources, and refine the request through conversation.
+Missing evidence stays visible, so uncertainty is part of the answer.
+
+Building the prototype taught me that useful AI needs more than a fluent reply:
+it needs clear constraints, inspectable evidence, and honest limits.
+
+Stack: React, Python, SQLite, and configurable AI, retailer-search, and speech
+providers. Real checkout remains on retailer websites.
+
+Watch the prototype demo attached to this post.
+
+GitHub: https://github.com/arjeetanand/artha-shopping-agent
+
+What would make you trust an AI shopping recommendation?
+
+#AI #Hackathon #BuildInPublic #ShoppingAssistant

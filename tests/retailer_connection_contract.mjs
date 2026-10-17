@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RETAILERS, parseOrderDate, parseOrderEvidence, parseMoney, retailerUrl, historyUrls } from '../backend/retailer_extract.mjs';
+import { RETAILERS, parseFlipkartOrder, parseFlipkartOrderPage, parseOrderDate, parseOrderEvidence, parseMoney, retailerUrl, historyUrls } from '../backend/retailer_extract.mjs';
 
 test('retailer evidence preserves money, order date and multiple items', () => {
   const order=parseOrderEvidence({
@@ -21,6 +21,54 @@ test('a delivery date cannot silently become the order date',()=>{
   const order=parseOrderEvidence({url:'https://www.flipkart.com/order_details?order_id=OD1234567890123',
     text:'Delivered on 17 October 2026',products:[]},'flipkart');
   assert.equal(order.error,'order_date_missing');
+});
+
+test('Flipkart API evidence normalizes its timestamp, product attributes, and INR amounts',()=>{
+  const order=parseFlipkartOrder({
+    orderMetaData:{orderId:'OD12345678901234567890',orderDate:Date.UTC(2026,9,17)},
+    orderMoneyDataBag:{amountValueMultiCurrency:[{currency:'INR',inrValue:2399.75}]},
+    productDataBag:{FSN123:{productBasicData:{title:'Blue linen shirt'},productAttribute:{
+      storePath:'/blue-linen-shirt/p/itm12345',brand:'Example',size:'L',color:'Blue',
+    }}},
+    units:{UNIT123:{metaData:{fsn:'FSN123',quantity:1,status:{key:'Delivered'}},moneyDataBag:{
+      amountValueMultiCurrency:[{currency:'INR',inrValue:2399.75}],
+    }}},
+  });
+  assert.equal(order.id,'OD12345678901234567890');
+  assert.equal(order.order_date,'2026-10-17');
+  assert.equal(order.total,2399.75);
+  assert.equal(order.items.length,1);
+  assert.equal(order.items[0].name,'Blue linen shirt');
+  assert.equal(order.items[0].url,'https://www.flipkart.com/blue-linen-shirt/p/itm12345');
+  assert.equal(order.items[0].brand,'Example');
+  assert.equal(order.items[0].size,'L');
+  assert.equal(order.items[0].color,'Blue');
+  assert.equal(order.items[0].price,2399.75);
+  assert.equal(order.status,'delivered');
+  assert.equal(order.evidence_hash.length,64);
+});
+
+test('Flipkart API evidence rejects missing dates and unmapped products',()=>{
+  const base={orderMetaData:{orderId:'OD12345678901234567890'},units:{}};
+  assert.equal(parseFlipkartOrder(base).error,'order_date_missing');
+  assert.equal(parseFlipkartOrder({...base,orderMetaData:{...base.orderMetaData,orderDate:Date.UTC(2026,9,17)}}).error,'order_items_missing');
+});
+
+test('Flipkart API page parser ignores session fields and preserves pagination state',()=>{
+  const result=parseFlipkartOrderPage({
+    SESSION:{secureToken:'must not be returned'},
+    RESPONSE:{multipleOrderDetailsView:{orders:[{
+      orderMetaData:{orderId:'OD12345678901234567890',orderDate:Date.UTC(2026,9,17)},
+      productDataBag:{FSN123:{productBasicData:{title:'Blue linen shirt'},productAttribute:{storePath:'/shirt/p/itm12345'}}},
+      units:{UNIT123:{metaData:{fsn:'FSN123',quantity:1}}},
+    }],moreOrder:true}},
+  });
+  assert.equal(result.orderCount,1);
+  assert.equal(result.moreOrder,true);
+  assert.equal(result.orders.length,1);
+  assert.equal(result.orders[0].id,'OD12345678901234567890');
+  assert.equal(Object.hasOwn(result,'session'),false);
+  assert.equal(parseFlipkartOrderPage({RESPONSE:{}}).error,'orders_payload_missing');
 });
 
 test('unknown totals stay unknown and invalid dates are rejected',()=>{

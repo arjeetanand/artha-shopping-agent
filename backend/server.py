@@ -64,7 +64,7 @@ _SOCIAL_CAPACITY = threading.BoundedSemaphore(2)
 _social_admission_lock = threading.Lock()
 _social_requests_by_client: dict[str, deque[float]] = {}
 _last_social_client_cleanup = 0.0
-_VOICE_REQUESTS_PER_MINUTE = 5
+_VOICE_REQUESTS_PER_MINUTE = 10
 _MAX_TRACKED_VOICE_CLIENTS = 4096
 _VOICE_CAPACITY = threading.BoundedSemaphore(2)
 _voice_admission_lock = threading.Lock()
@@ -527,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                     message = "Style analysis is busy; try again shortly." if admission_error == 503 else "Too many style analyses; try again later."
                     raise ApiError(message, admission_error)
                 social_request_admitted = True
-            body_limit = _MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_SOCIAL_BODY_BYTES if path == "/api/social/theme" else _MAX_BODY_BYTES
+            body_limit = 3_000_000 if path == "/api/voice/transcribe" else _MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_SOCIAL_BODY_BYTES if path == "/api/social/theme" else _MAX_BODY_BYTES
             payload = self._read_json(body_limit)
             if path in {"/api/agent/search/jobs", "/api/agent/search", "/api/agent/refine"}:
                 user = self._user()
@@ -662,6 +662,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/voice/warm":
                 self._send(200, VoiceService().warm())
                 return
+            if path == "/api/voice/transcribe":
+                voice = VoiceService()
+                if not voice.slng_api_key:
+                    raise VoiceError("SLNG_API_KEY is required for voice transcription.")
+                admission_error = _admit_paid_voice_request(self.client_address[0])
+                if admission_error:
+                    raise ApiError("Voice request limit reached; try again shortly.", admission_error)
+                voice_request_admitted = True
+                self._send(200, {"text": voice.transcribe(payload.get("audio"), payload.get("content_type")), "provider": "slng"})
+                return
             if path == "/api/voice/speak":
                 voice = VoiceService()
                 if voice.provider == "browser":
@@ -685,6 +695,8 @@ class Handler(BaseHTTPRequestHandler):
         except AuthError as error:
             self._send(error.status, {"error": str(error)})
         except VoiceError as error:
+            if path == "/api/voice/transcribe":
+                print(json.dumps({"event": "voice_transcription_failed", "format": str(payload.get("content_type", ""))[:60], "error_class": type(error.__cause__).__name__, "provider_status": getattr(error.__cause__, "code", None)}), flush=True)
             self._send(503, {"error": str(error)})
         except ApiError as error:
             self._send(error.status, {"error": str(error)})

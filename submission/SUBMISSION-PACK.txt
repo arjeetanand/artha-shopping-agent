@@ -1,0 +1,218 @@
+ARTHA — HACKATHON SUBMISSION PACK
+Prepared from the project README and source on 17 October 2026.
+
+Submission form: https://forms.gle/CKYCKRbkj6wejQ7t8
+Organizer's stated window: 3:30 PM–4:30 PM. Confirm the event date/timezone.
+Participant: Arjeet Anand
+Submission type: Solo
+Team name / team leader: Not applicable unless the form requires it.
+
+1. PROJECT NAME
+
+Artha — Your AI Shopping Research Agent
+
+2. ONE-LINE PITCH
+
+Turn a shopping brief into a source-linked purchase plan, with clear evidence,
+budget checks, and honest answers about what still needs verification.
+
+3. PROJECT DESCRIPTION — COPY THIS PARAGRAPH ONLY
+
+Artha is an AI shopping research assistant that turns a natural-language brief, reference image, or product link into a source-linked purchase plan. Instead of opening dozens of tabs, shoppers describe their budget, preferences, location, and delivery needs. Artha clarifies missing details, searches retailer sources, compares products, and ranks options against those constraints. Each recommendation keeps supporting links and highlights unknown prices, stock, variants, or delivery information rather than inventing certainty. A conversational interface supports typed and voice interactions, while signed-in users can save private purchase plans. Built with React, a Python backend, SQLite, and configurable AI, search, and speech providers, the prototype explores a more transparent way to shop. Real purchases happen on retailer websites; the local order flow is explicitly labeled as a sandbox. Its evidence gate separates checked recommendations from uncertain options, helping shoppers compare trade-offs and understand each result’s limits before choosing a retailer and proceeding further.
+
+4. PROBLEM / SOLUTION / DIFFERENTIATOR — OPTIONAL FORM ANSWERS
+
+Problem:
+Online shopping requires juggling retailer tabs, checking inconsistent product
+information, and manually comparing price, fit, and delivery against a budget.
+
+Solution:
+Artha captures the shopper's constraints, researches retailer sources, and creates
+an explainable shortlist with a purchase plan and links to supporting evidence.
+
+What makes it different:
+Artha exposes uncertainty. Missing or conflicting evidence stays visible, and
+recommendations distinguish a checked fit from an option requiring verification.
+It supports follow-up refinement without making shoppers repeat the whole brief.
+
+Technology:
+React + Vite frontend; Python backend; SQLite; Anakin retailer search; configurable
+Gemini or Ollama brief extraction; configurable speech output, including SLNG.
+Mention only the providers actually shown in your recording.
+
+Prototype limits:
+Retailer checkout happens outside Artha. Order tracking in the local prototype
+is a labeled sandbox. Delivery, stock, and final prices need retailer confirmation.
+
+5. GITHUB REPOSITORY
+
+Configured Git remote:
+https://github.com/arjeetanand/artha-shopping-agent
+
+Status: NOT VERIFIED PUBLIC. GitHub's unauthenticated repository API returned
+404 when checked. This can mean private, missing, or inaccessible. Do not claim
+the public-repository requirement is complete yet.
+
+Owner action:
+- Open the repository while signed into the correct GitHub account.
+- Confirm the intended code is pushed and the repository exists at this URL.
+- Before making it public, check tracked files for API keys, .env files, private
+  invoices, databases, and account/session data, including committed history.
+- If private, use repository Settings > General > Danger Zone > Change visibility.
+- Open the URL in a private/incognito window to confirm public access.
+- Paste the public repository URL into the form.
+
+6. VIDEO — 2 MINUTES 30 SECONDS
+
+READY: artha-demo.mp4 — recorded actual prototype, 150 seconds, synthetic
+voice-over and optional captions. Uses the app's labeled sample catalog.
+
+Title: Artha — From Shopping Brief to Evidence-Backed Shortlist
+
+Recording checklist:
+- Use the working local app; close unrelated windows and notifications.
+- Keep API keys, personal purchase history, and account details off screen.
+- Use one shopping scenario throughout, with legible text at normal zoom.
+- Clearly identify fixture/catalog results as demo data if fixture mode is used.
+- Show the real interface. Do not present sample results as live retailer checks.
+- Voice-over is optional. The script below can be read as narration.
+- Export an MP4 if possible and verify playback and a 2–3 minute duration.
+
+0:00–0:20 — INTRO / HOME SCREEN
+Action: Show the Artha home/discovery screen.
+Narration:
+"Meet Artha, an AI shopping research assistant. Shopping online often means
+opening many tabs and still being unsure which product fits your needs. Artha
+turns a shopping request into a transparent shortlist, with sources you can check."
+
+0:20–0:45 — ENTER A SHOPPING BRIEF
+Action: Type the brief below. Show the budget and delivery requirements.
+Brief:
+I need an office chair under ₹12,000 with good back support, delivered to
+Bengaluru within 5 days.
+Narration:
+"I start with a natural-language brief: an office chair under twelve thousand
+rupees, with good back support, delivered to Bengaluru within five days. Artha
+uses these details as constraints. When an important detail is missing, the
+workflow asks for clarification before continuing."
+
+0:45–1:15 — RUN RESEARCH / SHOW RESULTS
+Action: Submit the brief, show workflow progress, then inspect the shortlist.
+If the search takes too long, cut the wait in editing and label the transition.
+Narration:
+"The workflow extracts the brief, searches retailer sources, normalizes the
+evidence, and ranks the available options. Here I can compare the shortlist
+against my budget and delivery needs. Every option retains its source link,
+so the recommendation can be checked."
+Fixture-mode replacement:
+"This recording uses Artha's labeled demo catalog to make the flow repeatable.
+The app also supports live retailer research through Anakin. The sample catalog
+does not establish current retailer prices, stock, or delivery."
+
+1:15–1:45 — EXPLAINABILITY / EVIDENCE
+Action: Open a product's evidence/details panel and show source links and unknowns.
+Narration:
+"The important part is the evidence behind the ranking. Artha keeps missing
+or conflicting details visible rather than treating them as confirmed facts.
+If price, stock, variant, or delivery evidence is incomplete, the result needs
+verification. This helps the shopper understand both the recommendation and
+its limits."
+
+1:45–2:10 — FOLLOW-UP / PURCHASE PLAN
+Action: If available, ask a typed follow-up in Talk to Artha:
+Why did you rank this option first?
+Then show the purchase-plan summary. Only demonstrate saving if signed in.
+Narration:
+"I can ask a follow-up about the shortlist instead of starting again. The
+conversation helps explain the selected option and refine the shopping brief.
+Signed-in users can save private purchase plans and return to their research
+later. The interface also supports voice, depending on the configured provider."
+
+2:10–2:30 — ARCHITECTURE / CLOSE
+Action: Return to the shortlist or home screen. End on the project name.
+Narration:
+"Artha combines a React interface with a Python backend, SQLite, and configurable
+AI, search, and speech providers. Real purchases happen on the retailer's site;
+the local order flow is a labeled sandbox. My goal is simple: less searching,
+clearer trade-offs, and shopping decisions backed by visible evidence."
+
+Video-link action:
+- Upload the final recording to a host accepted by the form, such as YouTube
+  unlisted or a Google Drive file with viewer access for anyone with the link.
+- Test the exact link in a private/incognito window.
+- Use the file/video link, not a local path or an owner-only folder URL.
+
+7. LINKEDIN POST — READY TO REVIEW AND PUBLISH
+
+I built Artha, an AI shopping research assistant that turns a shopping brief
+into a source-linked purchase plan.
+
+The problem I wanted to solve: finding a product is easy; comparing budget,
+preferences, delivery, and incomplete retailer information takes far more work.
+
+With Artha, a shopper can describe what they need, inspect a ranked shortlist,
+check the supporting sources, and refine the request through conversation.
+Missing evidence stays visible, so uncertainty is part of the answer.
+
+Building the prototype taught me that useful AI needs more than a fluent reply:
+it needs clear constraints, inspectable evidence, and honest limits.
+
+Stack: React, Python, SQLite, and configurable AI, retailer-search, and speech
+providers. Real checkout remains on retailer websites.
+
+Watch the prototype demo attached to this post.
+
+GitHub: https://github.com/arjeetanand/artha-shopping-agent
+
+What would make you trust an AI shopping recommendation?
+
+#AI #Hackathon #BuildInPublic #ShoppingAssistant
+
+Before publishing:
+- Adjust the experience paragraph if it does not reflect your own experience.
+- Attach the final 2–3 minute video.
+- For a team, use "we built" and credit teammates accurately.
+- Do not add invented organizer tags, sponsors, awards, or performance claims.
+- Verify the repository is public first.
+- After posting, copy the POST permalink into the form, not your profile link.
+
+8. X POST — READY TO REVIEW AND PUBLISH
+
+Built Artha: an AI shopping assistant that turns your brief into a source-linked
+shortlist. Budget checks, visible unknowns, and clearer trade-offs.
+
+My biggest lesson: useful AI needs evidence, not just fluent answers.
+
+Demo below. #AI #Hackathon #BuildInPublic
+
+Attach the final video. Copy the published POST permalink into the form.
+For a team, replace "My biggest lesson" with "Our biggest lesson" if accurate.
+
+9. FILL THE FORM — FINAL CHECKLIST
+
+[x] Solo participant confirmed: Arjeet Anand.
+[ ] Name, email, phone, team name, and teammate details match registration.
+[ ] Project name entered: Artha — Your AI Shopping Research Agent.
+[ ] Project description pasted from section 3 only (100–150 words).
+[ ] Repository URL opens publicly without signing in.
+[ ] Video is 2–3 minutes and plays correctly.
+[ ] Video link opens for a reviewer without requesting permission.
+[ ] LinkedIn post is published with the project video and experience.
+[ ] LinkedIn field contains the post permalink.
+[ ] X post is published with the project video and experience.
+[ ] X field contains the post permalink.
+[ ] All required form fields are filled; review every section.
+[ ] Submit within the organizer's stated window.
+[ ] Wait for the form's success confirmation and save a screenshot/receipt.
+
+10. STILL NEEDED BEFORE THIS IS SUBMITTED
+
+VIDEO URL: [paste final accessible video URL]
+PUBLIC GITHUB URL: [confirm the configured URL above]
+LINKEDIN POST URL: [paste published post permalink]
+X POST URL: [paste published post permalink]
+SUBMITTER: Arjeet Anand (solo)
+EMAIL / PHONE / OTHER REGISTRATION FIELDS: [enter the actual registered details]
+
+This pack is preparation, not proof of submission. No public posts, repository
+visibility changes, uploads, or form submissions were performed to create it.

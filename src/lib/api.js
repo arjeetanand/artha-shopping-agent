@@ -127,6 +127,25 @@ export async function speakText(text) {
   return response.json();
 }
 
+export async function transcribeAudio(blob, signal) {
+  const audio = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(new Error('Could not read the microphone recording.'));
+    reader.readAsDataURL(blob);
+  });
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new Error('Transcription timed out. Please record again or type your request.')), 40_000);
+  try {
+    return await request('/voice/transcribe', {
+      method: 'POST', signal: AbortSignal.any([signal, deadline.signal].filter(Boolean)),
+      body: JSON.stringify({ audio, content_type: blob.type }),
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function getTasteProfile() {
   return request('/profile/taste');
 }

@@ -1,0 +1,28 @@
+{
+  "duration_seconds": 150.0,
+  "bytes": 7137293,
+  "streams": [
+    {
+      "codec_type": "video",
+      "codec_name": "h264",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "codec_type": "audio",
+      "codec_name": "aac",
+      "width": null,
+      "height": null
+    },
+    {
+      "codec_type": "subtitle",
+      "codec_name": "mov_text",
+      "width": null,
+      "height": null
+    }
+  ],
+  "catalog": "labeled demo fixtures",
+  "narration": "synthetic macOS Samantha",
+  "visual_review": "Representative intro, shortlist, evidence, and copilot frames inspected.",
+  "audio_review": "Non-silent track verified; mean -16.3 dB, peak -1.4 dB."
+}

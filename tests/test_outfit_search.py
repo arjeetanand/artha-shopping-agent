@@ -15,6 +15,25 @@ TEXT = "half pant cream / white and white shirt for beach"
 
 
 class OutfitSearchTests(unittest.TestCase):
+    def test_voice_outfit_answers_one_question_at_a_time(self):
+        with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "fixture"}):
+            brief = BriefAgent().run({"text": "so i wanted to buy a white shirt and a white pant"})[0]
+        for key, answer in [
+            ("budget", "two thousand"), ("location", "Bengaluru"),
+            ("delivery", "five days"), ("wearer", "men"),
+            ("budget_scope", "whole outfit"), ("shirt_size", "medium"),
+            ("pants_size", "32"), ("pincode", "560001"),
+        ]:
+            with self.subTest(key=key):
+                self.assertEqual(brief["clarifications"][0]["key"], key)
+                brief = _merge_refinement_intent(brief, answer)
+                self.assertNotIn(key, [q["key"] for q in brief["clarifications"]])
+        self.assertEqual(brief["clarifications"], [])
+        self.assertEqual(brief["budget"], 2000)
+        self.assertEqual(brief["budget_scope"], "outfit")
+        self.assertEqual({item["key"]: item["size"] for item in brief["items"]}, {"shirt": "medium", "pants": "32"})
+        self.assertEqual([item["color_options"] for item in brief["items"]], [["white"], ["white"]])
+
     def brief(self, budget="under2k"):
         with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "fixture"}):
             return BriefAgent().run({"text": TEXT, "mission": {"budget": budget, "pincode": "560001"}})[0]

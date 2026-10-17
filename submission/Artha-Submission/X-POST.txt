@@ -1,0 +1,6 @@
+Built Artha: an AI shopping assistant that turns your brief into a source-linked
+shortlist. Budget checks, visible unknowns, and clearer trade-offs.
+
+My biggest lesson: useful AI needs evidence, not just fluent answers.
+
+Demo below. #AI #Hackathon #BuildInPublic

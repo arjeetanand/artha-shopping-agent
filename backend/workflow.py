@@ -2040,6 +2040,7 @@ def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, A
     if (
         not location_match
         and "location" in clarification_keys
+        and explicit_budget is None
         and not parsed_color
         and not parsed_size
         and not parsed_pincode
@@ -2089,6 +2090,13 @@ def _merge_refinement_intent(previous: dict[str, Any], text: str) -> dict[str, A
         brief.setdefault("clarifications", []).append({"key": "pincode", "question": "What delivery pincode should I use to verify the delivery promise?"})
     arrival_date = (_india_today() + timedelta(days=brief["arrive_by_days"])).isoformat() if parsed_follow_up_days is not None else None
     if brief.get("items"):
+        # A short spoken size answers the first question asked, not every outfit piece.
+        pending_key = next(iter(previous.get("clarifications") or []), {}).get("key", "")
+        size_answer = re.fullmatch(r"\s*(?:(?:size|waist)\s*(?:is\s*)?)?(xxxl|xxl|xl|xs|small|medium|large|s|m|l|\d{2})[.!]?\s*", follow_up, flags=re.IGNORECASE)
+        if pending_key.endswith("_size") and size_answer:
+            for item in brief["items"]:
+                if f"{item['key']}_size" == pending_key:
+                    item["size"] = size_answer.group(1).lower()
         _outfit_details(brief, follow_up)
         brief["clarifications"] = _clarification_questions(
             brief["raw_text"], brief, budget_explicit=brief.get("budget") is not None,

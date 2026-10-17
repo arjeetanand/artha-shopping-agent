@@ -1,0 +1,17 @@
+Scene 1 (20 seconds)
+Meet Artha, a shopping research assistant that turns a brief into a source-linked purchase plan. Online shopping often means opening many tabs and still being unsure what fits. Artha brings the constraints, recommendations, and supporting evidence into one place.
+
+Scene 2 (25 seconds)
+Here is our shopping brief: an office chair under twelve thousand rupees, with good back support, delivered to Bengaluru within five days. The shopper can also provide a reference image or product link. Budget, location, and delivery needs guide the research instead of getting lost in a generic list of products.
+
+Scene 3 (30 seconds)
+This recording uses Artha's labeled demo catalog, with sample products rather than live retailer prices. The application also supports live search through Anakin. The completed workflow shows a mission decision and a shortlist. We can see which option fits the budget, which misses the delivery window, and which costs more. The purchase plan keeps the selected item and budget headroom visible.
+
+Scene 4 (30 seconds)
+The evidence panel explains what is known and what still needs checking. Artha separates available evidence from missing information instead of inventing certainty. In this example, the decision says verify before buying. Missing retailer confirmation stays visible. The prototype also distinguishes demo price information from directly checked retailer offers, so sample data is not mistaken for current market evidence.
+
+Scene 5 (25 seconds)
+The conversational panel lets a shopper ask why an option ranked first. The answer explains the existing shortlist without asking the shopper to repeat the whole brief. The interface supports typed questions and optional voice interaction. Signed-in users can save private purchase plans and return to their research later.
+
+Scene 6 (20 seconds)
+Artha combines React, a Python backend, SQLite, and configurable AI, search, and speech providers. Real purchases happen on retailer websites; local orders are a labeled sandbox. The goal is less searching, clearer trade-offs, and shopping decisions supported by visible evidence.

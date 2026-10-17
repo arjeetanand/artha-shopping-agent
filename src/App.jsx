@@ -3,6 +3,7 @@ import { Icon } from './components/Icon';
 import { TalkDrawer } from './components/TalkDrawer';
 import { SocialThemeBar } from './components/SocialThemeBar';
 import { registerWebMCPCommerceTools } from './lib/webmcp';
+import { getSpeechRecognition, requestMicrophone, speechErrorMessage, stopMicrophone } from './lib/speechRecognition';
 import { Card3D } from './components/Card3D';
 import { BagsPurchaseTracker, BagFolderCard, BagDetailModal, DEMO_BAGS } from './components/BagsPurchaseTracker';
 import { TasteGraphView } from './components/TasteGraphView';
@@ -398,55 +399,123 @@ function SourceMark({ product }) {
   );
 }
 
-function VoiceInputButton({ onTranscript, onInterim, onError }) {
+function VoiceInputButton({ value = '', voice, onTranscript, onInterim, onError }) {
   const [isListening, setIsListening] = useState(false);
+  const [isRequesting, setIsRequesting] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const recognitionRef = useRef(null);
+  const microphoneRef = useRef(null);
+  const requestVersionRef = useRef(0);
 
-  const begin = useCallback(() => {
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Recognition) {
-      onError('Voice input is not supported in this browser. You can still type your brief.');
-      return;
-    }
+  const begin = useCallback(async () => {
     if (isListening) {
       recognitionRef.current?.stop();
       return;
     }
+    if (isRequesting) {
+      requestVersionRef.current += 1;
+      const recognition = recognitionRef.current;
+      recognitionRef.current = null;
+      try { recognition?.abort(); } catch { /* The permission prompt may still be pending. */ }
+      stopMicrophone(microphoneRef.current);
+      microphoneRef.current = null;
+      setIsRequesting(false);
+      setIsTranscribing(false);
+      return;
+    }
+    const Recognition = getSpeechRecognition(voice);
+    if (!Recognition) {
+      onError('Voice input is not supported in this browser. You can still type your brief.');
+      return;
+    }
     const recognition = new Recognition();
+    const requestVersion = ++requestVersionRef.current;
+    const baseQuery = String(value || '').trim();
+    let finalTranscript = '';
     recognition.lang = 'en-IN';
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => onError('I could not hear that clearly. Please try again or type your brief.');
+    recognition.onstart = () => {
+      if (recognitionRef.current !== recognition) return;
+      setIsRequesting(false);
+      setIsListening(true);
+    };
+    recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return;
+      recognitionRef.current = null;
+      stopMicrophone(microphoneRef.current);
+      microphoneRef.current = null;
+      setIsRequesting(false);
+      setIsTranscribing(false);
+      setIsListening(false);
+    };
+    recognition.onprocessing = () => {
+      if (recognitionRef.current !== recognition) return;
+      stopMicrophone(microphoneRef.current);
+      setIsListening(false);
+      setIsRequesting(true);
+      setIsTranscribing(true);
+    };
+    recognition.onerror = (event) => {
+      if (recognitionRef.current !== recognition || event.error === 'aborted') return;
+      stopMicrophone(microphoneRef.current);
+      microphoneRef.current = null;
+      setIsRequesting(false);
+      setIsTranscribing(false);
+      setIsListening(false);
+      onError(speechErrorMessage(event));
+    };
     recognition.onresult = (event) => {
-      let finalTranscript = '';
       let interimTranscript = '';
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
+          finalTranscript = `${finalTranscript} ${event.results[i][0].transcript}`.trim();
         } else {
           interimTranscript += event.results[i][0].transcript;
         }
       }
       if (interimTranscript && onInterim) {
-        onInterim(interimTranscript);
+        onInterim([baseQuery, finalTranscript, interimTranscript].filter(Boolean).join(' '));
       }
-      if (finalTranscript) {
-        onTranscript(finalTranscript);
-      }
+      if (finalTranscript) onTranscript(finalTranscript, baseQuery);
     };
     recognitionRef.current = recognition;
-    recognition.start();
-  }, [isListening, onError, onInterim, onTranscript]);
+    setIsRequesting(true);
+    try {
+      const stream = await requestMicrophone();
+      if (requestVersion !== requestVersionRef.current || recognitionRef.current !== recognition) {
+        stopMicrophone(stream);
+        return;
+      }
+      microphoneRef.current = stream;
+      await recognition.start(stream.getAudioTracks()[0]);
+    } catch (error) {
+      if (recognitionRef.current !== recognition) return;
+      recognitionRef.current = null;
+      recognition.abort?.();
+      stopMicrophone(microphoneRef.current);
+      microphoneRef.current = null;
+      setIsRequesting(false);
+      setIsListening(false);
+      onError(speechErrorMessage(error));
+    }
+  }, [isListening, isRequesting, onError, onInterim, onTranscript, value, voice]);
+
+  useEffect(() => () => {
+    requestVersionRef.current += 1;
+    try { recognitionRef.current?.abort(); } catch { /* The speech service may already be stopped. */ }
+    recognitionRef.current = null;
+    stopMicrophone(microphoneRef.current);
+    microphoneRef.current = null;
+  }, []);
 
   return (
     <button
       type="button"
-      className={`secondary-control ${isListening ? 'is-selected voice-listening-pulse' : ''}`}
+      className={`secondary-control ${isListening || isRequesting ? 'is-selected voice-listening-pulse' : ''}`}
       onClick={begin}
-      aria-pressed={isListening}
-      title={isListening ? 'Stop listening' : 'Speak brief with your voice'}
+      aria-pressed={isListening || isRequesting}
+      title={isListening ? 'Stop listening' : isRequesting ? 'Cancel microphone access' : 'Speak brief with your voice'}
     >
       {isListening ? (
         <span className="voice-wave" aria-hidden="true">
@@ -455,7 +524,7 @@ function VoiceInputButton({ onTranscript, onInterim, onError }) {
       ) : (
         <Icon name="mic" size={17} />
       )}
-      <span>{isListening ? 'Listening…' : 'Speak brief'}</span>
+      <span>{isTranscribing ? 'Transcribing…' : isListening ? 'Listening…' : isRequesting ? 'Requesting microphone…' : 'Speak brief'}</span>
     </button>
   );
 }
@@ -510,6 +579,7 @@ function ReferenceChip({ reference, onRemove }) {
 
 function Composer({
   query,
+  voice,
   setQuery,
   mission,
   onMissionChange,
@@ -610,13 +680,13 @@ function Composer({
               <span>Paste URL</span>
             </button>
             <VoiceInputButton
-              onTranscript={(transcript) => {
-                setQuery((prev) => (prev ? `${prev} ${transcript}` : transcript));
+              voice={voice}
+              value={query}
+              onTranscript={(transcript, baseQuery) => {
+                setQuery([baseQuery, transcript].filter(Boolean).join(' '));
                 onToast('Voice brief recorded.');
               }}
-              onInterim={(interim) => {
-                setQuery(interim);
-              }}
+              onInterim={setQuery}
               onError={onToast}
             />
             <button type="button" className="secondary-control talk-control" onClick={onOpenTalk}>
@@ -1706,6 +1776,7 @@ function DiscoverView({
         </div>
 
         <Composer
+          voice={voice}
           query={query}
           setQuery={setQuery}
           mission={mission}
@@ -3051,7 +3122,7 @@ export default function App() {
         setFocusedId(fastest.id);
         return `${sanitizeTitle(fastest.name)} has the quickest stated delivery among checked results: ${fastest.delivery_label || `${fastest.delivery_days} days`}. Verify the promise for your pincode at the retailer.`;
       }
-      if (/\b(buy|order|checkout|purchase)\b/i.test(spoken) && !question && !/\b(why|before|history|where|how|can|could|track|cancel|refund|return)\b/i.test(spoken)) {
+      if (/^(?:please\s+)?(?:(?:buy|order|purchase)\s+(?:it|(?:this|that)(?:\s+(?:item|one))?|(?:the\s+)?(?:recommended|selected)\s+item)|(?:proceed\s+to\s+)?check\s*out|place\s+(?:(?:the|this)\s+)?order)(?:\s+please)?[.!]?$/i.test(spoken)) {
         if (!products.length) {
           return 'There are no researched products in your shortlist to checkout yet. Describe what you are looking for first.';
         }
@@ -3099,7 +3170,7 @@ export default function App() {
       if (body?.status === 'needs_clarification') {
         const questions = body.intent?.clarifications || body.clarifications || [];
         return questions.length
-          ? `I need a little more detail first: ${questions.map((question) => question.question).join(' ')}`
+          ? questions[0].question
           : 'I need a little more detail before searching.';
       }
       const nextDecision = body?.intent?.decision;
@@ -3108,18 +3179,22 @@ export default function App() {
       if (nextDecision?.status === 'verify_before_buy') return `${sanitizeTitle(pick?.name)} is the current recommendation. Before buying, verify: ${(nextDecision.blocking_risks || []).join(', ')}.`;
       if (nextDecision?.status === 'buy_now') {
         const seller = pick?.seller ? ` from ${pick.seller}` : '';
+        const selection = body.products.filter((product) => body.selected_product_ids?.includes(product.id));
+        if (body.intent?.items?.length && selection.length > 1) {
+          return `I've shortlisted ${selection.map((product) => sanitizeTitle(product.name)).join(' and ')} for ${formatPrice(body.summary?.total)} together. The product links are below. Confirm sizes, stock, and delivery at the retailer.`;
+        }
         const deadline = body?.intent?.arrive_by ? ` Requested arrival: ${body.intent.arrive_by}.` : '';
         const themeMention = detectedTheme?.theme ? ` Matches your ${detectedTheme.theme} style.` : '';
-        return `${sanitizeTitle(pick?.name)} now clears the mission${seller}.${deadline}${themeMention} The retailer handoff is ready below.`;
+        return `${sanitizeTitle(pick?.name)} now clears the mission${seller} at ${formatPrice(pick?.total_price ?? pick?.price)}.${deadline}${themeMention} The retailer link is below.`;
       }
       if (pick) {
         const seller = pick.seller || 'retailer';
         const price = formatPrice(pick.price);
         const deadline = body?.intent?.arrive_by ? ` Requested arrival: ${body.intent.arrive_by}.` : '';
         const themeMention = detectedTheme?.theme ? ` Matches the ${detectedTheme.theme} style.` : '';
-        return `Found ${body?.products?.length || 0} options across Flipkart, Amazon, Myntra, and Ajio. Top match: ${sanitizeTitle(pick.name)} for ${price} from ${seller}.${deadline}${themeMention}`;
+        return `Found ${body?.products?.length || 0} options. Top match: ${sanitizeTitle(pick.name)} for ${price} from ${seller}.${deadline}${themeMention} Check the product links below.`;
       }
-      return 'I updated the mission using the completed research.';
+      return 'I could not confirm a purchasable product for that brief. Try a different budget, size, or product description.';
     },
     [handleAnalyzeUrl, handleSearchWithPayload, postUrl, reference, result, socialTheme, user],
   );
@@ -3580,6 +3655,8 @@ export default function App() {
         }}
         onToast={setToast}
         workflow={result.workflow}
+        products={result.products}
+        selectedProductIds={result.selected_product_ids}
         voice={voice}
       />
       <Toast message={toast} />

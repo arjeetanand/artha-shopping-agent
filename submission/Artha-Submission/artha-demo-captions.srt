@@ -1,0 +1,23 @@
+1
+00:00:00,000 --> 00:00:20,000
+Artha: from a shopping brief to a source-linked purchase plan.
+
+2
+00:00:20,000 --> 00:00:45,000
+Set the budget, must-have features, location, and delivery deadline.
+
+3
+00:00:45,000 --> 00:01:15,000
+Labeled demo catalog: compare sample products against the mission.
+
+4
+00:01:15,000 --> 00:01:45,000
+Inspect evidence and unknowns. Verify final details with the retailer.
+
+5
+00:01:45,000 --> 00:02:10,000
+Ask why an option ranked first. Review the purchase-plan summary.
+
+6
+00:02:10,000 --> 00:02:30,000
+React + Python + SQLite. Real checkout happens on retailer websites.
