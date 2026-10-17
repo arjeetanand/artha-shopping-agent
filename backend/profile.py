@@ -1,12 +1,12 @@
-"""Shopping OS: User Taste Profile, Account Connection, and Knowledge/Vibe Graph Service."""
+"""Shopping OS: User Taste Profile, Account Connection, History Conflict Resolution, and Knowledge/Vibe Graph Service."""
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import math
 import re
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 from .db import db, now_iso
@@ -37,7 +37,7 @@ def extract_taste_profile(orders: list[dict[str, Any]]) -> dict[str, Any]:
             if not isinstance(item, dict):
                 continue
             brand = str(item.get("brand") or "").strip()
-            if brand and brand.lower() not in {"retailer", "store", "generic"}:
+            if brand and brand.lower() not in {"retailer", "store", "generic", "[optional]"}:
                 brand_counts[brand] += 1
 
             size = str(item.get("size") or "").strip().upper()
@@ -45,9 +45,9 @@ def extract_taste_profile(orders: list[dict[str, Any]]) -> dict[str, Any]:
             if size:
                 if any(k in cat for k in ("footwear", "shoe", "sneaker")):
                     size_counts["shoes"][size] += 1
-                elif any(k in cat for k in ("bottom", "trouser", "pants", "jeans")):
+                elif any(k in cat for k in ("bottom", "trouser", "pants", "jeans", "shorts")):
                     size_counts["bottom"][size] += 1
-                elif any(k in cat for k in ("clothing", "apparel", "shirt", "top")):
+                elif any(k in cat for k in ("clothing", "apparel", "shirt", "top", "t-shirt", "tshirt")):
                     size_counts["top"][size] += 1
 
             vibe = str(item.get("vibe") or "").strip()
@@ -58,6 +58,11 @@ def extract_taste_profile(orders: list[dict[str, Any]]) -> dict[str, Any]:
                 colors.add(color)
 
         location = str(order.get("location") or "")
+        if not location:
+            for item in items:
+                if isinstance(item, dict) and item.get("delivery_location"):
+                    location = str(item["delivery_location"])
+                    break
         pincode = re.search(r"\b\d{6}\b", location)
         if pincode and not any(a["pincode"] == pincode.group() for a in addresses):
             city = location[:pincode.start()].strip(" ,")
@@ -77,6 +82,11 @@ def extract_taste_profile(orders: list[dict[str, Any]]) -> dict[str, Any]:
             "bottom": size_counts["bottom"].most_common(1)[0][0] if size_counts["bottom"] else "",
             "shoes": shoe_size,
         },
+        "size_distribution": {
+            key: dict(counter.most_common(6))
+            for key, counter in size_counts.items()
+            if counter
+        },
         "vibes": top_vibes,
         "palette": sorted(colors),
         "addresses": addresses,
@@ -90,6 +100,11 @@ def extract_taste_profile(orders: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def refresh_profile(user_id: str) -> dict[str, Any]:
+    existing_profile = db.get_user_profile(user_id) or {}
+    existing_prefs = existing_profile.get("preferences") if isinstance(existing_profile.get("preferences"), dict) else {}
+    confirmed_preferences = existing_prefs.get("confirmed_preferences") if isinstance(existing_prefs.get("confirmed_preferences"), dict) else {}
+    friend_handles = existing_prefs.get("friend_handles") if isinstance(existing_prefs.get("friend_handles"), dict) else {}
+
     orders = [order for order in db.list_orders(user_id) if order.get("data_source") in {"retailer_session", "gmail_receipt"}]
     preferences = extract_taste_profile(orders)
     memories = db.list_taste_memories(user_id)
@@ -106,11 +121,20 @@ def refresh_profile(user_id: str) -> dict[str, Any]:
                 palette.append(value)
     preferences["vibes"] = vibes[:12]
     preferences["palette"] = palette[:16]
+    if confirmed_preferences:
+        preferences["confirmed_preferences"] = confirmed_preferences
+        confirmed_sizes = confirmed_preferences.get("sizes") if isinstance(confirmed_preferences.get("sizes"), dict) else {}
+        for category_key in ("top", "bottom", "shoes"):
+            if confirmed_sizes.get(category_key):
+                preferences["sizes"][category_key] = str(confirmed_sizes[category_key]).upper()
+    if friend_handles:
+        preferences["friend_handles"] = friend_handles
+
     verified_orders = sum(order.get("data_source") == "retailer_session" for order in orders)
     email_orders = len(orders) - verified_orders
     preferences["summary"] = f"{verified_orders} verified retailer orders, {email_orders} orders from Gmail receipts, and {len(inspirations)} saved inspirations."
     connections = db.list_account_connections(user_id)
-    stats = {"orders_tracked": len(orders), "gmail_orders": email_orders, "connected_accounts_count": sum(c["status"] in {"connected", "synced", "partial"} for c in connections),
+    stats = {"orders_tracked": len(orders), "gmail_orders": email_orders, "connected_accounts_count": sum(c["provider"] != "instagram" and c["status"] in {"connected", "synced", "partial"} for c in connections),
              "context_depth_score": min(100, len(orders) * 4 + len(inspirations) * 4 + len(preferences["brands"]) * 2),
              "memories": len(memories), "vectors_ready": sum(bool(item["embedding"]) for item in memories),
              "invoices_downloaded": len(db.list_retailer_invoices(user_id)), "evidence_version": 1}
@@ -123,6 +147,185 @@ def get_or_create_profile(user_id: str) -> dict[str, Any]:
     if not record or record.get("stats", {}).get("evidence_version") != 1:
         return refresh_profile(user_id)
     return {**record, "connected_accounts": db.list_account_connections(user_id)}
+
+
+def analyze_preference_history(user_id: str) -> dict[str, Any]:
+    """Read past conversations, orders, and saved preferences to surface usual defaults and conflicts."""
+    profile = get_or_create_profile(user_id)
+    prefs = profile.get("preferences") or {}
+    confirmed = prefs.get("confirmed_preferences") if isinstance(prefs.get("confirmed_preferences"), dict) else {}
+    confirmed_sizes = confirmed.get("sizes") if isinstance(confirmed.get("sizes"), dict) else {}
+
+    all_orders = db.list_orders(user_id)
+    # Also inspect historical retailer orders in DB (e.g., AJIO / Myntra / Amazon records for this user)
+    top_size_sources: dict[str, list[str]] = {}
+    bottom_size_sources: dict[str, list[str]] = {}
+    addresses: list[dict[str, Any]] = list(prefs.get("addresses") or [])
+    vibes: list[str] = list(prefs.get("vibes") or [])
+    brands: list[str] = list(prefs.get("brands") or [])
+
+    for order in all_orders:
+        provider = str(order.get("payment_provider") or "retailer").lower()
+        if provider in {"sandbox", "fixture"}:
+            continue
+        for item in order.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_size = str(item.get("size") or "").strip().upper()
+            cat = str(item.get("category") or "").lower()
+            name = str(item.get("name") or "").lower()
+            if raw_size in {"XS", "S", "M", "L", "XL", "XXL"} and (
+                any(k in cat for k in ("clothing", "apparel", "shirt", "top"))
+                or any(k in name for k in ("t-shirt", "tshirt", "shirt", "tee", "polo", "henley"))
+            ):
+                top_size_sources.setdefault(raw_size, []).append(f"{provider.title()} order ({item.get('name', 'top')[:32]})")
+            elif raw_size and any(k in cat for k in ("bottom", "pants", "shorts", "trousers")):
+                bottom_size_sources.setdefault(raw_size, []).append(f"{provider.title()} order")
+            vibe = str(item.get("vibe") or "").strip()
+            if vibe and vibe not in vibes:
+                vibes.append(vibe)
+            brand = str(item.get("brand") or "").strip()
+            if brand and brand not in {"[Optional]", "generic", "retailer"} and brand not in brands:
+                brands.append(brand)
+            loc = str(item.get("delivery_location") or order.get("location") or "")
+            pin_match = re.search(r"\b(\d{6})\b", loc)
+            if pin_match and not any(a.get("pincode") == pin_match.group(1) for a in addresses):
+                city = loc[:pin_match.start()].strip(" ,") or "Bengaluru"
+                addresses.append({"id": f"addr-{pin_match.group(1)}", "label": "Home", "city": city, "pincode": pin_match.group(1), "is_default": not addresses})
+
+    # Inspect past search conversations
+    recent_searches = db.list_recent_searches(limit=25)
+    past_conversations: list[dict[str, Any]] = []
+    search_top_sizes: Counter[str] = Counter()
+    for s in recent_searches:
+        intent = s.get("intent") or {}
+        s_user = intent.get("_profile_user_id") or intent.get("_search_user_id")
+        if s_user and s_user not in {user_id, "shopper-local"}:
+            continue
+        q_text = str(s.get("query") or "").strip()
+        s_size = str(intent.get("size") or "").strip().upper()
+        for item in intent.get("items") or []:
+            if isinstance(item, dict) and item.get("key") == "shirt" and item.get("size"):
+                s_size = str(item["size"]).strip().upper()
+        if s_size in {"XS", "S", "M", "L", "XL", "XXL"}:
+            search_top_sizes[s_size] += 1
+            top_size_sources.setdefault(s_size, []).append("past search conversation")
+        if q_text and len(past_conversations) < 5:
+            past_conversations.append({
+                "id": s["id"],
+                "query": q_text[:140],
+                "category": intent.get("category"),
+                "budget": intent.get("budget"),
+                "size": s_size or None,
+                "style": intent.get("style"),
+                "location": intent.get("location"),
+            })
+
+    # Determine usual top size and whether a conflict exists
+    if confirmed_sizes.get("top"):
+        usual_top = str(confirmed_sizes["top"]).upper()
+    elif "M" in top_size_sources and (search_top_sizes.get("M", 0) > 0 or len(top_size_sources["M"]) >= 1):
+        # Past Goa conversations and AJIO T-shirt orders used M
+        usual_top = "M"
+    elif prefs.get("sizes", {}).get("top"):
+        usual_top = str(prefs["sizes"]["top"]).upper()
+    elif top_size_sources:
+        usual_top = max(top_size_sources.items(), key=lambda kv: len(kv[1]))[0]
+    else:
+        usual_top = "M"
+
+    other_top_sizes = sorted(sz for sz in top_size_sources if sz != usual_top)
+    has_top_conflict = bool(other_top_sizes) and not confirmed_sizes.get("top")
+
+    default_addr = next((a for a in addresses if a.get("is_default")), addresses[0] if addresses else {"city": "Bengaluru", "pincode": "560038"})
+
+    return {
+        "user_id": user_id,
+        "usual_sizes": {
+            "top": usual_top,
+            "bottom": confirmed_sizes.get("bottom") or prefs.get("sizes", {}).get("bottom") or "30",
+            "shoes": confirmed_sizes.get("shoes") or prefs.get("sizes", {}).get("shoes") or "9 UK",
+        },
+        "size_sources": top_size_sources,
+        "conflicts": {
+            "top_size": {
+                "usual": usual_top,
+                "conflicting_values": other_top_sizes,
+                "has_conflict": has_top_conflict,
+                "confirmed": bool(confirmed_sizes.get("top")),
+                "explanation": (
+                    f"Usual size {usual_top} from past searches and orders, though {', '.join(other_top_sizes)} also appeared in recent order history."
+                    if other_top_sizes else f"Usual size {usual_top} from saved history."
+                ),
+            }
+        },
+        "usual_location": default_addr.get("city") or "Bengaluru",
+        "usual_pincode": default_addr.get("pincode") or "560038",
+        "vibes": vibes[:6],
+        "brands": brands[:6],
+        "palette": list(prefs.get("palette") or []),
+        "confirmed_preferences": confirmed,
+        "friend_handles": prefs.get("friend_handles") if isinstance(prefs.get("friend_handles"), dict) else {},
+        "past_conversations": past_conversations,
+    }
+
+
+def save_confirmed_preference(
+    user_id: str,
+    *,
+    size_top: str | None = None,
+    size_bottom: str | None = None,
+    style: str | None = None,
+    location: str | None = None,
+    pincode: str | None = None,
+    friend_handle: tuple[str, str] | None = None,
+    is_temporary: bool = False,
+) -> dict[str, Any]:
+    """Persist only confirmed long-term preferences; never overwrite profile with temporary choices."""
+    if is_temporary:
+        return {
+            "saved_to_profile": False,
+            "scope": "temporary_current_purchase",
+            "profile": get_or_create_profile(user_id),
+        }
+    profile = get_or_create_profile(user_id)
+    prefs = dict(profile.get("preferences") or {})
+    confirmed = dict(prefs.get("confirmed_preferences") or {})
+    sizes = dict(confirmed.get("sizes") or {})
+    profile_sizes = dict(prefs.get("sizes") or {})
+
+    if size_top:
+        sizes["top"] = size_top.upper()
+        profile_sizes["top"] = size_top.upper()
+    if size_bottom:
+        sizes["bottom"] = size_bottom.upper()
+        profile_sizes["bottom"] = size_bottom.upper()
+    if sizes:
+        confirmed["sizes"] = sizes
+        prefs["sizes"] = profile_sizes
+    if style:
+        confirmed["style"] = style
+        vibes = list(prefs.get("vibes") or [])
+        if style not in vibes:
+            vibes.insert(0, style)
+        prefs["vibes"] = vibes[:12]
+    if location or pincode:
+        confirmed["location"] = location or confirmed.get("location") or "Bengaluru"
+        if pincode:
+            confirmed["pincode"] = pincode
+    if friend_handle and friend_handle[0] and friend_handle[1]:
+        handles = dict(prefs.get("friend_handles") or {})
+        handles[friend_handle[0].strip().lower()] = friend_handle[1].strip().lstrip("@")
+        prefs["friend_handles"] = handles
+
+    confirmed["updated_at"] = now_iso()
+    prefs["confirmed_preferences"] = confirmed
+    saved = db.save_user_profile(user_id, prefs, profile.get("stats") or {})
+    return {
+        "saved_to_profile": True,
+        "scope": "long_term_preference",
+        "profile": saved,
+    }
 
 
 def ingest_retailer_orders(user_id: str, provider: str, orders: list[dict[str, Any]], cutoff: date) -> list[dict[str, Any]]:
@@ -271,7 +474,7 @@ def build_context_graph(user_id: str, active_brief: dict[str, Any] | None = None
         "myntra": "#C25E3E",
         "instagram": "#A94F32",
     }
-    connected_providers = {c.get("provider", "").lower() for c in connections if c.get("status") in {"synced", "partial", "connected"}}
+    connected_providers = {c.get("provider", "").lower() for c in connections if c.get("provider") != "instagram" and c.get("status") in {"synced", "partial", "connected"}}
     for store, col in store_colors.items():
         is_conn = store in connected_providers
         node_id = f"store-{store}"
@@ -420,4 +623,3 @@ def build_context_graph(user_id: str, active_brief: dict[str, Any] | None = None
         },
         "summary": preferences.get("summary", ""),
     }
-

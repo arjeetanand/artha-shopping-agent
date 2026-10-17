@@ -238,6 +238,32 @@ class Database:
                     created_at TEXT NOT NULL,
                     UNIQUE(user_id, provider, retailer_order_id, sha256)
                 );
+
+                CREATE TABLE IF NOT EXISTS instagram_references (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    friend_name TEXT NOT NULL DEFAULT '',
+                    handle TEXT NOT NULL DEFAULT '',
+                    post_url TEXT NOT NULL,
+                    shortcode TEXT NOT NULL DEFAULT '',
+                    caption TEXT NOT NULL DEFAULT '',
+                    screenshot_path TEXT NOT NULL DEFAULT '',
+                    captured_at TEXT NOT NULL,
+                    attributes_json TEXT NOT NULL DEFAULT '{}',
+                    confirmed INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(user_id, post_url)
+                );
+                CREATE INDEX IF NOT EXISTS instagram_references_user_index ON instagram_references(user_id, captured_at DESC);
+
+                CREATE TABLE IF NOT EXISTS conversation_sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    state_json TEXT NOT NULL DEFAULT '{}',
+                    messages_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS conversation_sessions_user_index ON conversation_sessions(user_id, updated_at DESC);
                 """
             )
             connection_columns = {row[1] for row in connection.execute("PRAGMA table_info(account_connections)").fetchall()}
@@ -556,6 +582,11 @@ class Database:
                 "INSERT INTO oauth_states (state, code_verifier, next_path, purpose, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (state, code_verifier, next_path, purpose, user_id, future_iso(minutes=10), now_iso()),
             )
+
+    def oauth_state_purpose(self, state: str) -> str:
+        with self._connect() as connection:
+            row = connection.execute("SELECT purpose FROM oauth_states WHERE state = ? AND expires_at > ?", (state, now_iso())).fetchone()
+        return str(row["purpose"] or "") if row else ""
 
     def consume_oauth_state(self, state: str) -> dict[str, Any] | None:
         with self._connect() as connection:
@@ -974,7 +1005,8 @@ class Database:
         invoice_id = "inv-" + hashlib.sha256(f"{user_id}:{provider}:{retailer_order_id}:{sha256}".encode()).hexdigest()[:32]
         with self._connect() as connection:
             connection.execute(
-                "INSERT OR IGNORE INTO retailer_invoices VALUES (?,?,?,?,?,?,?,?)",
+                """INSERT INTO retailer_invoices VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(user_id,provider,retailer_order_id,sha256) DO UPDATE SET extracted_text=excluded.extracted_text""",
                 (invoice_id,user_id,provider,retailer_order_id,relative_path,sha256,extracted_text[:200000],now_iso()),
             )
         return {"id": invoice_id, "provider": provider, "retailer_order_id": retailer_order_id}
@@ -987,6 +1019,157 @@ class Database:
     def get_retailer_invoice(self, user_id: str, invoice_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM retailer_invoices WHERE user_id=? AND id=?", (user_id,invoice_id)).fetchone()
+        return dict(row) if row else None
+
+    def list_recent_searches(self, limit: int = 20) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 100))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, query, intent_json, created_at FROM searches ORDER BY created_at DESC LIMIT ?",
+                (safe_limit,),
+            ).fetchall()
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                intent = json.loads(row["intent_json"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(intent, dict):
+                results.append({"id": row["id"], "query": row["query"], "intent": intent, "created_at": row["created_at"]})
+        return results
+
+    def save_instagram_reference(self, record: dict[str, Any]) -> dict[str, Any]:
+        ref_id = str(record.get("id") or ("igref-" + hashlib.sha256(f"{record['user_id']}:{record['post_url']}".encode()).hexdigest()[:24]))
+        captured_at = str(record.get("captured_at") or now_iso())
+        attrs = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO instagram_references (
+                    id, user_id, friend_name, handle, post_url, shortcode, caption,
+                    screenshot_path, captured_at, attributes_json, confirmed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, post_url) DO UPDATE SET
+                    friend_name = CASE WHEN excluded.friend_name != '' THEN excluded.friend_name ELSE instagram_references.friend_name END,
+                    handle = CASE WHEN excluded.handle != '' THEN excluded.handle ELSE instagram_references.handle END,
+                    shortcode = CASE WHEN excluded.shortcode != '' THEN excluded.shortcode ELSE instagram_references.shortcode END,
+                    caption = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE instagram_references.caption END,
+                    screenshot_path = CASE WHEN excluded.screenshot_path != '' THEN excluded.screenshot_path ELSE instagram_references.screenshot_path END,
+                    captured_at = excluded.captured_at,
+                    attributes_json = excluded.attributes_json,
+                    confirmed = excluded.confirmed
+                """,
+                (
+                    ref_id,
+                    str(record["user_id"]),
+                    str(record.get("friend_name") or ""),
+                    str(record.get("handle") or ""),
+                    str(record["post_url"]),
+                    str(record.get("shortcode") or ""),
+                    str(record.get("caption") or "")[:4000],
+                    str(record.get("screenshot_path") or ""),
+                    captured_at,
+                    json.dumps(attrs, ensure_ascii=False),
+                    1 if record.get("confirmed") else 0,
+                ),
+            )
+        return self.get_instagram_reference(ref_id, str(record["user_id"])) or {**record, "id": ref_id, "captured_at": captured_at, "attributes": attrs}
+
+    def get_instagram_reference(self, ref_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            if user_id:
+                row = connection.execute(
+                    "SELECT * FROM instagram_references WHERE id = ? AND user_id = ?",
+                    (ref_id, user_id),
+                ).fetchone()
+            else:
+                row = connection.execute("SELECT * FROM instagram_references WHERE id = ?", (ref_id,)).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        data["attributes"] = json.loads(data.pop("attributes_json", "{}") or "{}")
+        data["confirmed"] = bool(data.get("confirmed"))
+        return data
+
+    def list_instagram_references(self, user_id: str, handle: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            if handle:
+                rows = connection.execute(
+                    "SELECT * FROM instagram_references WHERE user_id = ? AND lower(handle) = lower(?) ORDER BY captured_at DESC LIMIT ?",
+                    (user_id, handle.lstrip("@"), max(1, min(int(limit), 50))),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM instagram_references WHERE user_id = ? ORDER BY captured_at DESC LIMIT ?",
+                    (user_id, max(1, min(int(limit), 50))),
+                ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["attributes"] = json.loads(item.pop("attributes_json", "{}") or "{}")
+            item["confirmed"] = bool(item.get("confirmed"))
+            out.append(item)
+        return out
+
+    def save_conversation_session(self, session_id: str, user_id: str, state: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
+        timestamp = now_iso()
+        with self._connect() as connection:
+            existing = connection.execute("SELECT created_at FROM conversation_sessions WHERE id = ?", (session_id,)).fetchone()
+            created_at = existing["created_at"] if existing else timestamp
+            connection.execute(
+                """
+                INSERT INTO conversation_sessions (id, user_id, state_json, messages_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    state_json = excluded.state_json,
+                    messages_json = excluded.messages_json,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, user_id, json.dumps(state, ensure_ascii=False), json.dumps(messages, ensure_ascii=False), created_at, timestamp),
+            )
+        return {"id": session_id, "user_id": user_id, "state": state, "messages": messages, "created_at": created_at, "updated_at": timestamp}
+
+    def get_conversation_session(self, session_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            if user_id:
+                row = connection.execute("SELECT * FROM conversation_sessions WHERE id = ? AND user_id = ?", (session_id, user_id)).fetchone()
+            else:
+                row = connection.execute("SELECT * FROM conversation_sessions WHERE id = ?", (session_id,)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "state": json.loads(row["state_json"] or "{}"),
+            "messages": json.loads(row["messages_json"] or "[]"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_conversation_sessions(self, user_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM conversation_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (user_id, max(1, min(int(limit), 50))),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "state": json.loads(row["state_json"] or "{}"),
+                "messages": json.loads(row["messages_json"] or "[]"),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def get_default_local_user(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, email, name, picture, updated_at FROM users ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
         return dict(row) if row else None
 
 
