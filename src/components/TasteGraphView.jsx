@@ -685,6 +685,8 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
               <span>{connection.details.message}</span>
               {connection.details.cutoff && <span>From {connection.details.cutoff} · {connection.details.orders || 0} orders · {connection.details.invoices || 0} invoices · {connection.details.coverage_complete ? 'History checked' : 'Coverage incomplete'}</span>}
               {(connection.details.missing_invoices > 0) && <span>{connection.details.missing_invoices} invoices unavailable</span>}
+              {connection.details.log_file && <span className="basis-full break-all text-[11px] text-[#596159]">Debug log: <code>{connection.details.log_file}</code></span>}
+              {connection.details.log_error && <span className="text-[#A94F32]">Log unavailable ({connection.details.log_error})</span>}
               <button type="button" className="taste-os-chip-btn" onClick={async () => {
                 try {
                   await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelRetailerSync(connection.provider) : disconnectRetailer(connection.provider));

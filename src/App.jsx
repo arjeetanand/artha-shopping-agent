@@ -1418,6 +1418,7 @@ function VoiceControl({ voice, isSpeaking, onSpeak, disabled = false }) {
 
 function SummaryPanel({
   selectedProducts,
+  availableOptionCount,
   intent,
   sourceMode,
   paymentProvider,
@@ -1447,7 +1448,11 @@ function SummaryPanel({
             {selectedProducts.length} {selectedProducts.length === 1 ? 'item' : 'items'}
           </span>
         </div>
-          <small className="summary-panel__sub">Only selected products appear here. Add or remove options on their cards.</small>
+          <small className="summary-panel__sub">
+            {selectedProducts.length === 1 && availableOptionCount > 1
+              ? `${availableOptionCount} options found; one top pick is selected. Select other cards below to compare.`
+              : 'Only selected products appear here. Add or remove options on their cards.'}
+          </small>
       </div>
 
       <div className="summary-items">
@@ -1860,6 +1865,7 @@ function DiscoverView({
 
       <SummaryPanel
         selectedProducts={selectedProducts}
+        availableOptionCount={result.products.length}
         intent={result.intent}
         sourceMode={result.source?.mode}
         paymentProvider={paymentProvider}

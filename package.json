@@ -17,7 +17,7 @@
     "test:slng": "python3 tests/slng_voice_contract.py",
     "test:security": "python3 tests/security_boundaries.py && node --test tests/social_ssrf_contract.mjs",
     "test:voice": "node tests/voice_call.mjs",
-    "test:profile": ".venv/bin/python -m unittest tests/test_profile_graph.py && node --test tests/retailer_connection_contract.mjs",
+    "test:profile": ".venv/bin/python -m unittest tests/test_profile_graph.py tests/test_service_logger.py && node --test tests/retailer_connection_contract.mjs tests/retailer_logging_contract.mjs",
     "test:retailer-browser": "node --test tests/retailer_browser_contract.mjs",
     "test:search": "python3 -m unittest tests/test_live_search.py tests/test_outfit_search.py",
     "build": "vite build",

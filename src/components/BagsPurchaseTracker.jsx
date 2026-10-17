@@ -62,7 +62,7 @@ export const DEMO_BAGS = [
   },
 ];
 
-export const COLOR_PALETTE = [
+const COLOR_PALETTE = [
   { color: '#F8D148', colorLight: '#FFF8D6', textColor: '#8C6C00' },
   { color: '#1EA7FD', colorLight: '#E5F5FF', textColor: '#026AA7' },
   { color: '#F04D99', colorLight: '#FFE8F3', textColor: '#9E165A' },

@@ -2,7 +2,8 @@
 set -e
 
 # Change directory to the repository root
-cd "$(dirname "$0")"
+RUN_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$RUN_SCRIPT_DIR"
 
 echo "=================================================="
 echo "          Artha — Intelligent Shopping Agent       "
@@ -78,7 +79,46 @@ case ",$ALLOWED_ORIGINS," in
 esac
 export SHOPPINGHELP_CORS_ORIGIN="$ALLOWED_ORIGINS"
 
-# 5. Leave other services alone and fail clearly when a configured port is busy
+# 5. Stop a previous Artha listener on these ports, but leave unrelated services alone
+stop_artha_listener() {
+  local port="$1"
+  local service="$2"
+  local pids pid command process_dir stopped_pids="" still_running
+
+  pids=$(lsof -a -ti -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+  for pid in $pids; do
+    command=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    process_dir=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)
+    case "$service:$command" in
+      backend:*backend/server.py*) ;;
+      frontend:*vite*) ;;
+      *) continue ;;
+    esac
+    if [ "$process_dir" != "$RUN_SCRIPT_DIR" ]; then
+      continue
+    fi
+
+    echo "♻️ Stopping existing Artha $service (PID $pid)..."
+    kill -TERM "$pid" 2>/dev/null || true
+    stopped_pids="${stopped_pids}${stopped_pids:+ }$pid"
+  done
+
+  for pid in $stopped_pids; do
+    still_running=true
+    for i in {1..40}; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        still_running=false
+        break
+      fi
+      sleep 0.25
+    done
+    if [ "$still_running" = "true" ]; then
+      echo "❌ Artha $service (PID $pid) did not stop cleanly; refusing to start a duplicate."
+      return 1
+    fi
+  done
+}
+
 check_port() {
   local port="$1"
   local desc="$2"
@@ -91,6 +131,8 @@ check_port() {
   fi
 }
 
+stop_artha_listener "$BACKEND_PORT" "backend"
+stop_artha_listener "$FRONTEND_PORT" "frontend"
 check_port "$BACKEND_PORT" "backend"
 check_port "$FRONTEND_PORT" "frontend"
 

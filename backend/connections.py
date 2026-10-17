@@ -19,6 +19,7 @@ from typing import Any
 from .db import db, now_iso
 from .profile import ingest_retailer_orders, refresh_profile
 from .settings import is_production, setting
+from .service_logger import append_service_log
 from .taste_memory import remember_orders
 
 
@@ -50,6 +51,14 @@ def _snapshot(job: dict[str, Any]) -> dict[str, Any]:
     return {key:value for key,value in job.items() if key not in {"process", "user_id"}}
 
 
+def _log(job: dict[str, Any], step: str, status: str, details: dict[str, Any] | None = None) -> None:
+    try:
+        append_service_log(Path(job["log_file"]), service=job["provider"], run_id=job["id"],
+                           step=step, status=status, details=details)
+    except OSError as error:
+        job["log_error"] = type(error).__name__
+
+
 def _persist(job: dict[str, Any]) -> None:
     db.save_account_connection(job["user_id"],job["provider"],"",job.get("orders",0),job["status"],details=_snapshot(job))
 
@@ -70,6 +79,7 @@ def start_sync(user_id: str, provider: str) -> dict[str, Any]:
         job = {"id":"sync-"+uuid.uuid4().hex,"user_id":user_id,"provider":provider,"status":"connecting",
                "message":"Opening a private Chrome window for retailer sign-in.","orders":0,"invoices":0,
                "cutoff":six_month_cutoff().isoformat(),"started_at":now_iso(),"coverage_complete":False}
+        job["log_file"] = str(provider_directory(user_id,provider)/"logger.txt")
         job["until"] = datetime.now(timezone(timedelta(hours=5,minutes=30))).date().isoformat()
         _jobs[key] = job
         _persist(job)
@@ -108,8 +118,10 @@ def _run(job: dict[str, Any]) -> None:
         directory.chmod(0o700)
         for parent in (private_root(),directory.parent):
             parent.chmod(0o700)
+        _log(job,"sync_started","info",{"cutoff":job["cutoff"],"until":job["until"]})
         process = subprocess.Popen(["node",str(_WORKER)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL,text=True,encoding="utf-8")
+        _log(job,"worker_started","info")
         with _lock:
             job["process"] = process
         timer = threading.Timer(30*60,process.terminate)
@@ -127,12 +139,20 @@ def _run(job: dict[str, Any]) -> None:
                     break
             if event.get("type") == "order":
                 records.extend(ingest_retailer_orders(job["user_id"],job["provider"],[event["order"]],date.fromisoformat(job["cutoff"])))
+                _log(job,"order_ingested","info",{"order_count":len(records)})
             elif event.get("type") == "invoice":
                 try:
                     _store_invoice(job["user_id"],job["provider"],event,directory)
-                except Exception:
+                    _log(job,"invoice_saved","info",{"invoice_count":1})
+                except Exception as error:
                     job["invoice_read_errors"] = job.get("invoice_read_errors",0)+1
+                    _log(job,"invoice_save_failed","warn",{"error_class":type(error).__name__})
+            elif event.get("type") == "log":
+                details = event.get("details") if isinstance(event.get("details"),dict) else {}
+                _log(job,str(event.get("step") or "worker_event"),str(event.get("status") or "info"),details)
             elif event.get("type") == "progress":
+                progress_details = {"page":event.get("pages"),"order_count":event.get("orders"),"invoice_count":event.get("invoices")}
+                _log(job,"worker_progress",str(event.get("status") or "running"),progress_details)
                 with _lock:
                     job.update({key:event[key] for key in ("status","message","orders","invoices","pages") if key in event})
                     _persist(job)
@@ -146,10 +166,16 @@ def _run(job: dict[str, Any]) -> None:
                 return
         if not final or process.returncode:
             raise RuntimeError("Retailer connection stopped before confirming history coverage. Reconnect to continue.")
+        _log(job,"history_complete","info",{
+            "order_count":final.get("orders"),"invoice_count":final.get("invoices"),
+            **{key:final[key] for key in ("missing_invoices","missing_dates","unreadable_pages","pages",
+                                           "coverage_complete","window_limited","cutoff") if key in final},
+        })
         with _lock:
             job.update({"status":"indexing","message":"Building your taste memory from verified purchase items."})
             _persist(job)
         remember_orders(job["user_id"],records)
+        _log(job,"taste_memory_updated","info",{"order_count":len(records)})
         with _lock:
             if job["status"] == "cancelled":
                 return
@@ -161,6 +187,7 @@ def _run(job: dict[str, Any]) -> None:
             _persist(job)
         refresh_profile(job["user_id"])
     except Exception as error:
+        _log(job,"sync_failed","error",{"error_class":type(error).__name__})
         if process and process.poll() is None:
             process.terminate()
         if records:

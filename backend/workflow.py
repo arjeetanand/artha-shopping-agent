@@ -1499,6 +1499,7 @@ class RankingAgent:
         requested_brand = str(brief.get("brand") or "").strip().lower()
         requested_color = str(brief.get("color") or "").strip().lower()
         requested_colors = [str(value).lower() for value in (brief.get("color_options") or [requested_color]) if value]
+        known_colors = ("black", "white", "red", "blue", "green", "yellow", "pink", "purple", "violet", "orange", "brown", "beige", "cream", "navy", "maroon", "grey", "gray", "gold", "silver", "olive", "charcoal", "taupe")
         requested_size = str(brief.get("size") or "").strip().lower()
         requested_fabric = str(brief.get("fabric") or "").strip().lower()
         size_aliases = {"small": "s", "medium": "m", "large": "l", "extra large": "xl"}
@@ -1506,6 +1507,11 @@ class RankingAgent:
         def size_key(value: Any) -> str:
             value = str(value or "").strip().lower()
             return size_aliases.get(value, value)
+
+        def color_match(color: Any, value: Any) -> bool:
+            color = re.sub(r"[^a-z0-9]+", " ", str(color).lower()).strip()
+            value = re.sub(r"[^a-z0-9]+", " ", str(value).lower())
+            return bool(color and re.search(rf"(?<![a-z0-9]){re.escape(color)}(?![a-z0-9])", value))
 
         def stock_quantity(value: Any) -> int | None:
             if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value < 10**9 and int(value) == value:
@@ -1538,9 +1544,13 @@ class RankingAgent:
             brand_text = " ".join(str(product.get(field) or "") for field in ("brand", "seller", "name")).lower()
             brand_fit = True if not requested_brand else requested_brand in brand_text
             variants = [value for value in (product.get("variants") or []) if isinstance(value, dict)]
-            available_colors = [str(value).lower() for value in (product.get("colors") or []) if str(value).strip()] or [str(value.get("color")).lower() for value in variants if value.get("color")]
+            available_colors = [str(value).lower() for value in (product.get("colors") or []) if str(value).strip()]
+            available_colors = available_colors or [str(value.get("color")).lower() for value in variants if value.get("color")]
+            available_colors = available_colors or ([str(product["color"]).lower()] if product.get("color") else [])
+            if not available_colors and requested_colors:
+                available_colors = [color for color in known_colors if color_match(color, product.get("name"))]
             available_sizes = [str(value).lower() for value in (product.get("sizes") or []) if str(value).strip()] or [str(value.get("size")).lower() for value in variants if value.get("size")]
-            color_fit = None if not requested_colors or not available_colors else any(color in value for color in requested_colors for value in available_colors)
+            color_fit = None if not requested_colors or not available_colors else any(color_match(color, value) for color in requested_colors for value in available_colors)
             size_fit = None if not requested_size or not available_sizes else size_key(requested_size) in {size_key(value) for value in available_sizes}
             variant_fit = None
             matching_variants: list[dict[str, Any]] = []
@@ -1656,7 +1666,7 @@ class RankingAgent:
                 product["budget_fit"] is not False
                 and product["delivery_fit"] is not False
                 and product["stock_fit"] is not False
-                and color_fit is not False
+                and (not requested_colors or color_fit is True)
                 and size_fit is not False
                 and product["fabric_fit"] is not False
             )
@@ -1697,12 +1707,23 @@ def _default_selection(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _mission_decision(products: list[dict[str, Any]], brief: dict[str, Any]) -> dict[str, Any]:
     """Turn the existing ranked list into one accountable, evidence-gated action."""
+    def color_clears(product: dict[str, Any], request: dict[str, Any]) -> bool:
+        return not (request.get("color") or request.get("color_options")) or product.get("color_fit") is True
+
     if brief.get("items"):
-        groups = [[p for p in products if p.get("request_item") == item["key"] and p.get("eligible") is not False and _money(p.get("price")) > 0] for item in brief["items"]]
+        groups = [[p for p in products if p.get("request_item") == item["key"] and p.get("eligible") is not False
+                   and color_clears(p, _item_brief(brief, item)) and _money(p.get("price")) > 0] for item in brief["items"]]
         outfits = [choice for choice in combinations(*groups)
                    if len({p.get("url") for p in choice if p.get("url")}) == sum(bool(p.get("url")) for p in choice)
                    and (brief.get("budget_scope") == "item" or sum(_money(p.get("line_total") or p.get("total_price") or p.get("price")) for p in choice) <= _money(brief.get("budget")))]
         if not outfits:
+            missing_color_items = [item for item in brief["items"] if (item.get("color_options") or item.get("color"))
+                                   and not any(p.get("request_item") == item["key"] and p.get("color_fit") is True for p in products)]
+            if missing_color_items:
+                labels = ", ".join(item["category"].lower() for item in missing_color_items)
+                return {"status": "no_safe_fit", "recommended_product_id": None, "recommended_product_ids": [], "fallback_product_id": None,
+                        "reasons": [], "blocking_risks": [f"Retailer pages do not confirm the requested colour for {labels}"],
+                        "mission_change": "Search for product pages that name the requested colour or expose a matching colour variant.", "checked_at": now_iso()}
             return {"status": "no_safe_fit", "recommended_product_id": None, "recommended_product_ids": [], "fallback_product_id": None,
                     "reasons": [], "blocking_risks": ["A complete outfit with known prices does not fit the confirmed budget and sizes yet"],
                     "mission_change": "Check the individual product links or adjust the outfit budget or sizes.", "checked_at": now_iso()}
@@ -1714,7 +1735,7 @@ def _mission_decision(products: list[dict[str, Any]], brief: dict[str, Any]) -> 
                 "total": sum(_money(p.get("line_total") or p.get("total_price") or p.get("price")) for p in chosen),
                 "reasons": ["Each item is within its budget" if brief.get("budget_scope") == "item" else "Whole outfit is within budget"],
                 "blocking_risks": risks, "mission_change": None, "checked_at": now_iso()}
-    candidates = [product for product in products if product.get("eligible") is not False]
+    candidates = [product for product in products if product.get("eligible") is not False and color_clears(product, brief)]
     if candidates and not any(_money(product.get("price")) > 0 for product in candidates):
         return {
             "status": "no_safe_fit", "recommended_product_id": None, "fallback_product_id": None,
@@ -1746,6 +1767,9 @@ def _mission_decision(products: list[dict[str, Any]], brief: dict[str, Any]) -> 
             if needed:
                 phrases = [changes[field] for field in needed]
                 next_step = (" and ".join(phrases) if len(phrases) < 3 else f"{', '.join(phrases[:-1])} and {phrases[-1]}").capitalize() + "."
+            elif (brief.get("color") or brief.get("color_options")) and not any(product.get("color_fit") is True for product in failed):
+                risks.append("Available retailer pages do not confirm the requested colour")
+                next_step = "Search for a product page that names the requested colour or exposes a matching colour variant."
         for field, label in (
             ("budget_fit", "Budget"),
             ("delivery_fit", "Arrival deadline"),

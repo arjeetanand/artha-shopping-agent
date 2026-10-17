@@ -3,9 +3,9 @@
 
 /* ─── Design Tokens & Theme Variables ─────────────────────────────────────── */
 :root {
-  /* ── Warm Editorial Commerce Foundation ── */
-  --bg-app:         #F5F3ED;
-  --bg-deep:        #EBE8DE;
+  /* ── SLNG-inspired neutral and green palette ── */
+  --bg-app:         #F3F1EC;
+  --bg-deep:        #EAE7E0;
 
   /* ── Surfaces (Warm Paper & Card Ivory) ── */
   --surface:        #FFFEFA;
@@ -18,22 +18,22 @@
   --line:         #E5E1D7;
   --line-subtle:  #EDEAE2;
   --line-strong:  #D4D0C5;
-  --line-glow:    rgba(169, 79, 50, 0.2);
+  --line-glow:    rgba(0, 187, 127, 0.2);
 
   /* ── NavRail (Deep Forest Green) ── */
-  --rail-bg:     #1C3027;
+  --rail-bg:     #15120D;
   --rail-border: rgba(255, 255, 255, 0.08);
-  --rail-text:   #E9EEE7;
-  --rail-muted:  #9EAFA2;
+  --rail-text:   #F3F1EC;
+  --rail-muted:  #B4B4B3;
   --rail-hover:  rgba(255, 255, 255, 0.07);
   --rail-active: rgba(255, 255, 255, 0.12);
 
-  /* ── Primary — Terracotta (Warm, Decisive Action) ── */
-  --primary:       #A94F32;
-  --primary-hover: #8E3F27;
-  --primary-light: rgba(169, 79, 50, 0.08);
-  --primary-ring:  rgba(169, 79, 50, 0.22);
-  --glow-cyan:     0 4px 16px rgba(169, 79, 50, 0.18);
+  /* Darkened SLNG green keeps white action labels readable. */
+  --primary:       #007A67;
+  --primary-hover: #006B5A;
+  --primary-light: rgba(0, 187, 127, 0.08);
+  --primary-ring:  rgba(0, 187, 127, 0.22);
+  --glow-cyan:     0 4px 16px rgba(0, 187, 127, 0.18);
 
   /* ── Accent — Cobalt Blue (Verified Retailer Sources) ── */
   --accent-blue:        #2D5BD1;
@@ -42,13 +42,13 @@
   --accent-blue-border: rgba(45, 91, 209, 0.22);
 
   /* ── Accent — Emerald (Verified / Complete Status) ── */
-  --emerald:        #287E5D;
-  --emerald-soft:   #EDF8F1;
-  --emerald-border: rgba(40, 126, 93, 0.22);
-  --emerald-text:   #216448;
+  --emerald:        #007A67;
+  --emerald-soft:   #EDF8F4;
+  --emerald-border: rgba(0, 122, 103, 0.22);
+  --emerald-text:   #005E4D;
 
   /* ── Accent — Coral & Warning ── */
-  --coral:      #A94F32;
+  --coral:      #B4541C;
   --coral-soft: #FFF0EB;
 
   /* ── Error & Alert ── */
@@ -56,10 +56,10 @@
   --danger-soft: #FEF3F2;
 
   /* ── Typography & Ink ── */
-  --ink:           #222A24;
-  --ink-secondary: #596159;
-  --muted:         #7D8279;
-  --faint:         #A7AAA1;
+  --ink:           #15120D;
+  --ink-secondary: #3C3B3B;
+  --muted:         #737373;
+  --faint:         #8A8783;
 
   /* ── Fonts ── */
   --serif: 'Instrument Serif', Georgia, serif;
@@ -72,7 +72,7 @@
   --shadow-md: 0 8px 24px rgba(34, 42, 36, 0.07), 0 0 0 1px #E5E1D7;
   --shadow-lg: 0 16px 40px rgba(34, 42, 36, 0.09), 0 0 0 1px #E5E1D7;
   --shadow-xl: 0 24px 64px rgba(34, 42, 36, 0.12), 0 0 0 1px #E5E1D7;
-  --shadow-primary: 0 4px 16px rgba(169, 79, 50, 0.25);
+  --shadow-primary: 0 4px 16px rgba(0, 107, 90, 0.25);
   --shadow-card: 0 2px 12px rgba(34, 42, 36, 0.05), 0 0 0 1px #E5E1D7;
 
   /* ── Surfaces ── */
@@ -3544,11 +3544,11 @@ button:disabled { cursor: not-allowed; }
 */ /* end Artha 2.0 suppressed cascade */
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Warm Editorial Commerce refresh (Stitch Sync)
+   SLNG-inspired neutral and green theme
    ──────────────────────────────────────────────────────────────────────────── */
 :root {
-  --bg-app:         #F5F3ED;
-  --bg-deep:        #EBE8DE;
+  --bg-app:         #F3F1EC;
+  --bg-deep:        #EAE7E0;
   --surface:        #FFFEFA;
   --surface-solid:  #FFFEFA;
   --surface-subtle: #F1EFE8;
@@ -3557,41 +3557,41 @@ button:disabled { cursor: not-allowed; }
   --line:         #E5E1D7;
   --line-subtle:  #EDEAE2;
   --line-strong:  #D4D0C5;
-  --line-glow:    rgba(169, 79, 50, 0.2);
-  --rail-bg:     #1C3027;
+  --line-glow:    rgba(0, 187, 127, 0.2);
+  --rail-bg:     #15120D;
   --rail-border: rgba(255, 255, 255, 0.08);
-  --rail-text:   #E9EEE7;
-  --rail-muted:  #9EAFA2;
+  --rail-text:   #F3F1EC;
+  --rail-muted:  #B4B4B3;
   --rail-hover:  rgba(255, 255, 255, 0.07);
   --rail-active: rgba(255, 255, 255, 0.12);
-  --primary:       #A94F32;
-  --primary-hover: #8E3F27;
-  --primary-light: rgba(169, 79, 50, 0.08);
-  --primary-ring:  rgba(169, 79, 50, 0.22);
-  --glow-cyan:     0 4px 16px rgba(169, 79, 50, 0.18);
+  --primary:       #007A67;
+  --primary-hover: #006B5A;
+  --primary-light: rgba(0, 187, 127, 0.08);
+  --primary-ring:  rgba(0, 187, 127, 0.22);
+  --glow-cyan:     0 4px 16px rgba(0, 187, 127, 0.18);
   --accent-violet: #2D5BD1;
   --accent-violet-soft: #EEF2FF;
   --accent-violet-border: rgba(45, 91, 209, 0.22);
-  --emerald:        #287E5D;
-  --emerald-soft:   #EDF8F1;
-  --emerald-border: rgba(40, 126, 93, 0.22);
-  --emerald-text:   #216448;
-  --coral:      #A94F32;
+  --emerald:        #007A67;
+  --emerald-soft:   #EDF8F4;
+  --emerald-border: rgba(0, 122, 103, 0.22);
+  --emerald-text:   #005E4D;
+  --coral:      #B4541C;
   --coral-soft: #FFF0EB;
   --accent-blue:        #2D5BD1;
   --accent-blue-hover:  #1E46B2;
   --accent-blue-soft:   #EEF2FF;
   --accent-blue-border: rgba(45, 91, 209, 0.22);
-  --ink:           #222A24;
-  --ink-secondary: #596159;
-  --muted:         #7D8279;
-  --faint:         #A4A9A0;
+  --ink:           #15120D;
+  --ink-secondary: #3C3B3B;
+  --muted:         #737373;
+  --faint:         #8A8783;
   --shadow-xs: 0 1px 2px rgba(18, 18, 18, 0.04);
   --shadow-sm: 0 4px 12px rgba(18, 18, 18, 0.06);
   --shadow-md: 0 10px 24px rgba(18, 18, 18, 0.08);
   --shadow-lg: 0 18px 42px rgba(18, 18, 18, 0.1);
   --shadow-xl: 0 24px 60px rgba(18, 18, 18, 0.12);
-  --shadow-primary: 0 10px 24px rgba(169, 79, 50, 0.24);
+  --shadow-primary: 0 10px 24px rgba(0, 107, 90, 0.24);
   --shadow-card: 0 4px 16px rgba(18, 18, 18, 0.05);
   --sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --serif: 'Instrument Serif', Georgia, serif;
@@ -7726,8 +7726,8 @@ img.product-thumb {
 }
 
 .product-card.is-selected .product-card__tab {
-  background: #A94F32;
-  border-color: #A94F32;
+  background: var(--primary);
+  border-color: var(--primary);
   color: #ffffff;
 }
 
@@ -7754,6 +7754,68 @@ img.product-thumb {
   background: var(--primary-hover, #8E3F27);
   border-color: var(--primary-hover, #8E3F27);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(169, 79, 50, 0.25);
+  box-shadow: 0 4px 12px rgba(0, 107, 90, 0.25);
+}
+
+/* Keep the first shopping action in reach without losing the editorial hero. */
+.discover-layout { grid-template-columns: minmax(0, 1fr) 304px; }
+.main-column { padding: 24px clamp(24px, 3.7vw, 56px) 96px; }
+.hero-copy {
+  grid-template-columns: minmax(0, 1.35fr) minmax(190px, .72fr);
+  align-items: center;
+  min-height: 0;
+  gap: clamp(20px, 2.5vw, 32px);
+  padding: 0 0 20px;
+}
+.hero-copy h1 { font-size: clamp(48px, 4.7vw, 68px); line-height: .98; }
+.hero-copy > .hero-copy__intro > p { margin-top: 14px; font-size: 14px; }
+.hero-copy__note { margin-top: 12px; }
+.hero-visual { width: min(100%, 235px); padding: 0 10px 18px 0; }
+.hero-visual__frame { aspect-ratio: 1.08; border-radius: 16px; box-shadow: 8px 8px 0 #f1f0eb; }
+.hero-visual__stickers { top: -20px; right: 14px; gap: 4px; }
+.hero-visual__sticker { font-size: 20px; }
+.composer-container { margin-top: 20px; }
+.composer { border-radius: 16px; box-shadow: 0 6px 0 #f1f0eb; }
+.composer:focus-within { box-shadow: 0 6px 0 var(--primary-light), 0 0 0 4px rgba(0, 187, 127, .08); }
+.composer textarea { min-height: 104px; padding: 18px 20px; }
+.composer-suggestions { margin-block: 16px 24px; }
+.home-bags-showcase .bags-tracker__shelf--grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); }
+
+@media (max-width: 1000px) and (min-width: 821px) {
+  .discover-layout { grid-template-columns: minmax(0, 1fr); }
+  .main-column { border-right: 0; padding-inline: clamp(28px, 4vw, 48px); }
+  .summary-panel { position: static; height: auto; margin: 32px 28px 0; padding: 24px; box-shadow: inset 0 1px 0 var(--line); }
+  .summary-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-empty { grid-column: 1 / -1; }
+}
+
+@media (max-width: 820px) {
+  .main-column { padding: 24px 20px 78px; }
+  .hero-copy { grid-template-columns: 1fr; align-items: start; gap: 16px; padding-bottom: 22px; }
+  .hero-copy h1 { font-size: clamp(42px, 9vw, 58px); line-height: .98; }
+  .hero-copy > .hero-copy__intro > p { margin-top: 12px; font-size: 14px; }
+  .hero-copy__note { margin-top: 12px; }
+  .hero-visual { width: min(100%, 340px); justify-self: center; margin: 0; padding: 0 8px 14px; }
+  .hero-visual__frame { aspect-ratio: 2.05; border-radius: 14px; }
+  .composer-container { margin-top: 20px; }
+  .composer textarea { min-height: 84px; padding: 16px; }
+  .composer-suggestions { margin: 12px 0 20px; }
+  .mobile-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .mobile-nav button { min-width: 0; padding-inline: 0; font-size: 9px; }
+  .mobile-nav button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@media (max-width: 520px) {
+  .main-column { padding-inline: 16px; }
+  .top-header { padding-inline: 12px; }
+  .account-identity { padding: 3px; }
+  .account-identity__name { display: none; }
+  .account-cluster { gap: 6px; }
+  .hero-copy h1 { font-size: clamp(40px, 12vw, 52px); }
+  .hero-copy > .hero-copy__intro > p { font-size: 13px; line-height: 1.5; }
+  .hero-visual { width: min(100%, 300px); }
+  .composer textarea { min-height: 82px; padding: 15px; }
+  .composer__footer { gap: 10px; padding: 10px; }
+  .mobile-nav button { font-size: 8px; }
 }
 

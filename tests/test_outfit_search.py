@@ -79,9 +79,9 @@ class OutfitSearchTests(unittest.TestCase):
     def test_whole_outfit_selection_obeys_the_combined_budget(self):
         brief = _merge_refinement_intent(self.brief(), "shirt size M; shorts size 32; for men; budget for the whole outfit; within 5 days")
         products = [
-            {"id": "shorts", "request_item": "shorts", "price": 700, "eligible": True, "match_score": 80},
-            {"id": "shirt-expensive", "request_item": "shirt", "price": 1500, "eligible": True, "match_score": 99},
-            {"id": "shirt", "request_item": "shirt", "price": 1200, "eligible": True, "match_score": 80},
+            {"id": "shorts", "request_item": "shorts", "price": 700, "eligible": True, "color_fit": True, "match_score": 80},
+            {"id": "shirt-expensive", "request_item": "shirt", "price": 1500, "eligible": True, "color_fit": True, "match_score": 99},
+            {"id": "shirt", "request_item": "shirt", "price": 1200, "eligible": True, "color_fit": True, "match_score": 80},
         ]
         decision = _mission_decision(products, brief)
         self.assertEqual({p["id"] for p in _decision_selection(products, decision)}, {"shorts", "shirt"})
@@ -135,6 +135,31 @@ class OutfitSearchTests(unittest.TestCase):
         self.assertFalse(ranked[1]["color_fit"])
         wrong_wearer = {"id": "wrong", "name": "Women White Shirt", "request_item": "shirt", "price": 700, "colors": ["white"], "sizes": ["M"]}
         self.assertFalse(RankingAgent().run([wrong_wearer], brief)[0][0]["eligible"])
+
+    def test_requested_color_must_be_supported_by_the_listing_before_recommendation(self):
+        brief = {"category": "Shirt", "description": "white shirt", "budget": 2000, "color": "white", "must_have": []}
+        products = [
+            {"id": "white", "name": "White Linen Shirt", "price": 1200},
+            {"id": "blue", "name": "Blue Linen Shirt", "price": 900},
+            {"id": "unknown", "name": "Linen Shirt", "price": 800},
+        ]
+        ranked, _ = RankingAgent().run(products, brief)
+        by_id = {product["id"]: product for product in ranked}
+
+        self.assertIs(by_id["white"]["color_fit"], True)
+        self.assertIs(by_id["blue"]["color_fit"], False)
+        self.assertIsNone(by_id["unknown"]["color_fit"])
+        self.assertTrue(by_id["white"]["eligible"])
+        self.assertFalse(by_id["blue"]["eligible"])
+        self.assertFalse(by_id["unknown"]["eligible"])
+
+        stale_unknown = {**by_id["unknown"], "eligible": True}
+        decision = _mission_decision([stale_unknown], brief)
+        self.assertEqual(decision["status"], "no_safe_fit")
+        self.assertIn("colour", " ".join(decision["blocking_risks"]).lower())
+        self.assertIn("colour variant", decision["mission_change"].lower())
+        decision = _mission_decision([by_id["blue"], by_id["white"]], brief)
+        self.assertEqual(decision["recommended_product_id"], "white")
 
     def test_budget_accepts_decimal_shorthand_but_rejects_invalid_amounts(self):
         self.assertEqual(self.brief("2.5k")["budget"], 2500)
