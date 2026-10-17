@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .settings import is_production, setting
@@ -17,6 +22,20 @@ OLLAMA_BASE_URL = setting("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/
 OLLAMA_MODEL = setting("OLLAMA_MODEL", "llama3.2:3b")
 OLLAMA_VISION_MODEL = setting("OLLAMA_VISION_MODEL", OLLAMA_MODEL)
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+_FREE_RETAILER_SCRIPT = Path(__file__).parent / "free_retailer_scraper.mjs"
+
+
+def _node_bin() -> str:
+    found = shutil.which("node")
+    if found:
+        return found
+    for candidate in (
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return "node"
 
 
 def _request_json(
@@ -49,9 +68,6 @@ def _json_object(value: object) -> dict[str, Any] | None:
     try:
         parsed = json.loads(candidate)
     except json.JSONDecodeError:
-        # Some local reasoning models prefix an otherwise valid fenced JSON object
-        # with trace-like text. Decode from the final object boundary so that prefix
-        # is never mistaken for user-visible structured data.
         decoder = json.JSONDecoder()
         parsed = None
         for start in reversed([match.start() for match in re.finditer(r"{", candidate)]):
@@ -65,6 +81,181 @@ def _json_object(value: object) -> dict[str, Any] | None:
         if parsed is None:
             return None
     return parsed if isinstance(parsed, dict) else None
+
+
+class LocalRetailerClient:
+    """Free, open-source local Playwright + JSON-LD/DOM scraper for Amazon India and Flipkart."""
+
+    name = "local_playwright"
+
+    @property
+    def configured(self) -> bool:
+        return True
+
+    def _http_fallback_search(self, query: str, num_results: int = 8) -> dict[str, Any]:
+        """Direct HTTP + HTML parser fallback for Amazon.in and Flipkart when Playwright is unavailable."""
+        cleaned = re.sub(r"\bsite:[^\s]+|\bOR\b", " ", query, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        retrieved_at = datetime.now(timezone.utc).isoformat()
+        results: list[dict[str, Any]] = []
+        diagnostics: list[dict[str, Any]] = []
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-IN,en;q=0.9",
+        }
+        # 1. Amazon India
+        amz_url = f"https://www.amazon.in/s?k={urllib.parse.quote_plus(cleaned)}"
+        try:
+            req = urllib.request.Request(amz_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                html = resp.read(1_500_000).decode("utf-8", errors="ignore")
+            if re.search(r"validateCaptcha|api-services-support@amazon", html, flags=re.IGNORECASE):
+                diagnostics.append({"retailer": "Amazon India", "status": "bot_challenge", "retrieved_at": retrieved_at})
+            else:
+                cards = re.findall(
+                    r'data-asin="([A-Z0-9]{10})"[\s\S]{1,4500}?<img[^>]+src="(https://m\.media-amazon\.com/images/[^"]+)"[^>]+alt="([^"]{6,240})"[\s\S]{1,2500}?<span class="a-offscreen">(₹[\d,]+)</span>',
+                    html,
+                )
+                for asin, img, title, price_text in cards[: max(1, num_results // 2)]:
+                    results.append({
+                        "title": title.replace("&amp;", "&").replace("&#39;", "'").strip(),
+                        "url": f"https://www.amazon.in/dp/{asin}",
+                        "image": img,
+                        "price_text": price_text,
+                        "seller": "Amazon India",
+                        "retrieved_at": retrieved_at,
+                        "snippet": f"Price {price_text} · Observed on Amazon India at {retrieved_at}",
+                        "data": {
+                            "name": title.replace("&amp;", "&").strip(),
+                            "price": price_text,
+                            "currency": "INR",
+                            "image": img,
+                            "seller": "Amazon India",
+                            "pageType": "productDetail",
+                            "retrieved_at": retrieved_at,
+                        },
+                    })
+                diagnostics.append({"retailer": "Amazon India", "status": "ok" if cards else "empty_or_layout_changed", "count": len(cards), "retrieved_at": retrieved_at})
+        except Exception as exc:
+            diagnostics.append({"retailer": "Amazon India", "status": "unavailable", "detail": str(exc)[:160], "retrieved_at": retrieved_at})
+
+        # 2. Flipkart
+        fk_url = f"https://www.flipkart.com/search?q={urllib.parse.quote_plus(cleaned)}"
+        try:
+            req = urllib.request.Request(fk_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                html = resp.read(1_500_000).decode("utf-8", errors="ignore")
+            matches = re.findall(
+                r'href="(/[^"?#]+/p/itm[a-zA-Z0-9]+)[^"]*"[\s\S]{1,2500}?(₹[\d,]+)',
+                html,
+            )
+            seen_fk: set[str] = set()
+            for path, price_text in matches:
+                full_url = f"https://www.flipkart.com{path}"
+                if full_url in seen_fk:
+                    continue
+                seen_fk.add(full_url)
+                slug = path.strip("/").split("/")[0].replace("-", " ").title()
+                if len(slug) < 5:
+                    continue
+                results.append({
+                    "title": slug,
+                    "url": full_url,
+                    "image": "",
+                    "price_text": price_text,
+                    "seller": "Flipkart",
+                    "retrieved_at": retrieved_at,
+                    "snippet": f"Price {price_text} · Observed on Flipkart at {retrieved_at}",
+                    "data": {
+                        "name": slug,
+                        "price": price_text,
+                        "currency": "INR",
+                        "seller": "Flipkart",
+                        "pageType": "productDetail",
+                        "retrieved_at": retrieved_at,
+                    },
+                })
+                if len(seen_fk) >= max(1, num_results // 2):
+                    break
+            diagnostics.append({"retailer": "Flipkart", "status": "ok" if seen_fk else "empty_or_layout_changed", "count": len(seen_fk), "retrieved_at": retrieved_at})
+        except Exception as exc:
+            diagnostics.append({"retailer": "Flipkart", "status": "unavailable", "detail": str(exc)[:160], "retrieved_at": retrieved_at})
+
+        return {"results": results[:num_results], "diagnostics": diagnostics, "retrieved_at": retrieved_at}
+
+    def search(self, query: str, num_results: int = 8) -> dict[str, Any]:
+        limit = min(max(num_results, 1), 10)
+        try:
+            proc = subprocess.run(
+                [_node_bin(), str(_FREE_RETAILER_SCRIPT), "search", query, str(limit)],
+                capture_output=True,
+                text=True,
+                timeout=38,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                parsed = json.loads(proc.stdout.strip())
+                if isinstance(parsed, dict) and parsed.get("success") and isinstance(parsed.get("results"), list):
+                    normalized = []
+                    for item in parsed["results"]:
+                        if not isinstance(item, dict):
+                            continue
+                        normalized.append({
+                            **item,
+                            "data": {
+                                "name": item.get("title"),
+                                "price": item.get("price_text"),
+                                "currency": "INR" if item.get("price_text") else None,
+                                "image": item.get("image"),
+                                "seller": item.get("seller"),
+                                "pageType": "productDetail",
+                                "retrieved_at": item.get("retrieved_at") or parsed.get("retrieved_at"),
+                            },
+                        })
+                    record_usage("local_playwright", "live_search", model="chromium-retailer-scraper", input_characters=len(query))
+                    if normalized:
+                        return {
+                            "results": normalized,
+                            "diagnostics": parsed.get("diagnostics") or [],
+                            "retrieved_at": parsed.get("retrieved_at"),
+                        }
+        except Exception:
+            pass
+        fallback = self._http_fallback_search(query, num_results=limit)
+        record_usage("local_playwright", "live_search_http_fallback", model="urllib-retailer-scraper", input_characters=len(query))
+        return fallback
+
+    def scrape_inline(self, url: str, max_wait_seconds: int = 45) -> dict[str, Any]:
+        from .social import _public_reference_url, capture_social_page
+
+        url, _ = _public_reference_url(url)
+        try:
+            proc = subprocess.run(
+                [_node_bin(), str(_FREE_RETAILER_SCRIPT), "product", url],
+                capture_output=True,
+                text=True,
+                timeout=min(25, max_wait_seconds),
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                parsed = json.loads(proc.stdout.strip())
+                if isinstance(parsed, dict) and parsed.get("success"):
+                    record_usage("local_playwright", "product_scrape", model="chromium-retailer-scraper", input_characters=len(url))
+                    return parsed
+        except Exception:
+            pass
+
+        local = capture_social_page(url, product=True, timeout=min(25, max_wait_seconds))
+        if local.get("success") and local.get("html"):
+            return {
+                "html": local["html"],
+                "finalUrl": local.get("finalUrl") or url,
+                "pageTitle": local.get("title") or "",
+                "description": local.get("description") or "",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            }
+        raise RuntimeError("Local retailer scraper could not verify that product page.")
 
 
 class AnakinClient:
@@ -191,25 +382,35 @@ class TavilyClient:
         return {"markdown": results[0]["raw_content"], "finalUrl": results[0].get("url") or url}
 
 
-def get_search_client() -> AnakinClient | TavilyClient:
+def get_search_client() -> AnakinClient | TavilyClient | LocalRetailerClient:
     provider = setting("SHOPPINGHELP_SEARCH_PROVIDER", "auto").lower()
+    if provider in {"local", "playwright", "free", "local_playwright"}:
+        return LocalRetailerClient()
     if provider == "auto":
-        provider = "tavily" if setting("TAVILY_API_KEY") else "anakin"
+        if setting("TAVILY_API_KEY"):
+            return TavilyClient()
+        if setting("ANAKIN_API_KEY"):
+            return AnakinClient()
+        return LocalRetailerClient()
     if provider not in {"anakin", "tavily"}:
-        raise ValueError("SHOPPINGHELP_SEARCH_PROVIDER must be auto, tavily, or anakin")
+        raise ValueError("SHOPPINGHELP_SEARCH_PROVIDER must be auto, local, tavily, or anakin")
     return TavilyClient() if provider == "tavily" else AnakinClient()
 
 
 def search_status() -> dict[str, Any]:
     client = get_search_client()
-    return {"search_provider": client.name, "search_configured": client.configured}
+    return {
+        "search_provider": client.name,
+        "search_configured": client.configured,
+        "supported_retailers": ["Amazon India (amazon.in)", "Flipkart (flipkart.com)", "Myntra (myntra.com)", "AJIO (ajio.com)"],
+    }
 
 
 def search_failure(provider: str, error: Exception) -> str:
-    label = provider.title()
+    label = "Local Playwright Scraper" if provider == "local_playwright" else provider.title()
     code = getattr(error, "code", None)
     if code in {402, 432, 433}:
-        return f"{label} search credits are exhausted (HTTP {code}). Check your provider balance or free-tier renewal."
+        return f"{label} search credits are exhausted (HTTP {code}). Check your provider balance or switch SHOPPINGHELP_SEARCH_PROVIDER=local."
     if code in {401, 403}:
         return f"{label} rejected the API key (HTTP {code}). Check {provider.upper()}_API_KEY and account access."
     if code == 429:
@@ -238,9 +439,6 @@ class OllamaClient:
         }
         if reference_image:
             payload["images"] = [reference_image["data_base64"]]
-            # Vision-capable local models can otherwise prepend private reasoning
-            # traces to their JSON response. The purchase brief needs only the
-            # structured result that is safe to persist and display.
             payload["think"] = False
         try:
             response = _request_json(
@@ -336,7 +534,14 @@ class BriefModel:
         active = self.provider
         configured = self.gemini.configured if active == "gemini" else self.ollama.configured
         model = self.gemini.model if active == "gemini" else self.ollama.model
-        return {"provider": active, "model": model, "configured": configured, "gemini_configured": self.gemini.configured, "ollama_enabled": self.ollama.configured}
+        return {
+            "provider": active,
+            "model": model,
+            "vision_model": self.ollama.vision_model if active == "ollama" else self.gemini.model,
+            "configured": configured,
+            "gemini_configured": self.gemini.configured,
+            "ollama_enabled": self.ollama.configured,
+        }
 
     def extract_brief(self, text: str, reference_image: dict[str, str] | None = None) -> tuple[dict[str, Any] | None, str]:
         image_context = reference_image["name"] if reference_image else "none"

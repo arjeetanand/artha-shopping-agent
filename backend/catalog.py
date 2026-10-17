@@ -1,6 +1,6 @@
 """Small deterministic catalog used only for local end-to-end development.
 
-The live path remains the default when Anakin is configured. Setting
+The live path remains the default when live retailer scraping is active. Setting
 ``SHOPPINGHELP_SEARCH_MODE=fixture`` makes local tests repeatable and keeps
 test prompts, locations, and product data on the developer machine.
 """
@@ -152,6 +152,80 @@ FIXTURE_PRODUCTS: list[dict[str, Any]] = [
         "review_analysis": {"label": "Strong signal", "detail": "Fabric quality and fit feedback remain consistent across sources."},
         "price_history": {"low_90d": 2990, "median_90d": 3490, "high_90d": 3990, "trend_label": "Below its 90-day median"},
     },
+    {
+        "id": "fixture-tshirt-01",
+        "name": "Uniqlo AIRism Cotton Relaxed Crew Neck T-Shirt",
+        "category": "T-shirt",
+        "brand": "Uniqlo",
+        "description": "Relaxed-fit breathable cotton-blend T-shirt in olive and beige monochrome palette, ideal for coastal and Goa travel.",
+        "price": 1290,
+        "shipping_cost": 0,
+        "delivery_days": 3,
+        "delivery_label": "Arrives in 3 days",
+        "stock": 14,
+        "rating": 4.6,
+        "color": "olive",
+        "colors": ["olive", "beige", "off-white", "charcoal"],
+        "size": "M",
+        "sizes": ["S", "M", "L", "XL"],
+        "variants": [
+            {"color": "olive", "size": "S", "available": True, "price": 1290, "stock": 6},
+            {"color": "olive", "size": "M", "available": True, "price": 1290, "stock": 14},
+            {"color": "beige", "size": "M", "available": True, "price": 1290, "stock": 9},
+            {"color": "off-white", "size": "M", "available": True, "price": 1290, "stock": 11},
+            {"color": "charcoal", "size": "M", "available": True, "price": 1290, "stock": 8},
+        ],
+        "features": ["breathable", "relaxed fit", "neutral palette", "cotton"],
+        "seller": "Amazon India",
+        "url": "https://www.amazon.in/dp/B0UNIQLOTEE01",
+        "image": "/assets/editorial-outfit-triptych.png",
+        "source_kind": "sandbox_catalog",
+        "source_label": "Local catalog fixture",
+        "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
+        "review_summary": "Praised for breathable weight and clean drape in humid weather.",
+        "review_reliability": 0.91,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 210, "rating": 4.6, "signal": "Low duplication signal"},
+        ],
+        "review_analysis": {"label": "Strong signal", "detail": "Consistent fit and fabric reviews for travel wear."},
+        "price_history": {"low_90d": 1190, "median_90d": 1490, "high_90d": 1690, "trend_label": "Below its 90-day median"},
+    },
+    {
+        "id": "fixture-tshirt-02",
+        "name": "Jack & Jones Coastal Textured Relaxed Fit T-Shirt",
+        "category": "T-shirt",
+        "brand": "Jack & Jones",
+        "description": "Textured knit crew-neck T-shirt with relaxed drop-shoulder cut in earthy olive/beige tones.",
+        "price": 1449,
+        "shipping_cost": 0,
+        "delivery_days": 4,
+        "delivery_label": "Arrives in 4 days",
+        "stock": 9,
+        "rating": 4.4,
+        "color": "beige",
+        "colors": ["beige", "olive", "white", "black"],
+        "size": "M",
+        "sizes": ["S", "M", "L"],
+        "variants": [
+            {"color": "beige", "size": "M", "available": True, "price": 1449, "stock": 9},
+            {"color": "olive", "size": "M", "available": True, "price": 1449, "stock": 5},
+            {"color": "white", "size": "M", "available": True, "price": 1449, "stock": 7},
+        ],
+        "features": ["breathable", "textured knit", "neutral palette", "cotton"],
+        "seller": "Flipkart",
+        "url": "https://www.flipkart.com/jack-jones-coastal-tee/p/itm700502570",
+        "image": "/assets/editorial-outfit-triptych.png",
+        "source_kind": "sandbox_catalog",
+        "source_label": "Local catalog fixture",
+        "evidence": ["Catalog price", "Seller stock feed", "Delivery estimate"],
+        "review_summary": "Soft textured weave that holds shape well after washing.",
+        "review_reliability": 0.87,
+        "review_sources": [
+            {"name": "Verified buyer reviews", "count": 94, "rating": 4.4, "signal": "Consistent sizing feedback"},
+        ],
+        "review_analysis": {"label": "Mostly consistent", "detail": "Reviewers confirm true-to-size M fit."},
+        "price_history": {"low_90d": 1299, "median_90d": 1499, "high_90d": 1799, "trend_label": "Typical 90-day price"},
+    },
 ]
 
 
@@ -165,17 +239,23 @@ class FixtureCatalogClient:
     configured = True
 
     def search(self, brief: dict[str, Any], num_results: int = 10) -> dict[str, Any]:
-        query_tokens = _tokens(" ".join([
+        raw_desc = " ".join([
             str(brief.get("category") or ""),
             str(brief.get("description") or ""),
+            str(brief.get("raw_text") or ""),
             " ".join(str(value) for value in brief.get("must_have") or []),
-        ]))
+        ]).lower()
+        query_tokens = _tokens(raw_desc)
         category = str(brief.get("category") or "").lower()
-        candidates = FIXTURE_PRODUCTS
+        is_tshirt = bool(re.search(r"\b(?:t[\s-]*shirts?|tees?)\b", f"{category} {raw_desc}"))
         if any(token in category for token in ("chair", "ergonomic", "furniture")) or "chair" in query_tokens:
             candidates = [item for item in FIXTURE_PRODUCTS if item["category"] == "Office chair"]
+        elif is_tshirt:
+            candidates = [item for item in FIXTURE_PRODUCTS if item["category"] in {"T-shirt", "Clothing"}]
         elif any(token in category for token in ("shirt", "fashion", "clothing", "outfit")) or "shirt" in query_tokens:
             candidates = [item for item in FIXTURE_PRODUCTS if item["category"] == "Clothing"]
+        else:
+            candidates = [item for item in FIXTURE_PRODUCTS if item["category"] != "T-shirt"]
         brand = str(brief.get("brand") or "").lower().strip()
         if brand:
             candidates = sorted(

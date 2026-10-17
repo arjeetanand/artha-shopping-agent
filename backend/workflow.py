@@ -62,8 +62,8 @@ def _date_label(days: int) -> str:
 
 
 def _parse_budget(text: str) -> int | None:
-    text = re.sub(r"\b(under|below|budget|max|spend)(?=\d)", r"\1 ", text, flags=re.IGNORECASE)
-    cue = r"(?:₹|\b(?:under|below|budget|less than|upto|up to|spend|max(?:imum)?|rs\.?|inr)\b)"
+    text = re.sub(r"\b(under|below|budget|max|spend|around|about)(?=\d)", r"\1 ", text, flags=re.IGNORECASE)
+    cue = r"(?:₹|\b(?:under|below|budget|less than|upto|up to|spend|max(?:imum)?|around|about|approx(?:imately)?|rs\.?|inr)\b)"
     for match in re.finditer(rf"{cue}\D{{0,14}}([\d,]+(?:\.\d{{1,2}})?)\s*(k|thousand|lakh|grand)?", text, flags=re.IGNORECASE):
         if re.match(r"\s*days?\b", text[match.end():], flags=re.IGNORECASE):
             continue
@@ -1044,6 +1044,7 @@ class ExtractionAgent:
             "review_analysis": data.get("review_analysis") if isinstance(data, dict) and isinstance(data.get("review_analysis"), dict) else {},
             "price_history": data.get("price_history") if isinstance(data, dict) and isinstance(data.get("price_history"), dict) else {},
             "seller_reliability": data.get("seller_reliability") if isinstance(data, dict) else None,
+            "retrieved_at": str((data.get("retrieved_at") if isinstance(data, dict) else None) or raw.get("retrieved_at") or now_iso()),
         }
 
     def run(self, raw_products: list[dict[str, Any]], source_meta: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1661,6 +1662,48 @@ class RankingAgent:
                 product["reason_tags"].append("Accessory, not the requested product")
             product["color_fit"] = color_fit
             product["size_fit"] = size_fit
+            product["retrieved_at"] = str(product.get("retrieved_at") or now_iso())
+            product["availability_label"] = (
+                "In stock (verified)" if stock_fit is True else "Out of stock" if stock_fit is False else "Listed on source — confirm stock at retailer"
+            )
+            if requested_size:
+                product["size_status"] = (
+                    f"Size {requested_size.upper()} verified available" if size_fit is True
+                    else f"Size {requested_size.upper()} unavailable" if size_fit is False
+                    else f"Sizes listed: {', '.join(s.upper() for s in available_sizes[:4])}" if available_sizes
+                    else f"Size {requested_size.upper()} unverified — check on retailer page"
+                )
+            else:
+                product["size_status"] = f"Sizes listed: {', '.join(s.upper() for s in available_sizes[:4])}" if available_sizes else "Size options on retailer page"
+            exact_verified = bool(
+                product.get("gtin")
+                or (product.get("same_product_match") in {"gtin", "brand_and_exact_title"})
+                or (requested_brand and brand_fit and color_fit is True and size_fit is True and product.get("research_status") == "complete" and not brief.get("reference_attributes"))
+            )
+            product["match_kind"] = "exact_match" if exact_verified else "visually_similar"
+            product["match_kind_label"] = "Verified exact match" if exact_verified else "Visually similar match"
+            ref_attrs = brief.get("reference_attributes") if isinstance(brief.get("reference_attributes"), dict) else {}
+            explanation_parts: list[str] = []
+            if ref_attrs:
+                ref_desc = " ".join(filter(None, [ref_attrs.get("fit"), ref_attrs.get("pattern"), ref_attrs.get("color"), ref_attrs.get("category")]))
+                explanation_parts.append(f"Visually similar to the reference post ({ref_desc or 'selected garment'})")
+            elif exact_verified:
+                explanation_parts.append("Directly verified product match")
+            else:
+                explanation_parts.append(f"Matches your {brief.get('category') or 'shopping'} brief")
+            if product["budget_fit"] is True and line_total:
+                explanation_parts.append(f"within your ₹{budget:,} budget (₹{line_total:,})")
+            elif line_total:
+                explanation_parts.append(f"observed at ₹{line_total:,}")
+            if requested_size and size_fit is True:
+                explanation_parts.append(f"verified in size {requested_size.upper()}")
+            elif requested_size:
+                explanation_parts.append(f"confirm size {requested_size.upper()} at {product.get('seller') or 'retailer'}")
+            if brief.get("occasion") and str(brief.get("occasion")).lower() not in {"everyday", "shopping"}:
+                explanation_parts.append(f"suited for {brief.get('occasion')}")
+            if taste_matches:
+                explanation_parts.append("aligned with your saved style preferences")
+            product["match_explanation"] = ("; ".join(explanation_parts[:4]) + ".").capitalize()
             product["eligible"] = (
                 product["currency_fit"] is not False
                 and product["category_fit"]
@@ -2518,6 +2561,7 @@ def create_purchase_plan(payload: dict[str, Any], user_id: str) -> dict[str, Any
     plan = {
         "id": f"PLAN-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:5].upper()}",
         "user_id": user_id,
+        "name": str(payload.get("name") or "").strip()[:120],
         "search_id": search_id,
         "status": "ready_for_checkout",
         "total": sum(product["line_total"] for product in products),

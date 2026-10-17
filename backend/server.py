@@ -31,6 +31,9 @@ if __package__ in {None, ""}:
     from backend.connections import start_sync, list_connections, cancel_sync, disconnect, invoice_file
     from backend.taste_memory import public_memories, remember_link, save_memories, reindex_memories
     from backend.gmail_sync import GmailSyncError, cancel_gmail_sync, disconnect_gmail, gmail_status, save_gmail_connection, start_gmail_sync
+    from backend.retailer_extension_sync import cancel as cancel_retailer_extension, disconnect as disconnect_retailer_extension, submit_batch as submit_retailer_extension_batch
+    from backend.conversation import confirm_instagram_post_and_search, get_or_start_session, process_conversation_turn
+    from backend.social import capture_instagram_posts, resolve_instagram_reference, save_uploaded_instagram_reference, screenshot_file_for_reference
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, begin_gmail_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, complete_gmail_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from .clients import AnakinClient, BriefModel, search_status
@@ -47,6 +50,9 @@ else:
     from .connections import start_sync, list_connections, cancel_sync, disconnect, invoice_file
     from .taste_memory import public_memories, remember_link, save_memories, reindex_memories
     from .gmail_sync import GmailSyncError, cancel_gmail_sync, disconnect_gmail, gmail_status, save_gmail_connection, start_gmail_sync
+    from .retailer_extension_sync import cancel as cancel_retailer_extension, disconnect as disconnect_retailer_extension, submit_batch as submit_retailer_extension_batch
+    from .conversation import confirm_instagram_post_and_search, get_or_start_session, process_conversation_turn
+    from .social import capture_instagram_posts, resolve_instagram_reference, save_uploaded_instagram_reference, screenshot_file_for_reference
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -325,6 +331,16 @@ class Handler(BaseHTTPRequestHandler):
             return user["id"]
         raise ApiError("Sign in with Google to use a private taste profile.", 401)
 
+    def _assistant_user(self) -> tuple[str, str]:
+        user = self._user()
+        if user:
+            return str(user["id"]), str(user.get("name") or "Arjeet")
+        if not is_production():
+            local_user = db.get_default_local_user()
+            if local_user:
+                return str(local_user["id"]), str(local_user.get("name") or "Arjeet")
+        return "shopper-local", "Arjeet"
+
     def _local_connector_request(self) -> None:
         if self.client_address[0] not in {"127.0.0.1", "::1"}:
             raise ApiError("Account connection must be started from the local app.", 403)
@@ -333,12 +349,41 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin.rstrip("/") not in {value.rstrip("/") for value in allowed if value}:
             raise ApiError("Account connection must be started from the app window.", 403)
 
+    def _portal_extension_request(self) -> None:
+        origin = self.headers.get("Origin", "").rstrip("/")
+        allowed = {setting("SHOPPINGHELP_APP_URL"), *setting("SHOPPINGHELP_CORS_ORIGIN").split(",")}
+        if not origin or origin not in {value.strip().rstrip("/") for value in allowed if value.strip()}:
+            raise ApiError("Retailer sync must be submitted from the signed-in portal.", 403)
+
     def _app_origin(self) -> str | None:
         referer = self.headers.get("Referer", "")
         parsed = urlparse(referer)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return None
         return f"{parsed.scheme}://{parsed.netloc}"
+
+    def _gmail_callback(self, query: dict[str, list[str]], callback_path: str) -> None:
+        state = (query.get("state") or [""])[0]
+        clear_cookie = clear_oauth_state_cookie(state, callback_path)
+        if query.get("error"):
+            db.consume_oauth_state(state)
+            self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=cancelled", extra_cookies=(clear_cookie,) if clear_cookie else ())
+            return
+        user = self._user()
+        if not user:
+            db.consume_oauth_state(state)
+            self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=sign_in_required", extra_cookies=(clear_cookie,) if clear_cookie else ())
+            return
+        email, refresh_token, next_path = complete_gmail_auth((query.get("code") or [""])[0], state,
+            self.headers.get("Cookie"), user["id"])
+        save_gmail_connection(user["id"], email, refresh_token)
+        try:
+            start_gmail_sync(user["id"])
+        except Exception:
+            pass
+        destination = next_path if next_path.startswith(("http://", "https://")) else app_redirect_url(next_path)
+        separator = "&" if "?" in destination else "?"
+        self._redirect(f"{destination}{separator}gmail=connected", extra_cookies=(clear_cookie,) if clear_cookie else ())
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -349,6 +394,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         query = parse_qs(parsed.query)
+        gmail_callback_path = ""
         try:
             if path == "/api/health":
                 brief = BriefModel().status()
@@ -396,12 +442,18 @@ class Handler(BaseHTTPRequestHandler):
                 user = self._require_user()
                 authorize_url = begin_gmail_auth(user["id"], (query.get("next") or ["/taste-graph"])[0], self._app_origin())
                 state = (parse_qs(urlparse(authorize_url).query).get("state") or [""])[0]
-                if not state:
+                redirect_uri = (parse_qs(urlparse(authorize_url).query).get("redirect_uri") or [""])[0]
+                callback_path = urlparse(redirect_uri).path
+                if not state or not callback_path:
                     raise AuthError("Gmail connection could not be started.", 500)
-                self._redirect(authorize_url, oauth_state_cookie(state, "/api/auth/gmail/callback"))
+                self._redirect(authorize_url, oauth_state_cookie(state, callback_path))
                 return
             if path == "/api/auth/google/callback":
                 state = (query.get("state") or [""])[0]
+                if db.oauth_state_purpose(state) == "gmail":
+                    gmail_callback_path = path
+                    self._gmail_callback(query, gmail_callback_path)
+                    return
                 if query.get("error"):
                     clear_cookie = clear_oauth_state_cookie(state)
                     self._redirect(
@@ -420,25 +472,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
             if path == "/api/auth/gmail/callback":
-                state = (query.get("state") or [""])[0]
-                clear_cookie = clear_oauth_state_cookie(state, "/api/auth/gmail/callback")
-                if query.get("error"):
-                    self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=cancelled", extra_cookies=(clear_cookie,) if clear_cookie else ())
-                    return
-                user = self._user()
-                if not user:
-                    self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=sign_in_required", extra_cookies=(clear_cookie,) if clear_cookie else ())
-                    return
-                email, refresh_token, next_path = complete_gmail_auth((query.get("code") or [""])[0], state,
-                    self.headers.get("Cookie"), user["id"])
-                save_gmail_connection(user["id"], email, refresh_token)
-                try:
-                    start_gmail_sync(user["id"])
-                except Exception:
-                    pass
-                destination = next_path if next_path.startswith(("http://", "https://")) else app_redirect_url(next_path)
-                separator = "&" if "?" in destination else "?"
-                self._redirect(f"{destination}{separator}gmail=connected", extra_cookies=(clear_cookie,) if clear_cookie else ())
+                gmail_callback_path = path
+                self._gmail_callback(query, gmail_callback_path)
                 return
             if path == "/api/usage":
                 if is_production():
@@ -525,8 +560,33 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/voice/status":
                 self._send(200, VoiceService().status())
                 return
+            if path == "/api/assistant/session":
+                user_id, user_name = self._assistant_user()
+                session_id = (query.get("session_id") or [""])[0].strip() or None
+                reset = (query.get("reset") or [""])[0].strip().lower() in {"1", "true", "yes"}
+                if reset:
+                    session_id = None
+                self._send(200, get_or_start_session(user_id, session_id=session_id, user_name=user_name))
+                return
+            if path.startswith("/api/social/screenshots/"):
+                ref_id = path.removeprefix("/api/social/screenshots/").strip("/")
+                if not ref_id or "/" in ref_id:
+                    raise ApiError("Screenshot not found", 404)
+                user_id, _ = self._assistant_user()
+                file_path = screenshot_file_for_reference(ref_id, user_id) or screenshot_file_for_reference(ref_id)
+                if not file_path:
+                    raise ApiError("Screenshot not found", 404)
+                ext = file_path.suffix.lower()
+                mime = "image/png" if ext == ".png" else "image/webp" if ext == ".webp" else "image/jpeg"
+                self._send_bytes(200, file_path.read_bytes(), mime, {"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
+                return
             raise ApiError("Not found", 404)
         except AuthError as error:
+            if gmail_callback_path:
+                state = (query.get("state") or [""])[0]
+                clear_cookie = clear_oauth_state_cookie(state, gmail_callback_path)
+                self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=failed", extra_cookies=(clear_cookie,) if clear_cookie else ())
+                return
             if path == "/api/auth/google/callback":
                 state = (query.get("state") or [""])[0]
                 clear_cookie = clear_oauth_state_cookie(state)
@@ -570,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
                     message = "Style analysis is busy; try again shortly." if admission_error == 503 else "Too many style analyses; try again later."
                     raise ApiError(message, admission_error)
                 social_request_admitted = True
-            body_limit = 3_000_000 if path == "/api/voice/transcribe" else _MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_SOCIAL_BODY_BYTES if path == "/api/social/theme" else _MAX_BODY_BYTES
+            body_limit = 3_000_000 if path == "/api/voice/transcribe" else _MAX_VOICE_BODY_BYTES if path == "/api/voice/speak" else _MAX_SOCIAL_BODY_BYTES if path == "/api/social/theme" else 7_750_000 if path in {"/api/profile/flipkart-extension/submit", "/api/profile/retailer-extension/submit", "/api/social/instagram/upload"} else _MAX_BODY_BYTES
             payload = self._read_json(body_limit)
             if path in {"/api/agent/search/jobs", "/api/agent/search", "/api/agent/refine"}:
                 user = self._user()
@@ -585,6 +645,88 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/agent/refine":
                 self._send(200, run_refinement(payload))
+                return
+            if path == "/api/assistant/converse":
+                user_id, user_name = self._assistant_user()
+                message = str(payload.get("message") or "").strip()
+                if not message:
+                    raise ApiError("Message is required", 400)
+                session_id = str(payload.get("session_id") or "").strip() or None
+                overrides = payload.get("search_overrides") if isinstance(payload.get("search_overrides"), dict) else None
+                self._send(
+                    200,
+                    process_conversation_turn(
+                        user_id=user_id,
+                        message=message,
+                        session_id=session_id,
+                        user_name=user_name,
+                        search_payload_overrides=overrides,
+                    ),
+                )
+                return
+            if path == "/api/assistant/confirm-reference":
+                user_id, _ = self._assistant_user()
+                session_id = str(payload.get("session_id") or "").strip()
+                reference_id = str(payload.get("reference_id") or "").strip()
+                clothing_note = str(payload.get("clothing_note") or "").strip()
+                if not session_id or not reference_id:
+                    raise ApiError("session_id and reference_id are required", 400)
+                self._send(
+                    200,
+                    confirm_instagram_post_and_search(
+                        user_id=user_id,
+                        session_id=session_id,
+                        reference_id=reference_id,
+                        clothing_note=clothing_note,
+                        search_payload_overrides=payload.get("search_overrides") if isinstance(payload.get("search_overrides"), dict) else None,
+                    ),
+                )
+                return
+            if path == "/api/social/instagram/resolve":
+                user_id, _ = self._assistant_user()
+                ref_input = str(payload.get("reference") or payload.get("handle") or payload.get("url") or "").strip()
+                if not ref_input:
+                    raise ApiError("Instagram handle, URL, or friend name is required", 400)
+                resolution = resolve_instagram_reference(ref_input, user_id)
+                if not resolution.get("resolved"):
+                    self._send(200, resolution)
+                    return
+                captured = capture_instagram_posts(
+                    user_id=user_id,
+                    handle=resolution.get("handle") or "",
+                    profile_url=resolution.get("profile_url") or "",
+                    limit=int(payload.get("limit") or 5),
+                )
+                self._send(200, {**resolution, **captured})
+                return
+            if path == "/api/social/instagram/upload":
+                user_id, _ = self._assistant_user()
+                saved_ref = save_uploaded_instagram_reference(
+                    user_id=user_id,
+                    image_data=payload.get("image_data"),
+                    post_url=str(payload.get("post_url") or ""),
+                    caption=str(payload.get("caption") or ""),
+                    handle=str(payload.get("handle") or ""),
+                )
+                session_id = str(payload.get("session_id") or "").strip()
+                session_data = None
+                if session_id:
+                    session = db.get_conversation_session(session_id, user_id)
+                    if session:
+                        state = session.get("state") or {}
+                        posts = list(state.get("instagram_posts") or [])
+                        posts = [p for p in posts if p.get("id") != saved_ref.get("id")]
+                        posts.insert(0, saved_ref)
+                        state["instagram_posts"] = posts[:5]
+                        state["stage"] = "awaiting_instagram_post_selection"
+                        messages = list(session.get("messages") or [])
+                        messages.append({
+                            "role": "assistant",
+                            "text": "I saved your uploaded Instagram reference locally. Select it below and confirm the clothing item so I can analyze it and search retailers.",
+                            "timestamp": saved_ref.get("captured_at"),
+                        })
+                        session_data = db.save_conversation_session(session_id, user_id, state, messages)
+                self._send(201, {"reference": saved_ref, "session": session_data})
                 return
             if path == "/api/social/theme":
                 try:
@@ -663,6 +805,26 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError("Use Connect to read orders directly from your retailer account.", 400)
                 self._send(202, start_sync(user_id,provider))
                 return
+            if path in {"/api/profile/retailer-extension/submit", "/api/profile/flipkart-extension/submit"}:
+                self._portal_extension_request()
+                user_id = self._require_user()["id"]
+                is_legacy = path.endswith("flipkart-extension/submit")
+                if set(payload) != ({"pages", "stop_reason"} if is_legacy else {"provider", "pages", "stop_reason"}):
+                    raise ApiError("Retailer sync payload is invalid", 400)
+                provider = "flipkart" if is_legacy else payload["provider"]
+                connection = submit_retailer_extension_batch(user_id, provider, payload["pages"], payload["stop_reason"])
+                self._send(202, {"connection": connection})
+                return
+            if path in {"/api/profile/retailer-extension/cancel", "/api/profile/retailer-extension/disconnect", "/api/profile/flipkart-extension/cancel", "/api/profile/flipkart-extension/disconnect"}:
+                self._portal_extension_request()
+                user_id = self._require_user()["id"]
+                is_legacy = path.startswith("/api/profile/flipkart-extension/")
+                if (is_legacy and payload) or (not is_legacy and set(payload) != {"provider"}):
+                    raise ApiError("Retailer sync request is invalid", 400)
+                provider = "flipkart" if is_legacy else payload["provider"]
+                (disconnect_retailer_extension if path.endswith("disconnect") else cancel_retailer_extension)(user_id, provider)
+                self._send(200, {"success": True})
+                return
             if path == "/api/profile/gmail/sync":
                 self._send(202, {"connection": start_gmail_sync(self._require_user()["id"])})
                 return
@@ -716,13 +878,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/voice/transcribe":
                 voice = VoiceService()
-                if not voice.slng_api_key:
-                    raise VoiceError("SLNG_API_KEY is required for voice transcription.")
-                admission_error = _admit_paid_voice_request(self.client_address[0])
-                if admission_error:
-                    raise ApiError("Voice request limit reached; try again shortly.", admission_error)
-                voice_request_admitted = True
-                self._send(200, {"text": voice.transcribe(payload.get("audio"), payload.get("content_type")), "provider": "slng"})
+                if voice.preference == "slng":
+                    if not voice.slng_api_key:
+                        raise VoiceError("SLNG_API_KEY is required for SLNG voice transcription.")
+                    admission_error = _admit_paid_voice_request(self.client_address[0])
+                    if admission_error:
+                        raise ApiError("Voice request limit reached; try again shortly.", admission_error)
+                    voice_request_admitted = True
+                text = voice.transcribe(payload.get("audio"), payload.get("content_type"))
+                provider_name = "slng" if voice.preference == "slng" else voice.stt_provider
+                self._send(200, {"text": text, "provider": provider_name, "local": provider_name != "slng"})
                 return
             if path == "/api/voice/speak":
                 voice = VoiceService()
