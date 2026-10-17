@@ -8,7 +8,7 @@
     "demo:voice": "SHOPPINGHELP_SEARCH_MODE=fixture VOICE_PROVIDER=slng ./run.sh",
     "dev": "vite",
     "backend": ".venv/bin/python -u backend/server.py",
-    "test:e2e": "python3 tests/e2e_local.py",
+    "test:e2e": ".venv/bin/python tests/e2e_local.py",
     "test:brief": "python3 tests/brief_fallback.py",
     "test:payments": "python3 tests/payment_adapter.py",
     "test:auth": "python3 tests/auth_contract.py",

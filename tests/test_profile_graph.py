@@ -17,7 +17,7 @@ os.environ['SHOPPINGHELP_DB_PATH'] = str(Path(_TEMP.name)/'app.sqlite3')
 os.environ['SHOPPINGHELP_PRIVATE_DIR'] = str(Path(_TEMP.name)/'private')
 
 from backend.db import db
-from backend.profile import get_or_create_profile, ingest_retailer_orders, refresh_profile, build_context_graph
+from backend.profile import get_or_create_profile, ingest_retailer_orders, ingest_gmail_orders, refresh_profile, build_context_graph
 from backend.connections import six_month_cutoff, provider_directory, _store_invoice, invoice_file
 from backend.taste_memory import save_memories, remember_link, remember_orders, retrieve_memories, public_memories
 from backend.workflow import BriefAgent
@@ -79,7 +79,16 @@ class TasteContracts(unittest.TestCase):
         self.assertTrue(all(link['source'] in ids and link['target'] in ids for link in graph['links']))
         self.assertIn('memory',{node['group'] for node in graph['nodes']})
         self.assertEqual(graph['metrics']['tracked_orders'],1)
+        order_node=next(node for node in graph['nodes'] if node['group']=='order')
+        self.assertEqual(order_node['meta']['price'],'₹1,299.75')
         self.assertNotIn('embedding',public_memories(self.user)[0])
+
+    def test_graph_does_not_report_item_price_as_gmail_order_total(self):
+        ingest_gmail_orders(self.user,'amazon',[{'id':'gmail-message-1','order_date':'2026-10-01',
+            'evidence_hash':'a'*64,'items':[{'name':'Blue linen shirt','price':1299.75}]}])
+        graph=build_context_graph(self.user)
+        order_node=next(node for node in graph['nodes'] if node['group']=='order')
+        self.assertEqual(order_node['meta']['price'],'Price not exposed by retailer')
 
     def test_semantic_retrieval_never_reads_another_users_memory(self):
         blue=[1.0]+[0.0]*31
@@ -138,6 +147,14 @@ class TasteContracts(unittest.TestCase):
         self.assertEqual(saved['source_url'],'https://www.instagram.com/p/example/')
         self.assertEqual(matches['mode'],'hybrid')
         self.assertEqual(matches['memories'][0]['kind'],'saved_link')
+
+    def test_instagram_personal_login_is_not_presented_as_an_account_connector(self):
+        from backend.social import extract_theme_from_url
+        with (patch('backend.social._public_reference_url',return_value=('https://www.instagram.com/reel/example/','https://www.instagram.com/reel/example/')),
+              patch('backend.social.capture_social_page',return_value={'success':False,'requires_login':True})):
+            result=extract_theme_from_url('https://www.instagram.com/reel/example/',user_id=self.user)
+        self.assertFalse(result['success'])
+        self.assertIn('Personal-account history is unavailable',result['error'])
 
     def test_invoice_is_private_and_validated(self):
         from pypdf import PdfWriter

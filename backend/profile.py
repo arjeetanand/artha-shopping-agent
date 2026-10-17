@@ -329,7 +329,7 @@ def build_context_graph(user_id: str, active_brief: dict[str, Any] | None = None
         first_item = items[0] if items else {}
         name = first_item.get("name") or order.get("id")
         short_name = (name[:28] + "…") if len(name) > 30 else name
-        price = order.get("total") or first_item.get("price") or 0
+        price = order.get("total") if order.get("total_verified") else 0
         prov = str(order.get("payment_provider") or "retailer").lower()
 
         add_node(

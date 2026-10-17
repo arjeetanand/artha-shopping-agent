@@ -29,6 +29,7 @@ import {
   getHealth,
   getOrders,
   getPlans,
+  getProfileOrders,
   getSession,
   getTasteMemories,
   rememberProduct,
@@ -267,7 +268,6 @@ function NavRail({ activeView, onNavigate, onReset, health, planCount, savedCoun
           >
             <Icon name={item.icon} size={19} />
             <span>{item.label}</span>
-            {item.id === 'orders' ? <span className="nav-badge--sandbox">Sandbox</span> : null}
             {item.id === 'plans' && planCount > 0 ? <em>{planCount}</em> : null}
             {item.id === 'saved' && savedCount > 0 ? <em>{savedCount}</em> : null}
           </button>
@@ -2385,7 +2385,42 @@ function OrderTracker({ order }) {
   );
 }
 
-function OrdersView({ user, isSessionLoading, orders, onDiscover, onCancel, onAdvance, onRequestReturn, onRefund, onSignIn }) {
+function RetailerOrderCard({ order }) {
+  const retailer = ({ amazon: 'Amazon', flipkart: 'Flipkart', myntra: 'Myntra', ajio: 'AJIO' })[order.payment_provider] || 'Retailer';
+  const fromGmail = order.data_source === 'gmail_receipt';
+  const orderReference = order.retailer_order_id && !String(order.retailer_order_id).startsWith('gmail-')
+    ? order.retailer_order_id
+    : '';
+  const items = Array.isArray(order.items) ? order.items : [];
+  const status = order.status && order.status !== 'unknown' ? String(order.status).replace(/_/g, ' ') : 'Status not reported';
+
+  return (
+    <article className="order-card retailer-order-card">
+      <header className="order-card__header">
+        <div>
+          <span className="section-kicker">{fromGmail ? `${retailer} · Gmail receipt` : `${retailer} account`}</span>
+          <h2>{items[0]?.name || `${retailer} order`}</h2>
+          <p>{items.length} {items.length === 1 ? 'item' : 'items'} · Ordered {formatDate(order.order_date || order.created_at)}{orderReference ? ` · Order ${orderReference}` : ''}</p>
+        </div>
+        <span className="order-status" aria-label={`${fromGmail ? 'Receipt' : 'Retailer'} status: ${status}`}>{status}</span>
+      </header>
+      <div className="order-card__summary">
+        <div>
+          <strong>{order.total_verified ? formatPrice(order.total) : 'Total not verified'}</strong>
+          <small>{fromGmail ? 'Product details parsed from a Gmail receipt. Confirm them with the retailer.' : 'Imported from your retailer account. Check the retailer for current delivery updates.'}</small>
+        </div>
+      </div>
+      {items.length > 1 ? (
+        <ul className="retailer-order-items" aria-label="Items in this order">
+          {items.slice(1, 4).map((item, index) => <li key={`${item.name}-${index}`}>{item.name}</li>)}
+          {items.length > 4 ? <li>and {items.length - 4} more</li> : null}
+        </ul>
+      ) : null}
+    </article>
+  );
+}
+
+function OrdersView({ user, isSessionLoading, retailerOrders, orders, ordersLoading, ordersError, onRefresh, onConnectAccounts, onDiscover, onCancel, onAdvance, onRequestReturn, onRefund, onSignIn }) {
   if (isSessionLoading) {
     return (
       <div className="page-stack">
@@ -2406,9 +2441,9 @@ function OrdersView({ user, isSessionLoading, orders, onDiscover, onCancel, onAd
     <div className="page-stack orders-page">
       <div className="page-heading">
         <div>
-          <span className="section-kicker">Purchase tracker</span>
-          <h1>Know what happens next.</h1>
-          <p>Every confirmed order keeps its total, seller handoff, delivery estimate, and next status in one place.</p>
+          <span className="section-kicker">Order history</span>
+          <h1>Your purchases, in one place.</h1>
+          <p>Real order history from connected retailer accounts and Gmail receipts. Local test checkouts stay separate.</p>
         </div>
         <button type="button" className="primary-button" onClick={onDiscover}>
           <span>Find something else</span>
@@ -2416,61 +2451,93 @@ function OrdersView({ user, isSessionLoading, orders, onDiscover, onCancel, onAd
         </button>
       </div>
 
-      <div className="sandbox-notice-banner" role="note">
-        <Icon name="info" size={18} />
-        <div>
-          <strong>Local Development Sandbox</strong>
-          <span>
-            Real purchases happen on retailer websites. Orders, shipments, and tracking events shown below are simulated local mock states for developer verification.
-          </span>
+      <section className="orders-history-section" aria-labelledby="retailer-orders-title">
+        <div className="orders-section-heading">
+          <div>
+            <span className="section-kicker">Connected accounts</span>
+            <h2 id="retailer-orders-title">Retailer order history</h2>
+            <p>Orders imported from retailer accounts and matching Gmail receipts.</p>
+          </div>
+          {retailerOrders.length ? <span className="orders-count">{retailerOrders.length} {retailerOrders.length === 1 ? 'order' : 'orders'}</span> : null}
         </div>
-      </div>
+
+        {ordersLoading ? (
+          <div className="retailer-orders-empty" role="status">Loading connected order history…</div>
+        ) : ordersError ? (
+          <div className="retailer-orders-empty" role="alert">
+            <strong>Could not load retailer orders.</strong>
+            <p>{ordersError}</p>
+            <button type="button" className="quiet-action" onClick={() => onRefresh().catch(() => {})}>Retry</button>
+          </div>
+        ) : retailerOrders.length ? (
+          <div className="orders-list">
+            {retailerOrders.map((order) => <RetailerOrderCard key={order.id} order={order} />)}
+          </div>
+        ) : (
+          <div className="retailer-orders-empty">
+            <strong>No retailer history imported yet.</strong>
+            <p>Connect Amazon, Flipkart, Myntra, or Gmail in Taste OS to show your real orders here.</p>
+            <button type="button" className="quiet-action" onClick={onConnectAccounts}>Connect accounts</button>
+          </div>
+        )}
+      </section>
 
       {orders.length ? (
-        <div className="orders-list">
-          {orders.map((order) => (
-            <article className="order-card" key={order.id}>
-              <header className="order-card__header">
-                <div>
-                  <span className="section-kicker">{order.payment_provider === 'sandbox' ? 'Sandbox order' : 'Confirmed order'}</span>
-                  <h2>{order.id}</h2>
-                  <p>Created {formatDate(order.created_at)} · Delivering to {order.location}</p>
-                </div>
-                <span className={`order-status order-status--${order.status}`}>{order.status.replace(/_/g, ' ')}</span>
-              </header>
-              <div className="order-card__summary">
-                <div>
-                  <strong>{formatPrice(order.total)}</strong>
-                  <small>{order.items?.length || 0} {order.items?.length === 1 ? 'item' : 'items'} · {order.notice}</small>
-                </div>
-                <div className="order-actions">
-                  {order.payment_provider === 'sandbox' && !['cancelled', 'delivered', 'return_requested', 'refunded'].includes(order.status) ? (
-                    <button type="button" className="quiet-action" onClick={() => onAdvance(order.id)}>Advance sandbox status</button>
-                  ) : null}
-                  {order.payment_provider === 'sandbox' && order.status !== 'cancelled' && !['delivered', 'return_requested', 'refunded'].includes(order.status) ? (
-                    <button type="button" className="quiet-action" onClick={() => onCancel(order.id)}>Cancel order</button>
-                  ) : null}
-                  {order.payment_provider === 'sandbox' && order.status === 'delivered' ? (
-                    <button type="button" className="quiet-action" onClick={() => onRequestReturn(order.id)}>Request return</button>
-                  ) : null}
-                  {order.payment_provider === 'sandbox' && order.status === 'return_requested' ? (
-                    <button type="button" className="quiet-action" onClick={() => onRefund(order.id)}>Record sandbox refund</button>
-                  ) : null}
-                  {order.payment_provider !== 'sandbox' ? <small className="order-actions__note">Live status waits for the merchant adapter</small> : null}
-                </div>
+        <section className="local-orders-section" aria-labelledby="local-orders-title">
+          <div className="orders-section-heading">
+            <div>
+              <span className="section-kicker">In-app tracker</span>
+              <h2 id="local-orders-title">Local checkout activity</h2>
+              <p>This history is kept separate from orders imported from retailers.</p>
+            </div>
+          </div>
+          {orders.some((order) => order.payment_provider === 'sandbox') ? (
+            <div className="sandbox-notice-banner" role="note">
+              <Icon name="info" size={18} />
+              <div>
+                <strong>Sandbox checkouts are simulated</strong>
+                <span>They do not represent completed retailer purchases or live shipment updates.</span>
               </div>
-              <OrderTracker order={order} />
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <span className="empty-state__icon"><Icon name="truck" size={26} /></span>
-          <h2>No orders yet.</h2>
-          <p>Run a local catalog search, review the total, and confirm an order to see its tracker here.</p>
-          <button type="button" className="primary-button empty-state__btn" onClick={onDiscover}>Start discovering <Icon name="arrow" size={16} /></button>
-        </div>
-      )}
+            </div>
+          ) : null}
+          <div className="orders-list">
+            {orders.map((order) => (
+              <article className="order-card" key={order.id}>
+                <header className="order-card__header">
+                  <div>
+                    <span className="section-kicker">{order.payment_provider === 'sandbox' ? 'Sandbox order' : 'Confirmed order'}</span>
+                    <h2>{order.id}</h2>
+                    <p>Created {formatDate(order.created_at)} · Delivering to {order.location}</p>
+                  </div>
+                  <span className={`order-status order-status--${order.status}`}>{order.status.replace(/_/g, ' ')}</span>
+                </header>
+                <div className="order-card__summary">
+                  <div>
+                    <strong>{formatPrice(order.total)}</strong>
+                    <small>{order.items?.length || 0} {order.items?.length === 1 ? 'item' : 'items'} · {order.notice}</small>
+                  </div>
+                  <div className="order-actions">
+                    {order.payment_provider === 'sandbox' && !['cancelled', 'delivered', 'return_requested', 'refunded'].includes(order.status) ? (
+                      <button type="button" className="quiet-action" onClick={() => onAdvance(order.id)}>Advance sandbox status</button>
+                    ) : null}
+                    {order.payment_provider === 'sandbox' && order.status !== 'cancelled' && !['delivered', 'return_requested', 'refunded'].includes(order.status) ? (
+                      <button type="button" className="quiet-action" onClick={() => onCancel(order.id)}>Cancel order</button>
+                    ) : null}
+                    {order.payment_provider === 'sandbox' && order.status === 'delivered' ? (
+                      <button type="button" className="quiet-action" onClick={() => onRequestReturn(order.id)}>Request return</button>
+                    ) : null}
+                    {order.payment_provider === 'sandbox' && order.status === 'return_requested' ? (
+                      <button type="button" className="quiet-action" onClick={() => onRefund(order.id)}>Record sandbox refund</button>
+                    ) : null}
+                    {order.payment_provider !== 'sandbox' ? <small className="order-actions__note">Live status waits for the merchant adapter</small> : null}
+                  </div>
+                </div>
+                <OrderTracker order={order} />
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -2792,7 +2859,11 @@ export default function App() {
   const [searchError, setSearchError] = useState('');
   const [savedIds, setSavedIds] = useState(readSavedIds);
   const [plans, setPlans] = useState([]);
+  const [isPlansLoading, setIsPlansLoading] = useState(true);
   const [orders, setOrders] = useState([]);
+  const [retailerOrders, setRetailerOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
   const [health, setHealth] = useState({ search_configured: false, ai: { provider: 'ollama' }, payment_provider: 'disabled', payment_configured: false });
   const [voice, setVoice] = useState({ provider: 'browser', label: 'Local browser voice' });
   const [usage, setUsage] = useState(null);
@@ -2838,8 +2909,10 @@ export default function App() {
 
   const refreshOrders = useCallback(async () => {
     if (!user?.id) return;
-    const body = await getOrders();
-    setOrders(body.orders || []);
+    const [checkoutBody, retailerBody] = await Promise.all([getOrders(), getProfileOrders()]);
+    setOrders((checkoutBody.orders || []).filter((order) => ['sandbox', 'razorpay'].includes(order.payment_provider)));
+    setRetailerOrders(retailerBody.orders || []);
+    setOrdersError('');
   }, [user?.id]);
 
   const refreshUsage = useCallback(async () => {
@@ -2914,10 +2987,17 @@ export default function App() {
 
   useEffect(() => {
     if (activeView !== 'orders') return undefined;
-    const loadOrders = () => refreshOrders().catch((error) => setToast(error.message));
+    let active = true;
+    setOrdersLoading(true);
+    setOrdersError('');
+    const loadOrders = () => refreshOrders().catch((error) => {
+      if (active) setOrdersError(error.message || 'Could not load order history.');
+    }).finally(() => {
+      if (active) setOrdersLoading(false);
+    });
     loadOrders();
     const timer = window.setInterval(loadOrders, 30_000);
-    return () => window.clearInterval(timer);
+    return () => { active = false; window.clearInterval(timer); };
   }, [activeView, refreshOrders]);
 
   useEffect(() => {
@@ -3577,7 +3657,12 @@ export default function App() {
       <OrdersView
         user={user}
         isSessionLoading={isSessionLoading}
+        retailerOrders={retailerOrders}
         orders={orders}
+        ordersLoading={ordersLoading}
+        ordersError={ordersError}
+        onRefresh={refreshOrders}
+        onConnectAccounts={() => setActiveView('taste-graph')}
         onDiscover={startNewSearch}
         onCancel={handleCancelOrder}
         onAdvance={handleAdvanceOrder}
