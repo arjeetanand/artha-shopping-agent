@@ -70,6 +70,8 @@ def _json_object(value: object) -> dict[str, Any] | None:
 class AnakinClient:
     """Anakin Search API and inline URL Scraper client. Credentials never leave the backend."""
 
+    name = "anakin"
+
     def __init__(self) -> None:
         self.api_key = setting("ANAKIN_API_KEY")
 
@@ -125,6 +127,94 @@ class AnakinClient:
             raise RuntimeError("Anakin could not extract that URL")
         record_usage("anakin", "reference_scrape", model="url-scraper", input_characters=len(url))
         return result
+
+
+class TavilyClient:
+    """Basic-tier discovery with free local product-page checks."""
+
+    name = "tavily"
+
+    def __init__(self) -> None:
+        self.api_key = setting("TAVILY_API_KEY")
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+    def _request(self, endpoint: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
+        if not self.configured:
+            raise RuntimeError("Tavily is not configured. Add TAVILY_API_KEY to .env and restart the API.")
+        result = _request_json(
+            f"https://api.tavily.com/{endpoint}", method="POST", payload=payload,
+            headers={"Authorization": f"Bearer {self.api_key}"}, timeout=timeout,
+        )
+        if not isinstance(result, dict):
+            raise RuntimeError("Tavily returned an invalid response")
+        record_usage("tavily", endpoint, model="basic", input_characters=len(str(payload.get("query") or payload.get("urls") or "")))
+        return result
+
+    def search(self, query: str, num_results: int = 8) -> dict[str, Any]:
+        domains = [domain.split("/", 1)[0] for domain in re.findall(r"\bsite:([^\s]+)", query)]
+        if domains:
+            query = re.sub(r"\s+", " ", re.sub(r"\bsite:[^\s]+|\bOR\b", "", query)).strip()
+        response = self._request("search", {
+            "query": query, "max_results": min(max(num_results, 1), 10),
+            "search_depth": "basic", "auto_parameters": False,
+            "country": "india", "include_answer": False, "include_raw_content": False,
+            **({"include_domains": domains} if domains else {}),
+        })
+        results = response.get("results")
+        if not isinstance(results, list):
+            raise RuntimeError("Tavily returned invalid search results")
+        return {"results": [{**item, "snippet": item.get("content") or ""} for item in results if isinstance(item, dict)]}
+
+    def scrape_inline(self, url: str, max_wait_seconds: int = 90) -> dict[str, Any]:
+        from .social import _public_reference_url, capture_social_page
+
+        url, _ = _public_reference_url(url)
+        started = time.monotonic()
+        local = capture_social_page(url, product=True, timeout=min(30, max_wait_seconds))
+        if local.get("success") and local.get("html"):
+            return {"html": local["html"], "finalUrl": local.get("finalUrl") or url,
+                    "pageTitle": local.get("title") or "", "description": local.get("description") or ""}
+        remaining = int(max_wait_seconds - (time.monotonic() - started))
+        if remaining < 1:
+            raise TimeoutError("Product page extraction timed out")
+        response = self._request("extract", {
+            "urls": [url], "extract_depth": "basic", "format": "markdown",
+            "timeout": min(10, remaining),
+        }, timeout=remaining)
+        results = response.get("results") or []
+        if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict) or not results[0].get("raw_content"):
+            raise RuntimeError("Tavily could not extract that URL")
+        # Text is reference context only; purchase claims require retailer JSON-LD.
+        return {"markdown": results[0]["raw_content"], "finalUrl": results[0].get("url") or url}
+
+
+def get_search_client() -> AnakinClient | TavilyClient:
+    provider = setting("SHOPPINGHELP_SEARCH_PROVIDER", "auto").lower()
+    if provider == "auto":
+        provider = "tavily" if setting("TAVILY_API_KEY") else "anakin"
+    if provider not in {"anakin", "tavily"}:
+        raise ValueError("SHOPPINGHELP_SEARCH_PROVIDER must be auto, tavily, or anakin")
+    return TavilyClient() if provider == "tavily" else AnakinClient()
+
+
+def search_status() -> dict[str, Any]:
+    client = get_search_client()
+    return {"search_provider": client.name, "search_configured": client.configured}
+
+
+def search_failure(provider: str, error: Exception) -> str:
+    label = provider.title()
+    code = getattr(error, "code", None)
+    if code in {402, 432, 433}:
+        return f"{label} search credits are exhausted (HTTP {code}). Check your provider balance or free-tier renewal."
+    if code in {401, 403}:
+        return f"{label} rejected the API key (HTTP {code}). Check {provider.upper()}_API_KEY and account access."
+    if code == 429:
+        return f"{label} search rate limit reached. Wait before trying again."
+    return f"{label} live search failed{f' (HTTP {code})' if code else ''}. Check provider availability and network access."
 
 
 class OllamaClient:

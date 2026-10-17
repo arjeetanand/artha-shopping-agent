@@ -48,14 +48,14 @@ def _public_reference_url(value: str) -> tuple[str, str]:
     return value, safe_url
 
 
-def capture_social_page(url: str, profile_dir: Path | None = None) -> dict[str, Any]:
+def capture_social_page(url: str, profile_dir: Path | None = None, *, product: bool = False, timeout: int = 30) -> dict[str, Any]:
     """Capture page metadata and screenshot using Playwright Node script."""
     try:
         proc = subprocess.run(
-            ["node", str(_SCRAPER_SCRIPT), url, *([str(profile_dir)] if profile_dir else [])],
+            ["node", str(_SCRAPER_SCRIPT), url, *([str(profile_dir)] if profile_dir else []), *(["--product"] if product else [])],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
             check=False,
         )
         if proc.returncode != 0 or not proc.stdout.strip():

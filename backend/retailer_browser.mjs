@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile, readFile, chmod } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { RETAILERS, retailerUrl, parseOrderEvidence, historyUrls } from './retailer_extract.mjs';
+import { RETAILERS, retailerUrl, parseOrderEvidence, parseFlipkartOrderPage, historyUrls } from './retailer_extract.mjs';
 import { isPublicHttpUrl } from './social_network.mjs';
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -35,17 +35,19 @@ async function snapshot(page, config) {
   }, config);
 }
 
-async function savePdf(buffer, directory, orderId) {
+async function savePdf(buffer, directory, orderId, savedPdfs) {
   if (buffer.length > 20 * 1024 * 1024 || buffer.subarray(0,5).toString() !== '%PDF-') return false;
   const sha256 = createHash('sha256').update(buffer).digest('hex');
+  if(savedPdfs.has(sha256)) return false;
   const filename = `${sha256}.pdf`;
   await writeFile(path.join(directory, filename), buffer, {mode:0o600});
+  savedPdfs.add(sha256);
   log('invoice_saved','info',{response_bytes:buffer.length});
   emit({type:'invoice', retailer_order_id:orderId, filename, sha256});
   return true;
 }
 
-async function fetchInvoice(context, url, directory, orderId, provider, visited = new Set()) {
+async function fetchInvoice(context, url, directory, orderId, provider, visited = new Set(), savedPdfs = new Set(), headers = {}) {
   if (visited.has(url) || visited.size > 12) {
     log('invoice_fetch','warning',{error_code:'duplicate_or_limit'});
     return 0;
@@ -56,7 +58,7 @@ async function fetchInvoice(context, url, directory, orderId, provider, visited 
       log('invoice_fetch','warning',{error_code:'unsafe_url'});
       return false;
     }
-    const response = await context.request.get(url, {maxRedirects:0, timeout:20000});
+    const response = await context.request.get(url, {maxRedirects:0, timeout:20000,headers});
     if (response.status() >= 300 && response.status() < 400) {
       const location = response.headers().location;
       if (!location) {
@@ -72,7 +74,7 @@ async function fetchInvoice(context, url, directory, orderId, provider, visited 
       return false;
     }
     const content = await response.body();
-    if (content.subarray(0,5).toString()==='%PDF-') return savePdf(content,directory,orderId);
+    if (content.subarray(0,5).toString()==='%PDF-') return savePdf(content,directory,orderId,savedPdfs);
     if (/text\/html/i.test(response.headers()['content-type'] || '') && retailerUrl(url,provider)) {
       log('invoice_fetch','info',{route:routeName(url),http_status:response.status(),response_bytes:content.length});
       const invoicePage = await context.newPage();
@@ -81,7 +83,7 @@ async function fetchInvoice(context, url, directory, orderId, provider, visited 
         const links = await invoicePage.locator('a[href]').filter({hasText:/^(?:Invoice\s*\d*|Download Invoice|Tax Invoice|Download Tax Invoice)$/i}).evaluateAll(nodes=>nodes.map(node=>node.href));
         log('invoice_page_read',links.length?'info':'warning',{invoice_candidate_count:links.length,route:routeName(url)});
         let count=0;
-        for (const link of links) count+=Number(await fetchInvoice(context,link,directory,orderId,provider,visited));
+        for (const link of links) count+=Number(await fetchInvoice(context,link,directory,orderId,provider,visited,savedPdfs,headers));
         return count;
       } finally {await invoicePage.close();}
     }
@@ -91,7 +93,7 @@ async function fetchInvoice(context, url, directory, orderId, provider, visited 
   return false;
 }
 
-async function collectInvoices(context, page, links, directory, orderId, provider, interact = true) {
+async function collectInvoices(context, page, links, directory, orderId, provider, interact = true, savedPdfs = new Set(), invoiceApi = null) {
   let count = 0;
   const candidates = new Set(links || []);
   log('invoice_scan','info',{invoice_candidate_count:candidates.size});
@@ -102,18 +104,31 @@ async function collectInvoices(context, page, links, directory, orderId, provide
     for (const href of await page.locator('a').filter({hasText:/^(?:Invoice\s*\d*|Download Invoice|Tax Invoice)$/i}).evaluateAll(nodes=>nodes.map(n=>n.href))) candidates.add(href);
   }
   for (const url of candidates) {
-    try { count += Number(await fetchInvoice(context,url,directory,orderId,provider)); }
+    try { count += Number(await fetchInvoice(context,url,directory,orderId,provider,new Set(),savedPdfs)); }
     catch(error) { log('invoice_fetch','warning',{error_class:error?.name||'Error'}); }
   }
   if (!count && interact) {
-    const button = page.getByRole('button',{name:/^(?:Download Invoice|Download Tax Invoice)$/i}).first();
+    if(provider==='flipkart') {
+      const priceDetails=page.getByRole('button',{name:/^Price details(?:\s|$)/i}).first();
+      if(await priceDetails.isVisible().catch(()=>false) && await priceDetails.getAttribute('aria-expanded')!=='true') await priceDetails.click();
+    }
+    const button = page.getByText(/^(?:Download Invoice|Download Tax Invoice)$/i).first();
     if (await button.isVisible().catch(()=>false)) {
-      const downloadPromise = page.waitForEvent('download',{timeout:10000}).catch(()=>null);
-      await button.click();
-      const download = await downloadPromise;
-      if (download && !await download.failure()) {
-        const temporary = await download.path();
-        if (temporary) count += Number(await savePdf(await readFile(temporary),directory,orderId));
+      if(provider==='flipkart' && invoiceApi) {
+        if(invoiceApi.attemptedOrders.has(orderId)) return count;
+        invoiceApi.attemptedOrders.add(orderId);
+        // Chrome on macOS can crash in its native download UI; save the authenticated PDF response directly.
+        const url=new URL(`/api/1/self-serve/invoice/download/${encodeURIComponent(orderId)}`,invoiceApi.origin).href;
+        try {count+=Number(await fetchInvoice(context,url,directory,orderId,provider,new Set(),savedPdfs,invoiceApi.headers));}
+        catch(error) {log('invoice_fetch','warning',{error_class:error?.name||'Error'});}
+      } else {
+        const downloadPromise = page.waitForEvent('download',{timeout:10000}).catch(()=>null);
+        await button.click();
+        const download = await downloadPromise;
+        if (download && !await download.failure()) {
+          const temporary = await download.path();
+          if (temporary) count += Number(await savePdf(await readFile(temporary),directory,orderId,savedPdfs));
+        } else log('invoice_download','warning',{error_code:download?'download_failed':'download_not_received'});
       }
     }
   }
@@ -210,16 +225,48 @@ export async function runConnection(input) {
       emit({type:'complete',status:'connected',orders:0,invoices:0,coverage_complete:true});
       return;
     }
+    await readHistory(context,page,input);
+  } finally {process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);await context.close();}
+}
+
+export async function readHistory(context,page,input) {
+  const provider=input.provider, config=RETAILERS[provider], startedAt=Date.now();
+  const historySeeds=historyUrls(provider,input.cutoff,input.until || new Date().toISOString().slice(0,10));
+  const apiOrders=new Map(), apiErrors=[], pending=new Set(), invoiceAttempts=new Set();
+  let apiPages=0, moreOrders=null, invoiceApi=null;
+  const onResponse=response=>{
+    if (provider!=='flipkart' || !retailerUrl(response.url(),provider)
+      || !/\/api\/\d+\/self-serve\/orders\/?$/.test(new URL(response.url()).pathname)) return;
+    const task=(async()=>{
+      if (!response.ok()) throw new Error('orders_api_http_error');
+      const result=parseFlipkartOrderPage(await response.json());
+      if(result.error) throw new Error(result.error);
+      apiPages++;
+      const userAgent=response.request().headers()['x-user-agent'];
+      invoiceApi={origin:new URL(response.url()).origin,headers:userAgent?{'X-User-Agent':userAgent}:{},attemptedOrders:invoiceAttempts};
+      moreOrders=result.moreOrder;
+      for(const order of result.orders) apiOrders.set(order.id,order);
+      apiErrors.push(...result.errors);
+      log('history_api_page','info',{page:apiPages,order_count:result.orders.length,has_next_page:moreOrders});
+    })().catch(error=>{
+      apiErrors.push('orders_api_unreadable');
+      log('history_api_page','warning',{error_class:error?.name||'Error',error_code:'orders_api_unreadable',http_status:response.status()});
+    }).finally(()=>pending.delete(task));
+    pending.add(task);
+  };
+  context.on('response',onResponse);
+  try {
     emit({type:'progress',status:'syncing',message:'Reading order history for the last six months.'});
     log('history_read_started','info',{route:routeName(page.url())});
-    await openHistory(page,target,provider);
+    await openHistory(page,historySeeds.shift(),provider);
     log('history_page_loaded','info',{route:routeName(page.url())});
     const detailUrls = new Set(), cardSnapshots = [], visitedPages = new Set();
     let historyExhausted = false, windowLimited = false, pageCount = 0;
     for (;pageCount<100;pageCount++) {
       await page.waitForTimeout(1000);
+      await Promise.all([...pending]);
       const text = await page.locator('body').innerText();
-      const signature = createHash('sha256').update(text).digest('hex');
+      const signature = createHash('sha256').update(text+apiPages).digest('hex');
       if (visitedPages.has(signature)) {
         log('pagination_stopped','warning',{page:pageCount+1,page_signature_duplicate:true,stop_reason:'duplicate_page'});
         break;
@@ -259,10 +306,12 @@ export async function runConnection(input) {
         continue;
       }
       let changed = false;
+      const beforeApiPages=apiPages;
       for (let attempt=0;attempt<3;attempt++) {
         await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
         await page.waitForTimeout(1200);
-        if (await page.locator('body').innerText() !== text) {changed=true;break;}
+        await Promise.all([...pending]);
+        if (await page.locator('body').innerText() !== text || apiPages!==beforeApiPages) {changed=true;break;}
       }
       if (!changed) {
         log('pagination','info',{page:pageCount+1,scroll_changed:false,outcome:'history_end'});
@@ -275,8 +324,7 @@ export async function runConnection(input) {
     const seenOrders = new Set();
     let orderCount=0,invoiceCount=0,missingDates=0,unreadable=0,missingInvoices=0,datedOrders=0;
     const detailPage = await context.newPage();
-    async function processSnapshot(data,invoicePage,interact = true) {
-      const order = parseOrderEvidence(data,provider);
+    async function processOrder(order,data,invoicePage,interact = true,invoiceTotal = null) {
       if (order.error) {
         if(order.error==='order_date_missing')missingDates++;else unreadable++;
         log('order_parse','warning',{error_code:order.error});
@@ -284,10 +332,14 @@ export async function runConnection(input) {
       }
       datedOrders++;
       if (seenOrders.has(order.id)) {log('order_parse','info',{outcome:'duplicate_skipped'});return;}
-      if (order.order_date<input.cutoff) {log('order_parse','info',{outcome:'outside_window'});return;}
+      if (order.order_date<input.cutoff || (input.until && order.order_date>input.until)) {log('order_parse','info',{outcome:'outside_window'});return;}
       log('order_parse','info',{outcome:'complete',item_count:order.items.length,invoice_candidate_count:(data.invoiceLinks||[]).length});
       seenOrders.add(order.id);
-      const invoiceTotal = await collectInvoices(context,invoicePage,data.invoiceLinks,input.invoice_dir,order.id,provider,interact);
+      if(invoiceTotal===null) {
+        invoiceTotal=0;
+        try {invoiceTotal = await collectInvoices(context,invoicePage,data.invoiceLinks,input.invoice_dir,order.id,provider,interact);}
+        catch(error) {log('invoice_scan','warning',{error_code:'invoice_read_failed',error_class:error?.name||'Error'});}
+      }
       invoiceCount += invoiceTotal;
       missingInvoices += Number(!invoiceTotal);
       order.invoice_status = invoiceTotal ? 'downloaded' : 'unavailable';
@@ -295,13 +347,39 @@ export async function runConnection(input) {
       orderCount++;
       emit({type:'progress',status:'syncing',message:`Read ${orderCount} recent orders; saved ${invoiceCount} invoices.`,orders:orderCount,invoices:invoiceCount});
     }
+    await Promise.all([...pending]);
+    for(const error of apiErrors) await processOrder({error},{},page,false);
+    if(apiPages) {
+      historyExhausted &&= moreOrders===false;
+      for(const order of apiOrders.values()) {
+        if(order.order_date<input.cutoff || (input.until && order.order_date>input.until)) {datedOrders++;continue;}
+        const urls=[...detailUrls].filter(value=>new URL(value).searchParams.get('order_id')===order.id);
+        const savedPdfs=new Set();
+        for(const url of urls) {
+          try {
+            await detailPage.goto(url,{waitUntil:'domcontentloaded',timeout:35000});
+            if(!retailerUrl(detailPage.url(),provider) || /signin|login|\/ap\//i.test(new URL(detailPage.url()).pathname)) throw new Error('Retailer session expired during sync');
+            await detailPage.getByRole('button',{name:/^Price details(?:\s|$)/i}).first().waitFor({state:'visible',timeout:10000}).catch(()=>{});
+            const data=await snapshot(detailPage,config);
+            await collectInvoices(context,detailPage,data.invoiceLinks,input.invoice_dir,order.id,provider,true,savedPdfs,invoiceApi);
+            if(invoiceAttempts.has(order.id)) break;
+          } catch(error) {
+            if(/session expired/.test(error.message)) throw error;
+            log('invoice_page_read','warning',{error_class:error?.name||'Error'});
+          }
+        }
+        await processOrder(order,{invoiceLinks:[]},detailPage,false,savedPdfs.size);
+      }
+    }
     for (const url of detailUrls) {
+      if(apiOrders.has(new URL(url).searchParams.get('order_id'))) continue;
       try {
         log('order_detail_navigation','info',{route:routeName(url)});
         await detailPage.goto(url,{waitUntil:'domcontentloaded',timeout:35000});
         if (!retailerUrl(detailPage.url(),provider) || /signin|login|\/ap\//i.test(new URL(detailPage.url()).pathname)) throw new Error('Retailer session expired during sync');
         await detailPage.waitForTimeout(700);
-        await processSnapshot({...await snapshot(detailPage,config),url:detailPage.url()},detailPage);
+        const data={...await snapshot(detailPage,config),url:detailPage.url()};
+        await processOrder(parseOrderEvidence(data,provider),data,detailPage);
       } catch(error) {
         if (/session expired/.test(error.message)) {
           log('order_detail_read','error',{error_code:'session_expired'});
@@ -311,9 +389,9 @@ export async function runConnection(input) {
         log('order_detail_read','warning',{error_class:error?.name||'Error'});
       }
     }
-    for (const data of cardSnapshots) await processSnapshot(data,page,false);
+    for (const data of cardSnapshots) await processOrder(parseOrderEvidence(data,provider),data,page,false);
     const empty = /(?:no orders|haven.t placed any orders|you have not placed|no purchases)/i.test(await page.locator('body').innerText());
-    if (!datedOrders && !empty) {
+    if (!datedOrders && !empty && !(apiPages && apiOrders.size===0 && !apiErrors.length && moreOrders===false)) {
       log('history_layout_unrecognized','error',{page:pageCount+1,card_count:cardSnapshots.length,detail_link_count:detailUrls.size,
         body_chars:(await page.locator('body').innerText()).length});
       throw new Error('Order history opened, but its current layout could not be read. No orders were invented.');
@@ -325,7 +403,7 @@ export async function runConnection(input) {
       missing_dates:missingDates,unreadable_pages:unreadable,pages:pageCount+1,
       coverage_complete:historyExhausted&&!windowLimited&&!missingDates&&!unreadable,
       cutoff:input.cutoff,window_limited:windowLimited});
-  } finally {process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);await context.close();}
+  } finally {context.off('response',onResponse);}
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {

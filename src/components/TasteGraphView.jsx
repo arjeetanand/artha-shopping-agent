@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
-import { getTasteGraph, getTasteProfile, syncRetailerAccount, getProfileConnections, getTasteMemories, getProfileInvoices, invoiceDownloadUrl, cancelRetailerSync, disconnectRetailer, removeTasteMemory, reindexTasteMemories } from '../lib/api';
+import { getTasteGraph, getTasteProfile, syncRetailerAccount, getProfileConnections, getTasteMemories, getProfileInvoices, invoiceDownloadUrl, cancelRetailerSync, disconnectRetailer, removeTasteMemory, reindexTasteMemories, beginGmailConnect, syncGmail, cancelGmailSync, disconnectGmail } from '../lib/api';
 import '../taste-graph.css';
 
 const RETAILER_CONFIG = {
@@ -91,6 +91,18 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
       await loadData(false);
     } catch (err) {
       setErrorMsg(`Sync failed for ${provider}: ${err.message}`);
+    } finally {
+      setSyncingProvider(null);
+    }
+  };
+
+  const handleSyncGmail = async () => {
+    setSyncingProvider('gmail');
+    try {
+      await syncGmail();
+      await loadData(false);
+    } catch (err) {
+      setErrorMsg(`Gmail sync failed: ${err.message}`);
     } finally {
       setSyncingProvider(null);
     }
@@ -541,7 +553,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
               </span>
             </div>
             <p className="text-xs text-[#9EACA3]">
-              Connect accounts to read six months of orders and invoices. Shared posts and saved products enrich your taste.
+              Retailer accounts read six months of order history; Gmail imports retailer receipts and invoice PDFs. Shared posts and saved products enrich your taste.
             </p>
           </div>
         </div>
@@ -654,6 +666,23 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           );
         })}
 
+        {(() => {
+          const gmail = connectionMap.get('gmail');
+          const connected = Boolean(gmail && gmail.status !== 'disconnected');
+          const isSyncing = syncingProvider === 'gmail' || ACTIVE_SYNC_STATES.has(gmail?.status);
+          return (
+            <div className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition ${connected ? 'border-[#DED9CC] bg-[#FFFEFA] text-[#222A24] shadow-sm' : 'border-[#E5E1D7] bg-[#F1EFE8] text-[#596159]'}`}>
+              <span className="h-2 w-2 rounded-full bg-[#A94F32]" />
+              <span className="font-semibold text-[#222A24]">Gmail receipts</span>
+              <span className="text-[11px] text-[#596159]">{isSyncing ? 'Syncing' : connected ? `${gmail.synced_orders_count || 0} orders` : 'Not connected'}</span>
+              <button type="button" onClick={() => connected ? handleSyncGmail() : beginGmailConnect('/taste-graph')} disabled={isSyncing || !profile} className="taste-os-chip-btn">
+                <Icon name="refresh" size={10} className={isSyncing ? 'animate-spin' : ''} />
+                {isSyncing ? 'In progress' : connected ? 'Resync' : 'Connect'}
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Filter Pills */}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {['all', 'store', 'vibe', 'brand', 'size', 'address', 'order', 'memory', 'invoice'].map((filt) => (
@@ -684,12 +713,17 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
               <strong className="capitalize">{connection.provider}</strong>
               <span>{connection.details.message}</span>
               {connection.details.cutoff && <span>From {connection.details.cutoff} · {connection.details.orders || 0} orders · {connection.details.invoices || 0} invoices · {connection.details.coverage_complete ? 'History checked' : 'Coverage incomplete'}</span>}
+              {connection.provider === 'gmail' && connection.details.messages_scanned > 0 && <span>{connection.details.messages_scanned} emails checked · {connection.details.invoices || 0} invoice PDFs imported</span>}
               {(connection.details.missing_invoices > 0) && <span>{connection.details.missing_invoices} invoices unavailable</span>}
               {connection.details.log_file && <span className="basis-full break-all text-[11px] text-[#596159]">Debug log: <code>{connection.details.log_file}</code></span>}
               {connection.details.log_error && <span className="text-[#A94F32]">Log unavailable ({connection.details.log_error})</span>}
               <button type="button" className="taste-os-chip-btn" onClick={async () => {
                 try {
-                  await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelRetailerSync(connection.provider) : disconnectRetailer(connection.provider));
+                  if (connection.provider === 'gmail') {
+                    await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelGmailSync() : disconnectGmail());
+                  } else {
+                    await (ACTIVE_SYNC_STATES.has(connection.status) ? cancelRetailerSync(connection.provider) : disconnectRetailer(connection.provider));
+                  }
                   await loadData(false);
                 } catch (err) {setErrorMsg(err.message);}
               }}>{ACTIVE_SYNC_STATES.has(connection.status) ? 'Cancel sync' : 'Disconnect'}</button>
@@ -752,8 +786,8 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           </div>
 
           <div className="space-y-3 text-xs">
-            <p>{metrics.tracked_orders || 0} verified orders · {memories.length} memories · {metrics.vectors_ready || 0} semantic vectors</p>
-            <p className="text-[#596159]">Purchase titles and saved style summaries use the configured AI model. Invoice PDFs and retailer login sessions stay on this machine.</p>
+            <p>{metrics.tracked_orders || 0} tracked orders · {memories.length} memories · {metrics.vectors_ready || 0} semantic vectors</p>
+            <p className="text-[#596159]">Gmail access is read-only. Product titles feed your recommendations; invoice PDFs and retailer login sessions stay in private app storage.</p>
             {!memories.length && <p>Connect a retailer, save a product, or share a post to start learning your taste.</p>}
             {/* Preferred Aesthetic */}
             <div>

@@ -1,8 +1,8 @@
 // Live SLNG smoke test: actual recorded audio -> STT -> shopping -> TTS.
-// Chrome receives a synthetic WAV microphone; no transcript events are mocked.
+// Each microphone turn receives real SLNG-generated audio; speech APIs and search are not mocked.
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,23 +44,25 @@ try {
     await delay(100);
   }
   assert.ok(healthy, 'Backend must start');
-  const prompt = 'Find me an office chair under twelve thousand rupees, delivered to Bangalore within five days';
-  const sample = await fetch(`${api}/api/voice/speak`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: prompt }),
-  });
-  assert.equal(sample.status, 200, 'SLNG must generate the synthetic microphone sample');
-  const spokenWav = join(temporary, 'brief.wav');
-  const wav = join(temporary, 'brief_48k.wav');
-  const microphone = join(temporary, 'microphone.wav');
-  await writeFile(spokenWav, Buffer.from(await sample.arrayBuffer()));
-  execFileSync('afconvert', ['-f', 'WAVE', '-d', 'LEI16@48000', '-c', '1', spokenWav, wav]);
-  execFileSync('.venv/bin/python', ['-c', 'import wave,sys\nwith wave.open(sys.argv[1], "rb") as source:\n p=source.getparams(); audio=source.readframes(source.getnframes())\nwith wave.open(sys.argv[2], "wb") as target:\n target.setparams(p); silence=b"\\0"*(p.framerate*p.sampwidth*p.nchannels); target.writeframes(silence+audio+silence*3)', wav, microphone]);
+  const turns = [
+    ['I want to buy an office chair.', /maximum.*spend|budget/i],
+    ['My budget is twelve thousand rupees, delivered to Bangalore within five days.', /PosturePro|ErgoForm|DailySeat|Luma/i],
+    ['Can anything arrive faster?', /quickest stated delivery/],
+  ];
+  const samples = [];
+  for (const [text] of turns) {
+    const sample = await fetch(`${api}/api/voice/speak`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    assert.equal(sample.status, 200, 'SLNG must generate each synthetic microphone sample');
+    samples.push(Buffer.from(await sample.arrayBuffer()).toString('base64'));
+  }
   vite = await createServer({ server: { host: '127.0.0.1', port: 0, proxy: { '/api': api } } });
   await vite.listen();
   browser = await chromium.launch({
     headless: true,
     ...(process.env.SHOPPINGHELP_CHROME_PATH ? { executablePath: process.env.SHOPPINGHELP_CHROME_PATH } : { channel: 'chrome' }),
-    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${microphone}`, '--disable-audio-output', '--autoplay-policy=no-user-gesture-required'],
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--disable-audio-output', '--autoplay-policy=no-user-gesture-required'],
   });
   page = await browser.newPage({ permissions: ['microphone'] });
   page.setDefaultTimeout(60_000);
@@ -78,9 +80,23 @@ try {
     if (path === '/api/agent/search/jobs' || path === '/api/agent/refine') searches.push(path);
     if (path === '/api/voice/transcribe') transcripts.push(response.json());
   });
-  await page.addInitScript(() => {
+  await page.addInitScript(({ samples }) => {
     window.MediaRecorder = undefined;
-    BaseAudioContext.prototype.decodeAudioData = () => Promise.reject(new Error('Audio codecs are unavailable in this browser'));
+    let microphoneTurn = 0;
+    navigator.mediaDevices.getUserMedia = async () => {
+      const context = new AudioContext();
+      const output = context.createMediaStreamDestination();
+      const source = context.createBufferSource();
+      const sample = samples[microphoneTurn++];
+      if (sample) source.buffer = await context.decodeAudioData(Uint8Array.from(atob(sample), (char) => char.charCodeAt(0)).buffer);
+      source.connect(output);
+      await context.resume();
+      if (sample) source.start(context.currentTime + 0.5);
+      const track = output.stream.getAudioTracks()[0];
+      const stop = track.stop.bind(track);
+      track.stop = () => { stop(); if (context.state !== 'closed') void context.close().catch(() => {}); };
+      return output.stream;
+    };
     window.__audioEnded = 0;
     window.__browserFallbacks = 0;
     window.__audioEvents = [];
@@ -96,37 +112,32 @@ try {
       return play.call(this);
     };
     window.speechSynthesis.speak = () => { window.__browserFallbacks += 1; };
-  });
+  }, { samples });
   await page.goto(vite.resolvedUrls.local[0]);
   await page.getByRole('button', { name: 'Talk to Artha' }).first().click();
   await page.getByText('Mic: SLNG Nova 3 · Reply: SLNG voice (aura-2-thalia-en)').waitFor();
-  await page.getByRole('button', { name: 'Use voice input', exact: true }).click();
-  const turns = [
-    [null, /PosturePro|ErgoForm|DailySeat|Luma/i],
-    ['Why did you rank it first?', /leads the checked shortlist/],
-    ['Can anything arrive faster?', /quickest stated delivery/],
-  ];
-  for (const [index, [prompt, answer]] of turns.entries()) {
-    if (prompt) {
-      await page.getByRole('textbox', { name: 'Ask the shopping copilot' }).fill(prompt);
-      await page.getByRole('button', { name: 'Send question', exact: true }).click();
-    }
+  await page.getByRole('button', { name: 'Start call', exact: true }).click();
+  for (const [index, [, answer]] of turns.entries()) {
     await page.getByRole('log').getByText(answer).last().waitFor();
     await page.waitForFunction((count) => window.__audioEnded > count || window.__browserFallbacks > 0 || window.__audioEvents.some((event) => event.event === 'error'), index);
     assert.equal(await page.evaluate(() => window.__browserFallbacks), 0, 'Every answer must use SLNG audio');
     assert.equal(await page.evaluate(() => window.__audioEnded), index + 1, 'SLNG audio must finish playing');
     console.log(`turn_${index + 1}_ok: product workflow and SLNG playback`);
   }
+  await page.getByRole('button', { name: 'End call', exact: true }).click();
+  const shortlist = page.getByRole('region', { name: 'Current voice shortlist' });
+  assert.ok(await shortlist.getByRole('link', { name: /View .* at/ }).count() > 0, 'Product links must be reachable inside the voice chat');
   assert.ok(searches.includes('/api/agent/search/jobs'), 'Spoken brief must start a backend search');
-  assert.equal(transcripts.length, 1, 'Microphone audio must go through the real transcription endpoint');
+  assert.equal(transcripts.length, turns.length, 'Every turn must go through the real transcription endpoint');
   const transcript = await transcripts[0];
   assert.match(transcript.text, /chair/i);
-  assert.match(transcript.text, /thousand|12.?000/i);
+  assert.match((await transcripts[1]).text, /thousand|12.?000/i);
+  assert.ok(searches.includes('/api/agent/refine'), 'Spoken clarification must resume the original search');
   assert.equal(audioResponses.length, turns.length);
   assert.ok(audioResponses.every((r) => r.status === 200 && r.type === 'audio/wav'), JSON.stringify(audioResponses));
   assert.deepEqual(errors, []);
   await page.screenshot({ path: '/tmp/artha-slng-voice-e2e.png', fullPage: true });
-  console.log('voice_live_ok: standalone microphone recording + SLNG STT + automatic agent submission + SLNG reply; two follow-ups');
+  console.log('voice_live_ok: continuous call, three recorded turns, real SLNG STT/TTS, clarification, recommendation, delivery, and product links');
 } catch (error) {
   if (page && !page.isClosed()) console.error(await page.evaluate(() => ({ audio: window.__audioEvents, transcript: document.querySelector('[role=log]')?.innerText })));
   throw error;

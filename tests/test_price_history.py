@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,9 @@ class PriceHistoryContracts(unittest.TestCase):
         return products
 
     def setUp(self) -> None:
+        provider = patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_PROVIDER": "anakin"})
+        provider.start()
+        self.addCleanup(provider.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.db = Database(Path(self.directory.name) / "prices.sqlite3")
@@ -39,7 +43,7 @@ class PriceHistoryContracts(unittest.TestCase):
             jsonld = f'<script type="application/ld+json">{{"@context":"https://schema.org","@type":"Product","name":"{title}","gtin13":"5901234123457"}}</script>'
             scrape = {"generatedJson": {"pageType": "productDetail", "name": title, "price": product["price"], "currency": "INR", "gtin": "5901234123457"},
                       "html": jsonld if index < 2 else "<html>No Product JSON-LD</html>"}
-            with patch.object(agent.anakin, "scrape_inline", return_value=scrape):
+            with patch.object(agent.client, "scrape_inline", return_value=scrape):
                 checked, ok = agent._one(product)
             self.assertTrue(ok)
             products.append(checked)
@@ -54,7 +58,7 @@ class PriceHistoryContracts(unittest.TestCase):
 
     def test_private_retailer_url_is_not_scraped(self) -> None:
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline") as scrape:
+        with patch.object(agent.client, "scrape_inline") as scrape:
             checked, ok = agent._one({"name": "Chair", "url": "http://127.0.0.1/private"})
         self.assertFalse(ok)
         self.assertEqual(checked["research_status"], "waiting")
@@ -184,7 +188,7 @@ class PriceHistoryContracts(unittest.TestCase):
         brief = {"category": "Shirt", "budget": 3000, "arrive_by_days": 5,
                  "color": "red", "size": "M", "must_have": []}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Shirt", "price": 900, "currency": "INR",
             "stock": 2, "shipping_cost": 0, "delivery_days": 2,
             "variants": [{"color": "red", "size": "M", "available": True, "stock": 2, "price": 2000}],

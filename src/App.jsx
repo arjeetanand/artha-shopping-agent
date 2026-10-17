@@ -245,7 +245,7 @@ function Logo({ onClick }) {
 }
 
 function NavRail({ activeView, onNavigate, onReset, health, planCount, savedCount = 0, location }) {
-  const live = health?.search_mode === 'live' && health?.anakin_configured;
+  const live = health?.search_mode === 'live' && health?.search_configured;
   const production = health?.environment === 'production';
   return (
     <aside className="nav-rail">
@@ -278,7 +278,7 @@ function NavRail({ activeView, onNavigate, onReset, health, planCount, savedCoun
           <span className={`connection-dot ${live ? 'is-live' : ''}`} />
           <div className="connection-status__text">
             <strong>{production ? 'Production API' : 'Local API'}</strong>
-            <small>{health?.search_mode === 'fixture' ? 'Demo catalog' : live ? 'Anakin live search' : 'Search provider not ready'} · {health?.ai?.provider === 'gemini' ? 'Gemini' : 'Ollama'}</small>
+            <small>{health?.search_mode === 'fixture' ? 'Demo catalog' : live ? `${usageProviderName(health?.search_provider)} live search` : 'Search provider not ready'} · {health?.ai?.provider === 'gemini' ? 'Gemini' : 'Ollama'}</small>
           </div>
         </div>
         <div className="nav-rail__rule" />
@@ -1768,7 +1768,7 @@ function DiscoverView({
             </p>
             <div className="hero-copy__note">
               <span className="hero-copy__note-dot" />
-              <span aria-label="Search mode">{health?.search_mode === 'fixture' ? 'Demo catalog · sample products' : health?.anakin_configured && health?.search_mode === 'live' ? 'Live retailer search · confirm at checkout' : health?.search_mode ? 'Search provider not ready' : 'Checking search connection…'}</span>
+              <span aria-label="Search mode">{health?.search_mode === 'fixture' ? 'Demo catalog · sample products' : health?.search_configured && health?.search_mode === 'live' ? 'Live retailer search · confirm at checkout' : health?.search_mode ? 'Search provider not ready' : 'Checking search connection…'}</span>
             </div>
             <a className="hero-copy__how-link" href="#how-artha-works">How Artha works <Icon name="arrow" size={14} /></a>
           </div>
@@ -2484,6 +2484,7 @@ function formatUsageCount(value) {
 function usageProviderName(provider) {
   return {
     anakin: 'Anakin',
+    tavily: 'Tavily',
     ollama: 'Ollama',
     gemini: 'Gemini',
     kokoro: 'Kokoro',
@@ -2614,8 +2615,8 @@ function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntime
         </article>
         <article className="usage-runtime-card">
           <span className="usage-card__label">Live sources</span>
-          <strong>{usage?.anakin_configured ? 'Anakin ready' : 'Not configured'}</strong>
-          <small>Search requests are tracked as unmetered activity.</small>
+          <strong>{usage?.search_configured ? `${usageProviderName(usage?.search_provider)} configured` : 'Not configured'}</strong>
+          <small>Activity counts requests, not provider credits. Free-tier limits apply.</small>
         </article>
         <article className="usage-runtime-card">
           <span className="usage-card__label">Voice route</span>
@@ -2758,7 +2759,7 @@ function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntime
       <aside className="billing-transparency-note" role="note">
         <Icon name="shield" size={16} />
         <span>
-          <strong>Billing Transparency:</strong> Metered token totals reflect reported counts from upstream AI APIs (Gemini/Ollama). Web scraping and local speech synthesis are unmetered local operations.
+          <strong>Billing Transparency:</strong> Metered token totals reflect reported counts from upstream AI APIs (Gemini/Ollama). Search and hosted extraction may consume provider credits; this ledger does not show remaining provider quota.
         </span>
       </aside>
     </div>
@@ -2792,7 +2793,7 @@ export default function App() {
   const [savedIds, setSavedIds] = useState(readSavedIds);
   const [plans, setPlans] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [health, setHealth] = useState({ anakin_configured: false, ai: { provider: 'ollama' }, payment_provider: 'disabled', payment_configured: false });
+  const [health, setHealth] = useState({ search_configured: false, ai: { provider: 'ollama' }, payment_provider: 'disabled', payment_configured: false });
   const [voice, setVoice] = useState({ provider: 'browser', label: 'Local browser voice' });
   const [usage, setUsage] = useState(null);
   const [usageWindow, setUsageWindow] = useState(30);
@@ -3161,7 +3162,8 @@ export default function App() {
       }
 
       const explicitNew = /^(?:start |do )?(?:a )?new search\b/i.test(spoken);
-      const forceNew = explicitNew || /^(?:find|search for|shop for|look for|i (?:want|need|am looking for)|check|hey)\b/i.test(spoken);
+      const refinement = /\b(cheaper|less expensive|lower price|faster|sooner)\b/i.test(spoken) || /^i (?:want|need) (?:it|them|this|that|these|those)\b/i.test(spoken);
+      const forceNew = explicitNew || (result.status !== 'needs_clarification' && !refinement && /^(?:find|search for|shop for|look for|i (?:want|need|am looking for)|check|hey)\b/i.test(spoken));
       let brief = explicitNew ? spoken.replace(/^(?:start |do )?(?:a )?new search\b[: ,]*/i, '').trim() : spoken;
       brief = brief.replace(/^(?:hey\s+(?:artha\s+)?)?(?:check\s+out\s+|check\s+put\s+|check\s+)/i, '').trim();
       if (!brief) return 'Tell me what product you want to search for.';

@@ -67,9 +67,9 @@ class OutfitSearchTests(unittest.TestCase):
         self.assertEqual(next(item for item in brief["items"] if item["key"] == "shorts")["color_options"], ["cream", "white"])
 
         agent = SearchAgent()
-        agent.anakin.api_key = "test"
-        with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(
-            agent.anakin, "search", side_effect=lambda query, num_results=10: {
+        agent.client.api_key = "test"
+        with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_PROVIDER": "anakin", "SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(
+            agent.client, "search", side_effect=lambda query, num_results=10: {
                 "results": [{
                     "title": "Men cream shorts" if "shorts" in query.lower() else "Men white shirt",
                     "url": f"https://store.in/products/{'shorts' if 'shorts' in query.lower() else 'shirt'}",
@@ -82,13 +82,13 @@ class OutfitSearchTests(unittest.TestCase):
     def test_discovery_searches_for_both_items_with_their_own_colors(self):
         brief = _merge_refinement_intent(self.brief(), "shirt size M; shorts size 32; for men; budget for the whole outfit; within 5 days")
         agent = SearchAgent()
-        agent.anakin.api_key = "test"
+        agent.client.api_key = "test"
 
         def search(query, num_results=10):
             key = "shorts" if "shorts" in query.lower() else "shirt"
             return {"results": [{"title": f"Beach {key}", "url": f"https://store.in/products/{key}"}]}
 
-        with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(agent.anakin, "search", side_effect=search) as searched:
+        with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_PROVIDER": "anakin", "SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(agent.client, "search", side_effect=search) as searched:
             products, _, _ = agent.run(brief, None)
         self.assertEqual({p["request_item"] for p in products}, {"shorts", "shirt"})
         queries = [call.args[0].lower() for call in searched.call_args_list]
@@ -135,7 +135,7 @@ class OutfitSearchTests(unittest.TestCase):
                         "stock": 5, "delivery_days": 3, "colors": [p["color"]], "sizes": [p["size"]],
                         "variants": [{"color": p["color"], "size": p["size"], "price": p["price"], "stock": 5, "available": True}]}}
 
-            with patch("backend.workflow.db", database), patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live", "ANAKIN_API_KEY": "test"}), \
+            with patch("backend.workflow.db", database), patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_PROVIDER": "anakin", "SHOPPINGHELP_SEARCH_MODE": "live", "ANAKIN_API_KEY": "test"}), \
                     patch.object(AnakinClient, "search", side_effect=search), patch.object(AnakinClient, "scrape_inline", side_effect=scrape):
                 result = run_refinement({"search_id": waiting["search_id"], "text": "shirt size M; shorts size 32; for men; budget for the whole outfit; within 5 days", "mission": waiting["intent"]["mission"]})
             self.assertEqual(result["status"], "complete")

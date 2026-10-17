@@ -26,6 +26,10 @@ export function beginGoogleSignIn(next = '/') {
   window.location.assign(`${API_BASE}/auth/google/start?next=${encodeURIComponent(next)}`);
 }
 
+export function beginGmailConnect(next = '/taste-graph') {
+  window.location.assign(`${API_BASE}/auth/gmail/start?next=${encodeURIComponent(next)}`);
+}
+
 export function signOut() {
   return request('/auth/logout', { method: 'POST', body: JSON.stringify({}) });
 }
@@ -160,6 +164,10 @@ export function syncRetailerAccount(provider) {
     body: JSON.stringify({ provider }),
   });
 }
+
+export const syncGmail = () => request('/profile/gmail/sync', { method: 'POST', body: JSON.stringify({}) });
+export const cancelGmailSync = () => request('/profile/gmail/cancel', { method: 'POST', body: JSON.stringify({}) });
+export const disconnectGmail = () => request('/profile/gmail/disconnect', { method: 'POST', body: JSON.stringify({}) });
 
 export function getTasteGraph(searchId = '') {
   const query = searchId ? `?search_id=${encodeURIComponent(searchId)}` : '';

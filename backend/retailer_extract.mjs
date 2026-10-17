@@ -132,6 +132,7 @@ export function parseFlipkartOrder(record) {
   const id = String(meta.orderId || '').trim();
   if (!/^[A-Za-z0-9-]{8,160}$/.test(id)) return {error:'order_id_missing'};
   const rawTimestamp = Number(meta.orderDate);
+  if (!Number.isFinite(rawTimestamp) || rawTimestamp <= 0) return {error:'order_date_missing', id};
   const timestamp = rawTimestamp > 1e12 ? rawTimestamp : rawTimestamp * 1000;
   const date = new Date(timestamp);
   if (!Number.isFinite(timestamp) || Number.isNaN(date.getTime())) return {error:'order_date_missing', id};
@@ -144,7 +145,7 @@ export function parseFlipkartOrder(record) {
   const products = record.productDataBag || {};
   const items = [];
   for (const unit of Object.values(record.units || {})) {
-    const product = products[unit?.metaData?.fsn];
+    const product = products[unit?.metaData?.listingId] || products[unit?.metaData?.fsn];
     const basic = product?.productBasicData || {};
     const attributes = product?.productAttribute || {};
     const name = String(basic.title || '').replace(/\s+/g, ' ').trim();
@@ -177,5 +178,5 @@ export function parseFlipkartOrderPage(payload) {
     if (order.error) errors.push(order.error);
     else orders.push(order);
   }
-  return {orders, orderCount:view.orders.length, moreOrder:Boolean(view.moreOrder), errors};
+  return {orders, orderCount:view.orders.length, moreOrder:typeof view.moreOrder==='boolean'?view.moreOrder:null, errors};
 }

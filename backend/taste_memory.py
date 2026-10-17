@@ -79,11 +79,11 @@ def save_memories(user_id: str, memories: list[dict[str, Any]]) -> list[dict[str
 def remember_orders(user_id: str, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     memories = []
     for order in orders:
-        if order.get("data_source") != "retailer_session":
+        if order.get("data_source") not in {"retailer_session", "gmail_receipt"}:
             continue
         for index, item in enumerate(order.get("items") or []):
             attributes = {key: item[key] for key in ("name", "brand", "category", "size", "color", "vibe", "price") if item.get(key) is not None}
-            attributes.update({"order_id": order["id"], "provider": order["payment_provider"], "order_date": order.get("order_date")})
+            attributes.update({"order_id": order["id"], "provider": order["payment_provider"], "order_date": order.get("order_date"), "evidence_source": order["data_source"]})
             document = ". ".join(str(item[key]) for key in ("name", "brand", "category", "size", "color", "vibe") if item.get(key))
             if document:
                 memories.append({"source_key": f"purchase:{order['id']}:{index}", "kind": "purchase",

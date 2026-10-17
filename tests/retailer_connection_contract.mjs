@@ -51,7 +51,23 @@ test('Flipkart API evidence normalizes its timestamp, product attributes, and IN
 test('Flipkart API evidence rejects missing dates and unmapped products',()=>{
   const base={orderMetaData:{orderId:'OD12345678901234567890'},units:{}};
   assert.equal(parseFlipkartOrder(base).error,'order_date_missing');
+  for (const orderDate of [null, '', 0, -1, 'invalid']) {
+    assert.equal(parseFlipkartOrder({...base,orderMetaData:{...base.orderMetaData,orderDate}}).error,'order_date_missing');
+  }
   assert.equal(parseFlipkartOrder({...base,orderMetaData:{...base.orderMetaData,orderDate:Date.UTC(2026,9,17)}}).error,'order_items_missing');
+});
+
+test('Flipkart joins products by listing ID and uses the purchase day in India',()=>{
+  const order=parseFlipkartOrder({
+    orderMetaData:{orderId:'OD12345678901234567890',orderDate:Date.UTC(2026,9,16,20)},
+    productDataBag:{LISTING123:{productBasicData:{title:'Blue linen shirt'},productAttribute:{storePath:'/shirt/p/itm12345'}}},
+    units:{UNIT123:{metaData:{listingId:'LISTING123',fsn:'FSN123',quantity:1}}},
+  });
+  assert.equal(order.error,undefined);
+  assert.equal(order.order_date,'2026-10-17');
+  assert.equal(order.items.length,1);
+  assert.equal(order.total,null);
+  assert.equal(order.items[0].price,null);
 });
 
 test('Flipkart API page parser ignores session fields and preserves pagination state',()=>{
@@ -69,6 +85,7 @@ test('Flipkart API page parser ignores session fields and preserves pagination s
   assert.equal(result.orders[0].id,'OD12345678901234567890');
   assert.equal(Object.hasOwn(result,'session'),false);
   assert.equal(parseFlipkartOrderPage({RESPONSE:{}}).error,'orders_payload_missing');
+  assert.equal(parseFlipkartOrderPage({RESPONSE:{multipleOrderDetailsView:{orders:[]}}}).moreOrder,null);
 });
 
 test('unknown totals stay unknown and invalid dates are rejected',()=>{

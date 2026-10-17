@@ -93,8 +93,26 @@ class Database:
                     state TEXT PRIMARY KEY,
                     code_verifier TEXT NOT NULL,
                     next_path TEXT NOT NULL,
+                    purpose TEXT NOT NULL DEFAULT 'signin',
+                    user_id TEXT,
                     expires_at TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS gmail_tokens (
+                    user_id TEXT PRIMARY KEY,
+                    account_email TEXT NOT NULL,
+                    refresh_token_ciphertext TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS gmail_imports (
+                    user_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    provider TEXT NOT NULL DEFAULT '',
+                    result TEXT NOT NULL,
+                    imported_at TEXT NOT NULL,
+                    PRIMARY KEY(user_id, message_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS purchase_plans (
@@ -225,6 +243,10 @@ class Database:
             connection_columns = {row[1] for row in connection.execute("PRAGMA table_info(account_connections)").fetchall()}
             if "details_json" not in connection_columns:
                 connection.execute("ALTER TABLE account_connections ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'")
+            oauth_columns = {row[1] for row in connection.execute("PRAGMA table_info(oauth_states)").fetchall()}
+            for column, definition in {"purpose": "TEXT NOT NULL DEFAULT 'signin'", "user_id": "TEXT"}.items():
+                if column not in oauth_columns:
+                    connection.execute(f"ALTER TABLE oauth_states ADD COLUMN {column} {definition}")
             order_columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()}
             migrations = {
                 "user_id": "TEXT",
@@ -527,19 +549,49 @@ class Database:
             with self._connect() as connection:
                 connection.execute("DELETE FROM sessions WHERE token_hash = ?", (_session_hash(token),))
 
-    def save_oauth_state(self, state: str, code_verifier: str, next_path: str) -> None:
+    def save_oauth_state(self, state: str, code_verifier: str, next_path: str, *, purpose: str = "signin", user_id: str | None = None) -> None:
         with self._connect() as connection:
             connection.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (now_iso(),))
             connection.execute(
-                "INSERT INTO oauth_states (state, code_verifier, next_path, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
-                (state, code_verifier, next_path, future_iso(minutes=10), now_iso()),
+                "INSERT INTO oauth_states (state, code_verifier, next_path, purpose, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (state, code_verifier, next_path, purpose, user_id, future_iso(minutes=10), now_iso()),
             )
 
     def consume_oauth_state(self, state: str) -> dict[str, Any] | None:
         with self._connect() as connection:
-            row = connection.execute("SELECT code_verifier, next_path FROM oauth_states WHERE state = ? AND expires_at > ?", (state, now_iso())).fetchone()
+            row = connection.execute("SELECT code_verifier, next_path, purpose, user_id FROM oauth_states WHERE state = ? AND expires_at > ?", (state, now_iso())).fetchone()
             connection.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
         return dict(row) if row else None
+
+    def save_gmail_token(self, user_id: str, account_email: str, ciphertext: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO gmail_tokens (user_id, account_email, refresh_token_ciphertext, updated_at)
+                   VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
+                   account_email=excluded.account_email, refresh_token_ciphertext=excluded.refresh_token_ciphertext,
+                   updated_at=excluded.updated_at""",
+                (user_id, account_email, ciphertext, now_iso()),
+            )
+
+    def get_gmail_token(self, user_id: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT account_email, refresh_token_ciphertext FROM gmail_tokens WHERE user_id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def delete_gmail_token(self, user_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM gmail_tokens WHERE user_id=?", (user_id,))
+
+    def has_gmail_import(self, user_id: str, message_id: str) -> bool:
+        with self._connect() as connection:
+            return connection.execute("SELECT 1 FROM gmail_imports WHERE user_id=? AND message_id=?", (user_id, message_id)).fetchone() is not None
+
+    def save_gmail_import(self, user_id: str, message_id: str, provider: str, result: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO gmail_imports (user_id, message_id, provider, result, imported_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, message_id, provider, result, now_iso()),
+            )
 
     def save_purchase_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:

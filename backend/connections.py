@@ -87,7 +87,7 @@ def start_sync(user_id: str, provider: str) -> dict[str, Any]:
         return _snapshot(job)
 
 
-def _store_invoice(user_id: str, provider: str, event: dict[str, Any], directory: Path) -> None:
+def _store_invoice(user_id: str, provider: str, event: dict[str, Any], directory: Path) -> str:
     filename = str(event.get("filename") or "")
     if not re.fullmatch(r"[a-f0-9]{64}\.pdf",filename):
         raise ValueError("Invalid invoice filename")
@@ -105,7 +105,8 @@ def _store_invoice(user_id: str, provider: str, event: dict[str, Any], directory
     text_file = file.with_suffix(".txt")
     text_file.write_text(text,encoding="utf-8")
     text_file.chmod(0o600)
-    db.save_retailer_invoice(user_id,provider,str(event["retailer_order_id"]),str(file.relative_to(private_root())),digest)
+    db.save_retailer_invoice(user_id,provider,str(event["retailer_order_id"]),str(file.relative_to(private_root())),digest,text)
+    return text
 
 
 def _run(job: dict[str, Any]) -> None:
@@ -211,6 +212,12 @@ def list_connections(user_id: str) -> list[dict[str, Any]]:
     records = db.list_account_connections(user_id)
     with _lock:
         for record in records:
+            if record["provider"] == "gmail":
+                from .gmail_sync import gmail_status
+                status = gmail_status(user_id)
+                if status:
+                    record.update(status)
+                continue
             job = _jobs.get((user_id,record["provider"]))
             if job:
                 record["details"] = _snapshot(job)

@@ -2,7 +2,8 @@ import { chromium } from 'playwright';
 import { isPublicHttpUrl } from './social_network.mjs';
 
 const url = process.argv[2];
-const profileDir = process.argv[3];
+const productMode = process.argv.includes('--product');
+const profileDir = process.argv[3] === '--product' ? null : process.argv[3];
 if (!url) {
   console.log(JSON.stringify({ success: false, error: 'No URL provided' }));
   process.exit(0);
@@ -66,7 +67,10 @@ async function scrape() {
       // Continue even if navigation had partial timeouts, screenshot whatever was loaded
     }
 
-    const screenshotBuffer = await page.screenshot({ type: 'jpeg', quality: 75 }).catch(() => null);
+    const screenshotBuffer = productMode ? null : await page.screenshot({ type: 'jpeg', quality: 75 }).catch(() => null);
+    const html = productMode ? await page.locator('script[type="application/ld+json"]').evaluateAll(
+      scripts => scripts.slice(0, 50).map(script => script.outerHTML).join('\n').slice(0, 2_000_000),
+    ).catch(() => '') : '';
     const finalUrl = page.url();
     const pageText = (await page.locator('body').innerText().catch(()=>'')).slice(0,12000);
     const requiresLogin = /instagram\.com\/accounts\/login/i.test(finalUrl)
@@ -80,13 +84,18 @@ async function scrape() {
       console.log(JSON.stringify({success:false,requires_login:true}));
       return;
     }
-    if (!screenshotBuffer || blockedNavigation || finalUrl === 'about:blank' || blocked) {
+    if ((!productMode && !screenshotBuffer) || blockedNavigation || finalUrl === 'about:blank' || blocked) {
       console.log(JSON.stringify({
         success: false,
         error: blockedNavigation ? 'Navigation to a non-public destination was blocked' : 'Could not capture screenshot',
         title: pageTitle,
         description: metaDescription,
       }));
+      return;
+    }
+
+    if (productMode) {
+      console.log(JSON.stringify({success: true, title: pageTitle, description: metaDescription, finalUrl, html}));
       return;
     }
 

@@ -90,7 +90,7 @@ def extract_taste_profile(orders: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def refresh_profile(user_id: str) -> dict[str, Any]:
-    orders = [order for order in db.list_orders(user_id) if order.get("data_source") == "retailer_session"]
+    orders = [order for order in db.list_orders(user_id) if order.get("data_source") in {"retailer_session", "gmail_receipt"}]
     preferences = extract_taste_profile(orders)
     memories = db.list_taste_memories(user_id)
     inspirations = [item for item in memories if item["kind"] != "purchase"]
@@ -106,9 +106,11 @@ def refresh_profile(user_id: str) -> dict[str, Any]:
                 palette.append(value)
     preferences["vibes"] = vibes[:12]
     preferences["palette"] = palette[:16]
-    preferences["summary"] = f"{len(orders)} verified retailer orders and {len(inspirations)} saved inspirations."
+    verified_orders = sum(order.get("data_source") == "retailer_session" for order in orders)
+    email_orders = len(orders) - verified_orders
+    preferences["summary"] = f"{verified_orders} verified retailer orders, {email_orders} orders from Gmail receipts, and {len(inspirations)} saved inspirations."
     connections = db.list_account_connections(user_id)
-    stats = {"orders_tracked": len(orders), "connected_accounts_count": sum(c["status"] in {"connected", "synced", "partial"} for c in connections),
+    stats = {"orders_tracked": len(orders), "gmail_orders": email_orders, "connected_accounts_count": sum(c["status"] in {"connected", "synced", "partial"} for c in connections),
              "context_depth_score": min(100, len(orders) * 4 + len(inspirations) * 4 + len(preferences["brands"]) * 2),
              "memories": len(memories), "vectors_ready": sum(bool(item["embedding"]) for item in memories),
              "invoices_downloaded": len(db.list_retailer_invoices(user_id)), "evidence_version": 1}
@@ -156,6 +158,62 @@ def ingest_retailer_orders(user_id: str, provider: str, orders: list[dict[str, A
     return records
 
 
+def ingest_gmail_orders(user_id: str, provider: str, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Persist dated retailer items parsed from a user's authenticated Gmail receipts."""
+    if provider not in {"amazon", "flipkart", "myntra"}:
+        raise ValueError("Unsupported Gmail retailer")
+    existing_orders = {order.get("id"): order for order in db.list_orders(user_id)}
+    records = []
+    for source in orders:
+        order_date = date.fromisoformat(str(source.get("order_date") or ""))
+        if order_date > date.today():
+            continue
+        retailer_id = str(source.get("id") or "").strip()
+        evidence_hash = str(source.get("evidence_hash") or "").strip()
+        items = source.get("items")
+        if not retailer_id or len(retailer_id) > 160 or not re.fullmatch(r"[a-f0-9]{64}", evidence_hash):
+            raise ValueError("Gmail purchase evidence is missing")
+        if not isinstance(items, list) or not items or any(not isinstance(item, dict) or not str(item.get("name") or "").strip() for item in items):
+            raise ValueError("Gmail receipt has no readable products")
+        normalized_items = []
+        for item in items[:100]:
+            name = str(item["name"]).strip()[:500]
+            link = str(item.get("url") or "").strip()
+            if link:
+                from urllib.parse import urlsplit
+                host = (urlsplit(link).hostname or "").lower()
+                allowed = {"amazon.in", "amazon.com"} if provider == "amazon" else {"flipkart.com"} if provider == "flipkart" else {"myntra.com"}
+                if urlsplit(link).scheme != "https" or not any(host == domain or host.endswith("." + domain) for domain in allowed):
+                    link = ""
+            price = item.get("price")
+            if price is not None and (type(price) not in {int, float} or not math.isfinite(price) or price < 0):
+                price = None
+            normalized_items.append({"name": name, "url": link, "brand": str(item.get("brand") or "")[:160],
+                                     "category": str(item.get("category") or "")[:100], "size": str(item.get("size") or "")[:60],
+                                     "color": str(item.get("color") or "")[:80], "price": price, "quantity": 1})
+        record_id = "ret-" + hashlib.sha256(f"{user_id}:{provider}:{retailer_id}".encode()).hexdigest()[:32]
+        previous = existing_orders.get(record_id)
+        if previous and previous.get("data_source") == "retailer_session":
+            records.append(previous)
+            continue
+        if previous:
+            seen = {(str(item.get("name", "")).casefold(), str(item.get("url", ""))) for item in previous.get("items", [])}
+            normalized_items = (previous.get("items", []) + [item for item in normalized_items if (item["name"].casefold(), item["url"]) not in seen])[:100]
+        record = {"id": record_id, "retailer_order_id": retailer_id, "user_id": user_id, "plan_id": None,
+                  "status": str(source.get("status") or "unknown")[:80], "payment_status": "gmail_receipt",
+                  "payment_provider": provider, "currency": "INR", "total": 0, "total_verified": False,
+                  "items": normalized_items, "location": "", "order_date": order_date.isoformat(),
+                  "created_at": order_date.isoformat() + "T00:00:00Z", "updated_at": now_iso(),
+                  "data_source": "gmail_receipt", "source_url": "", "evidence_hash": evidence_hash,
+                  "invoice_status": source.get("invoice_status", "unavailable"),
+                  "timeline": [{"key": "synced", "label": "Parsed from a retailer email in Gmail", "complete": True}],
+                  "notice": "Product details were parsed from an email receipt; confirm them with the original invoice."}
+        db.save_order(record)
+        existing_orders[record_id] = record
+        records.append(record)
+    return records
+
+
 def build_context_graph(user_id: str, active_brief: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Build a dynamic, interactive Knowledge Graph representing the shopper's Shopping OS.
@@ -165,7 +223,7 @@ def build_context_graph(user_id: str, active_brief: dict[str, Any] | None = None
     preferences = profile.get("preferences") or {}
     stats = profile.get("stats") or {}
     connections = profile.get("connected_accounts") or []
-    orders = [order for order in db.list_orders(user_id) if order.get("data_source") == "retailer_session"]
+    orders = [order for order in db.list_orders(user_id) if order.get("data_source") in {"retailer_session", "gmail_receipt"}]
 
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []

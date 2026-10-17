@@ -1,20 +1,20 @@
 # Artha — source-linked purchase research
 
-Artha turns a natural-language shopping brief, reference image, or product/post URL into a source-linked purchase plan. It extracts the constraints, searches live retailer sources through Anakin, normalizes the evidence, applies budget and delivery constraints, and lets a signed-in user save private retailer handoffs.
+Artha turns a natural-language shopping brief, reference image, or product/post URL into a source-linked purchase plan. It extracts the constraints, searches live retailer sources through Tavily or Anakin, normalizes the evidence, applies budget and delivery constraints, and lets a signed-in user save private retailer handoffs.
 
 This is a research and retailer handoff flow with a clearly labeled local order sandbox. Artha does not submit retailer orders or collect live payments. Even if Razorpay credentials are present, new in-app charges stay disabled until retailer fulfillment is connected; shoppers complete real purchases at the retailer.
 
 ## What runs where
 
 - **React + Vite** provides the responsive web interface.
-- **Python standard library API** handles provider credentials, Google OAuth, workflow orchestration, and SQLite persistence.
-- **Anakin** supplies live source search and optional URL extraction.
+- **Python API** handles provider credentials, Google OAuth, workflow orchestration, and SQLite persistence; `cryptography` encrypts linked Gmail refresh tokens.
+- **Tavily** supplies basic-tier live search with 1,000 free credits/month; local Playwright reads retailer Product JSON-LD without API credits. Tavily Extract is a reference-text fallback. **Anakin** remains available as an optional provider.
 - **Local fixture catalog** is available only when `SHOPPINGHELP_SEARCH_MODE=fixture`; it keeps development and end-to-end tests deterministic without sending test briefs to a third party.
 - **Ollama** is selected by default in local development for brief extraction.
 - **Gemini** is selected by default when `APP_ENV=production`; it can analyze reference images as well as text.
 - **Kokoro** is the preferred local voice when the optional local voice environment is installed, with browser SpeechSynthesis as a fallback. **ElevenLabs** is selected by default in production.
 - **SLNG** provides Nova 3 speech transcription and Aura 2 spoken replies. The browser records the microphone directly; the API key stays on the Python server.
-- **Usage & runtime** keeps a persistent SQLite ledger of provider-reported AI tokens, plus clearly marked unmetered Anakin search and server voice activity. The UI can filter the ledger by local or production runtime without pretending to switch the running deployment.
+- **Usage & runtime** keeps a persistent SQLite ledger of provider-reported AI tokens, plus clearly marked unmetered search-provider activity and server voice activity. The UI can filter the ledger by local or production runtime without pretending to switch the running deployment.
 
 ## Run locally
 
@@ -26,6 +26,10 @@ The easiest way to start both the Python backend and the Vite frontend together:
 ```
 
 Taste OS: sign in with Google, open **Taste OS**, and click **Connect** beside a retailer. Complete retailer login and OTP in the separate Chrome window. The connector reads the last six calendar months of visible order history, downloads available invoice PDFs, and reports missing invoices or incomplete pagination. It never substitutes sample purchases. This requires running the app on your desktop with Chrome installed; hosted deployments need a separate local connector.
+
+You can also connect Gmail from Taste OS. After Google read-only consent, Artha searches retailer emails from Amazon, Flipkart, and Myntra, imports readable product titles into purchase memory, and privately stores attached PDF invoices. Gmail sync checks all matching message history and deduplicates imported messages; unsupported email layouts are reported as partial instead of inventing product data.
+
+Keep the private Chrome window open until sync finishes. Flipkart invoices are downloaded from **Price details** on each item page; shared orders may not expose an invoice download even when their order history was read successfully.
 
 Amazon Business uses a separate year selector; the connector selects it explicitly because Amazon can ignore the date in the URL. Confirm you signed into the account containing your purchases. An empty Business account cannot supply personal-account orders. The browser regression test is `npm run test:retailer-browser`.
 
@@ -95,6 +99,12 @@ The OAuth state/PKCE and redirect-safety contract can also be checked offline:
 npm run test:auth
 ```
 
+The Gmail OAuth, retailer email parsing, invoice privacy, and purchase-memory import contract runs with mocked Google API responses:
+
+```bash
+npm run test:gmail
+```
+
 The browser voice-call loop can be checked with `npm run test:voice` after installing Playwright Chromium. To use an existing Chrome binary, set `SHOPPINGHELP_CHROME_PATH` to its executable path.
 
 The SLNG HTTP TTS request contract is covered offline with mocked responses:
@@ -123,9 +133,33 @@ http://127.0.0.1:8000/api/auth/google/callback
 
 The flow uses authorization-code OAuth with PKCE. It verifies the Google user identity, creates a server-side session, stores only a hash of the session token in SQLite, and discards Google access tokens after identity verification.
 
+### Gmail purchase history
+
+Enable the Gmail API in the same Google Cloud project and register `GOOGLE_GMAIL_REDIRECT_URI` as an authorized redirect URI alongside the sign-in callback. The default local value is:
+
+```text
+http://127.0.0.1:8000/api/auth/gmail/callback
+```
+
+Gmail is an explicit second consent step. Artha requests only `gmail.readonly`, stores the refresh token encrypted with AES-GCM, and reads retailer messages from Amazon, Flipkart, and Myntra. The encryption key is derived from `GOOGLE_CLIENT_SECRET`; rotating that secret requires connecting Gmail again. Disconnecting Gmail revokes the Google grant and keeps imported orders and invoice PDFs in the user's history.
+
+Google classifies `gmail.readonly` as a restricted scope. Google OAuth verification and its security assessment requirements apply before enabling this feature for public users; test deployments can use configured OAuth consent-screen test users. See [Google's Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) and [OAuth web-server guidance](https://developers.google.com/identity/protocols/oauth2/web-server).
+
 ### Search and URL extraction
 
-Set `ANAKIN_API_KEY`. The browser calls the Python API; only Python calls Anakin. Search results are marked **Live source** and keep their source URLs. A pasted product or post URL is first sent through Anakin's URL scraper and contributes context to the retailer search.
+For the free-tier route, get a key from [Tavily](https://app.tavily.com) and add it to your local `.env` (never to frontend variables):
+
+```dotenv
+TAVILY_API_KEY=your-key
+SHOPPINGHELP_SEARCH_PROVIDER=tavily
+SHOPPINGHELP_SEARCH_MODE=live
+```
+
+Restart with `npm start`. `/api/health` should report `search_provider: "tavily"` and `search_configured: true`; this confirms configuration, not account credits or connectivity. The sidebar and Usage & runtime view show the selected provider. Search results retain their source URLs. Public product pages are checked through the existing local Playwright scraper with its public-network guard; exact Product JSON-LD supplies purchase evidence. If Chrome/Chromium is unavailable or a retailer blocks extraction, Tavily Extract can return reference text, but text alone never verifies a price or stock.
+
+[Tavily's free plan](https://docs.tavily.com/documentation/api-credits) provides 1,000 credits/month without a credit card. We explicitly use basic search (1 credit/request) with automatic parameter upgrades disabled. A normal brief runs three searches (3 credits); an exact-item cross-store check may add one, and multi-item briefs run searches per item. Local page extraction costs no API credits. Basic Tavily extraction costs 1 credit per 5 successful URL extractions. Free-tier limits still apply; keep pay-as-you-go and automatic paid upgrades disabled in your Tavily account if you want to stay free.
+
+`SHOPPINGHELP_SEARCH_PROVIDER=auto` prefers Tavily when its key is set, otherwise Anakin. To keep Anakin explicitly, set `SHOPPINGHELP_SEARCH_PROVIDER=anakin` and `ANAKIN_API_KEY`. Provider failures never silently switch to a paid service or demo products. Credit, authentication, and rate-limit errors are reported separately without exposing provider response bodies or keys.
 
 Discovery uses category-specific store queries and requires an India storefront or INR evidence before accepting a source. The search introduction labels live search and the demo catalog separately. Products with unknown prices stay unselected. If the scraper groups the main item with recommendations, Artha can recover its price and unavailable-stock status from a single Product JSON-LD object on the same product page; listing pages and redirects do not qualify.
 
@@ -162,10 +196,12 @@ npm run demo:voice
 
 Open the frontend address printed by the startup script in Chrome or Edge, then choose **Talk to Artha → Start call** and allow microphone access. You can begin the search entirely by voice:
 
-1. “Find me an office chair.” Artha asks for budget, delivery city, and deadline.
+1. “Find me an office chair.” Artha asks one missing detail at a time, starting with budget.
 2. “Under twelve thousand rupees, delivered to Bangalore within five days.” Artha fetches and ranks the fixture products.
 3. “Why did you rank it first?” Artha explains the recommendation from the existing evidence.
 4. “Can anything arrive faster?” Artha compares the stated delivery times.
+
+For an outfit, start with “I want to buy a white shirt and white pants.” You can answer each question briefly: “two thousand”, “Bengaluru”, “five days”, “men”, “whole outfit”, then the requested shirt and pants sizes and delivery pincode. Each answer refines the same search. “I want it cheaper” keeps the existing shortlist; say “new search” to start over. Product cards, prices, delivery caveats, and retailer links appear inside the voice chat. Use **Interrupt and speak** to stop an answer and ask the next question. Real purchases finish on the retailer website; the in-app order tracker is a local sandbox.
 
 With SLNG selected, both **Speak brief** and **Start call** capture raw microphone samples with an AudioWorklet and send a WAV recording to `/api/voice/transcribe`. The server uses SLNG Nova 3 English at `/v1/stt/slng/deepgram/nova:3-en`; browser SpeechRecognition is not used. Speak in English and pause for about 1.2 seconds, or press **Send voice** in the call to submit manually. A turn lasts at most 30 seconds; no detected microphone audio ends the call with an explanation after 10 seconds. The microphone stops while the recording is transcribed. Recordings are sent to SLNG for transcription and are not saved to disk. SLNG speaks the answer, and the call resumes listening afterward. End the call when finished.
 
@@ -173,7 +209,7 @@ Microphone samples are mixed to mono, resampled to 16 kHz, and encoded directly 
 
 Fixture mode uses deterministic brief parsing and a local sample catalog, with no LLM or live retailer search. The products and delivery estimates are demo data. Use `npm start` with `SHOPPINGHELP_SEARCH_MODE=live` for live retailer research. **End call** or closing the drawer cancels recording, pending transcription, and playback. Typed questions also work in the same drawer.
 
-On macOS, `npm run test:voice:live` generates a synthetic spoken shopping brief with SLNG, converts it to a WAV with the built-in `afconvert`, and supplies that audio to Chrome's test microphone. It verifies actual PCM capture, SLNG transcription, product search, and SLNG WAV playback with browser speech recognition, MediaRecorder, and audio decoding disabled, then checks two typed follow-ups. It incurs one STT and four TTS requests; no transcript events are mocked. Physical microphone selection and OS permission still need a manual check. `npm run test:voice` covers PCM encoding, worklet capture, manual send, transcription errors, cancellation, and browser voice fallback offline. `npm run test:slng` checks the provider contracts. The server allows ten combined STT/TTS requests per IP per minute (five spoken turns) and 120 globally per rolling hour. Transcription failures stop the call with an explanation; reply synthesis failures use browser voice with a notice.
+`npm run test:voice:live` generates three microphone samples with SLNG and feeds them through Web Audio into one continuous Chrome call. Every turn uses the real recorder, SLNG transcription, backend shopping workflow, and SLNG reply playback: initial brief, budget/delivery clarification, and a delivery comparison. It verifies automatic listening between turns, retailer links inside the chat, and no browser-voice fallback. Search uses an isolated fixture catalog and database. The test incurs three STT and six TTS requests, within the existing ten-request per-minute limit; no transcript events or shopping API responses are mocked. Physical microphone selection and OS permission still need a manual check. `npm run test:voice` covers PCM encoding, worklet capture, one-question follow-ups, shopping-versus-checkout routing, cheaper refinements, retailer links, playback interruption, manual send, transcription errors, cancellation, and browser voice fallback offline. `npm run test:slng` checks the provider contracts. The server allows ten combined STT/TTS requests per IP per minute (five spoken turns) and 120 globally per rolling hour. Transcription failures stop the call with an explanation; reply synthesis failures use browser voice with a notice.
 
 Other voice providers retain browser SpeechRecognition for input. The call transcript stays visible, and every spoken turn uses the same research and refinement flow as typed requests. Use Chrome or Edge if microphone recording is unavailable in an embedded browser.
 
@@ -197,7 +233,7 @@ KOKORO_DEVICE=auto
 1. **Brief agent** extracts category, quantity, preferred brand, budget, location/pincode, delivery window, color, size, fabric, must-have specifications, and visual/style cues. Written durations such as “three days” are normalized safely.
 2. **Clarification checkpoint** pauses before retailer discovery when a decision-critical constraint is missing or ambiguous. The response carries structured questions and can be resumed through the follow-up endpoint without losing the brief.
 3. **Location agent** uses the typed city/pincode or an explicitly permissioned browser location, with optional Google Maps geocoding and nearby-store context; raw coordinates are never persisted.
-4. **Search agent** calls Anakin for retailer sources, and optionally scrapes a pasted URL for reference context. Provider-neutral retailer and delivery contracts live in `backend/retailers.py`; dedicated marketplace adapters can be added without changing ranking or UI code.
+4. **Search agent** calls the selected search provider for retailer sources, and optionally scrapes a pasted URL for reference context. Provider-neutral retailer and delivery contracts live in `backend/retailers.py`; dedicated marketplace adapters can be added without changing ranking or UI code.
 5. **Evidence agent** normalizes source-linked fields and labels unknown delivery, stock, variant, and price information as needing retailer confirmation.
 6. **Research agent** checks up to four discovery pages in parallel, then up to four exact-item pages from other retailer sites when product identity is strong enough. Each page check has a 45-second time budget. It uses direct-page details ahead of search snippets, records price mismatches, and keeps empty or failed checks visibly unverified. Fixture mode uses deterministic catalog evidence without network calls.
 7. **Analysis agent** cross-checks review-source consistency and current-vs-history price signals when those fields are available, explicitly preserving unknowns.
@@ -211,7 +247,7 @@ The price desk groups directly checked live pages across stores by a valid Produ
 
 When a product just outside the budget still satisfies delivery and stock constraints, the result includes a clearly labeled **Worth a small stretch** opportunity. It never changes the selected plan automatically; the user can inspect that product's evidence before deciding.
 
-Live searches can be started asynchronously with `POST /api/agent/search/jobs` and polled at `GET /api/agent/search/jobs/:job_id`. The job returns queued, working, complete, waiting, or failed stage snapshots while Anakin and parallel direct-page checks run, so the UI can keep the workflow visible instead of holding a blank request open.
+Live searches can be started asynchronously with `POST /api/agent/search/jobs` and polled at `GET /api/agent/search/jobs/:job_id`. The job returns queued, working, complete, waiting, or failed stage snapshots while live search and parallel direct-page checks run, so the UI can keep the workflow visible instead of holding a blank request open.
 
 When required details are missing, the search response uses `status: "needs_clarification"`, returns `intent.clarifications`, and contains no retailer shortlist. Send the user's answer to `POST /api/agent/refine` with the prior `search_id`, answer text, and edited mission. Artha loads the saved research on the server, starts discovery when the checkpoint has no products, and reuses completed evidence for soft follow-ups.
 
@@ -229,6 +265,12 @@ The displayed total includes shipping only when a direct retailer page confirms 
 | `GET /api/auth/session` | Current authenticated user, if any |
 | `GET /api/auth/google/start` | Start Google OAuth with PKCE |
 | `GET /api/auth/google/callback` | Complete Google OAuth and create the session |
+| `GET /api/auth/gmail/start` | Request Gmail read-only consent for the signed-in user |
+| `GET /api/auth/gmail/callback` | Save the encrypted Gmail grant and start the first sync |
+| `POST /api/profile/gmail/sync` | Sync retailer messages and PDF invoices |
+| `POST /api/profile/gmail/cancel` | Stop the active Gmail sync |
+| `POST /api/profile/gmail/disconnect` | Revoke Gmail access and keep imported history |
+| `GET /api/profile/gmail/status` | Read the user's Gmail sync status |
 | `POST /api/auth/logout` | End the local session |
 | `POST /api/agent/search` | Run the seven-stage brief → location → search → evidence → research → analysis → decision workflow |
 | `POST /api/agent/search/jobs` | Start the same research workflow asynchronously and return a job id |
@@ -252,9 +294,9 @@ The displayed total includes shipping only when a direct retailer page confirms 
 
 ## Data and safety notes
 
-- SQLite stores searches, OAuth state, hashed sessions, users, user-scoped purchase plans, and provider usage events in `backend/shoppinghelp.sqlite3`.
+- SQLite stores searches, OAuth state, hashed sessions, users, user-scoped purchase plans, Gmail token ciphertext, Gmail import IDs, and provider usage events in `backend/shoppinghelp.sqlite3`.
 - Usage events store counts and metadata only: provider, operation, model name, token counts when reported, character/byte counts for unmetered activity, runtime, status, and timestamp. Provider credentials are never written to the ledger.
-- No Google OAuth token, payment credential, or reference-image bytes are persisted.
+- Google sign-in tokens are discarded after identity verification. Gmail refresh tokens are encrypted at rest; payment credentials and reference-image bytes are not persisted.
 - The service cannot submit a retailer checkout, create a merchant order, or truthfully track a merchant order without a retailer integration that explicitly supports those actions. Razorpay payment authorization is separate from retailer fulfillment.
 - In development, the local sandbox order flow is clearly labeled and never stores payment credentials or claims a merchant charge. Production rejects sandbox checkout until a real payment/merchant adapter is enabled.
 - New Razorpay payment orders are blocked. Historical attempts are verified server-side with the signed `order_id|payment_id` callback; failed or replayed attempts do not create an order.

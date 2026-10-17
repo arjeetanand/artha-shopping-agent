@@ -16,8 +16,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from backend.auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
-    from backend.clients import AnakinClient, BriefModel
+    from backend.auth import AuthError, app_redirect_url, begin_google_auth, begin_gmail_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, complete_gmail_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
+    from backend.clients import AnakinClient, BriefModel, search_status
     from backend.db import db
     from backend.settings import is_production, setting
     from backend.usage import get_usage_summary, runtime_name
@@ -30,9 +30,10 @@ if __package__ in {None, ""}:
     from backend.profile import build_context_graph, get_or_create_profile, refresh_profile
     from backend.connections import start_sync, list_connections, cancel_sync, disconnect, invoice_file
     from backend.taste_memory import public_memories, remember_link, save_memories, reindex_memories
+    from backend.gmail_sync import GmailSyncError, cancel_gmail_sync, disconnect_gmail, gmail_status, save_gmail_connection, start_gmail_sync
 else:
-    from .auth import AuthError, app_redirect_url, begin_google_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
-    from .clients import AnakinClient, BriefModel
+    from .auth import AuthError, app_redirect_url, begin_google_auth, begin_gmail_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, complete_gmail_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
+    from .clients import AnakinClient, BriefModel, search_status
     from .db import db
     from .settings import is_production, setting
     from .usage import get_usage_summary, runtime_name
@@ -45,6 +46,7 @@ else:
     from .profile import build_context_graph, get_or_create_profile, refresh_profile
     from .connections import start_sync, list_connections, cancel_sync, disconnect, invoice_file
     from .taste_memory import public_memories, remember_link, save_memories, reindex_memories
+    from .gmail_sync import GmailSyncError, cancel_gmail_sync, disconnect_gmail, gmail_status, save_gmail_connection, start_gmail_sync
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -358,6 +360,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ok": True,
                         "google_configured": google_configured(),
                         "anakin_configured": AnakinClient().configured,
+                        **search_status(),
                         "search_mode": "fixture" if setting("SHOPPINGHELP_SEARCH_MODE", "live").lower() in {"fixture", "sandbox", "mock"} else "live",
                         "ai": brief,
                         "voice": voice,
@@ -389,6 +392,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise AuthError("Google sign-in could not be started.", 500)
                 self._redirect(authorize_url, oauth_state_cookie(state))
                 return
+            if path == "/api/auth/gmail/start":
+                user = self._require_user()
+                authorize_url = begin_gmail_auth(user["id"], (query.get("next") or ["/taste-graph"])[0], self._app_origin())
+                state = (parse_qs(urlparse(authorize_url).query).get("state") or [""])[0]
+                if not state:
+                    raise AuthError("Gmail connection could not be started.", 500)
+                self._redirect(authorize_url, oauth_state_cookie(state, "/api/auth/gmail/callback"))
+                return
             if path == "/api/auth/google/callback":
                 state = (query.get("state") or [""])[0]
                 if query.get("error"):
@@ -407,6 +418,27 @@ class Handler(BaseHTTPRequestHandler):
                     session_cookie(token),
                     (clear_cookie,) if clear_cookie else (),
                 )
+                return
+            if path == "/api/auth/gmail/callback":
+                state = (query.get("state") or [""])[0]
+                clear_cookie = clear_oauth_state_cookie(state, "/api/auth/gmail/callback")
+                if query.get("error"):
+                    self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=cancelled", extra_cookies=(clear_cookie,) if clear_cookie else ())
+                    return
+                user = self._user()
+                if not user:
+                    self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=sign_in_required", extra_cookies=(clear_cookie,) if clear_cookie else ())
+                    return
+                email, refresh_token, next_path = complete_gmail_auth((query.get("code") or [""])[0], state,
+                    self.headers.get("Cookie"), user["id"])
+                save_gmail_connection(user["id"], email, refresh_token)
+                try:
+                    start_gmail_sync(user["id"])
+                except Exception:
+                    pass
+                destination = next_path if next_path.startswith(("http://", "https://")) else app_redirect_url(next_path)
+                separator = "&" if "?" in destination else "?"
+                self._redirect(f"{destination}{separator}gmail=connected", extra_cookies=(clear_cookie,) if clear_cookie else ())
                 return
             if path == "/api/usage":
                 if is_production():
@@ -435,6 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                         "active_ai": brief,
                         "active_voice": voice,
                         "anakin_configured": AnakinClient().configured,
+                        **search_status(),
                         "google_configured": google_configured(),
                     },
                 )
@@ -461,6 +494,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/profile/connections":
                 self._send(200, {"connections": list_connections(self._profile_user_id())})
                 return
+            if path == "/api/profile/gmail/status":
+                self._send(200, {"connection": gmail_status(self._profile_user_id())})
+                return
             if path == "/api/profile/memories":
                 self._send(200, {"memories": public_memories(self._profile_user_id())})
                 return
@@ -484,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, build_context_graph(user_id, active_brief=brief))
                 return
             if path == "/api/profile/orders":
-                self._send(200, {"orders": [order for order in db.list_orders(self._profile_user_id()) if order.get("data_source") == "retailer_session"]})
+                self._send(200, {"orders": [order for order in db.list_orders(self._profile_user_id()) if order.get("data_source") in {"retailer_session", "gmail_receipt"}]})
                 return
             if path == "/api/voice/status":
                 self._send(200, VoiceService().status())
@@ -499,6 +535,11 @@ class Handler(BaseHTTPRequestHandler):
                     extra_cookies=(clear_cookie,) if clear_cookie else (),
                 )
                 return
+            if path == "/api/auth/gmail/callback":
+                state = (query.get("state") or [""])[0]
+                clear_cookie = clear_oauth_state_cookie(state, "/api/auth/gmail/callback")
+                self._redirect(f"{app_redirect_url('/taste-graph')}?gmail=failed", extra_cookies=(clear_cookie,) if clear_cookie else ())
+                return
             self._send(error.status, {"error": str(error)})
         except ApiError as error:
             self._send(error.status, {"error": str(error)})
@@ -506,6 +547,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(error)})
         except PaymentError as error:
             self._send(error.status, {"error": str(error)})
+        except GmailSyncError as error:
+            self._send(409, {"error": str(error)})
         except Exception:
             self._send(500, {"error": "Internal server error"})
 
@@ -620,6 +663,15 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError("Use Connect to read orders directly from your retailer account.", 400)
                 self._send(202, start_sync(user_id,provider))
                 return
+            if path == "/api/profile/gmail/sync":
+                self._send(202, {"connection": start_gmail_sync(self._require_user()["id"])})
+                return
+            if path == "/api/profile/gmail/cancel":
+                self._send(200, {"connection": cancel_gmail_sync(self._require_user()["id"])})
+                return
+            if path == "/api/profile/gmail/disconnect":
+                self._send(200, {"connection": disconnect_gmail(self._require_user()["id"])})
+                return
             if path in {"/api/profile/connections/cancel", "/api/profile/connections/disconnect"}:
                 user_id = self._profile_user_id()
                 self._local_connector_request()
@@ -704,6 +756,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(error)})
         except PaymentError as error:
             self._send(error.status, {"error": str(error)})
+        except GmailSyncError as error:
+            self._send(409, {"error": str(error)})
         except ValueError as error:
             self._send(400, {"error": str(error)})
         except RuntimeError as error:
@@ -729,7 +783,7 @@ def main() -> None:
             print(f"[artha] Run: lsof -ti :{PORT} | xargs kill -9", file=sys.stderr)
         raise
     print(f"Artha API listening on http://{HOST}:{PORT}")
-    print("Google OAuth, Anakin extraction, provider routing, and voice status are ready.")
+    print("Google OAuth, live search configuration, provider routing, and voice status are ready.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

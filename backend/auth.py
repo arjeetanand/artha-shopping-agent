@@ -19,6 +19,7 @@ from .settings import is_production, setting
 GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 SESSION_COOKIE = "artha_session"
 
 
@@ -34,6 +35,16 @@ def _google_config() -> tuple[str, str, str]:
         setting("GOOGLE_CLIENT_SECRET"),
         setting("GOOGLE_REDIRECT_URI"),
     )
+
+
+def _gmail_redirect_uri() -> str:
+    configured = setting("GOOGLE_GMAIL_REDIRECT_URI")
+    if configured:
+        return configured
+    default = _google_config()[2]
+    if not default.endswith("/api/auth/google/callback"):
+        raise AuthError("Set GOOGLE_GMAIL_REDIRECT_URI to the registered Gmail OAuth callback.", 503)
+    return default.removesuffix("/api/auth/google/callback") + "/api/auth/gmail/callback"
 
 
 def google_configured() -> bool:
@@ -52,28 +63,30 @@ def _valid_oauth_state(state: str) -> bool:
     return len(state) == 43 and all(char.isascii() and (char.isalnum() or char in "-_") for char in state)
 
 
-def _oauth_state_cookie_settings(state: str) -> tuple[str, str, bool]:
+def _oauth_state_cookie_settings(state: str, callback_path: str = "/api/auth/google/callback") -> tuple[str, str, bool]:
     if not _valid_oauth_state(state):
         raise ValueError("Invalid OAuth state")
+    if callback_path not in {"/api/auth/google/callback", "/api/auth/gmail/callback"}:
+        raise ValueError("Invalid OAuth callback path")
     force_secure = setting("SHOPPINGHELP_COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
     secure = is_production() or force_secure
     prefix = "__Host-" if secure else ""
-    path = "/" if secure else "/api/auth/google/callback"
+    path = "/" if secure else callback_path
     return f"{prefix}artha_oauth_state_{state}", path, secure
 
 
-def oauth_state_cookie(state: str) -> str:
-    name, path, secure = _oauth_state_cookie_settings(state)
+def oauth_state_cookie(state: str, callback_path: str = "/api/auth/google/callback") -> str:
+    name, path, secure = _oauth_state_cookie_settings(state, callback_path)
     parts = [f"{name}={state}", f"Path={path}", "HttpOnly", "SameSite=Lax", "Max-Age=600"]
     if secure:
         parts.append("Secure")
     return "; ".join(parts)
 
 
-def clear_oauth_state_cookie(state: str) -> str | None:
+def clear_oauth_state_cookie(state: str, callback_path: str = "/api/auth/google/callback") -> str | None:
     if not _valid_oauth_state(state):
         return None
-    name, path, secure = _oauth_state_cookie_settings(state)
+    name, path, secure = _oauth_state_cookie_settings(state, callback_path)
     parts = [f"{name}=", f"Path={path}", "HttpOnly", "SameSite=Lax", "Max-Age=0"]
     if secure:
         parts.append("Secure")
@@ -129,6 +142,28 @@ def begin_google_auth(next_path: str | None = None, app_origin: str | None = Non
         "code_challenge_method": "S256",
         "prompt": "select_account",
         "include_granted_scopes": "true",
+    }
+    return f"{GOOGLE_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
+
+
+def begin_gmail_auth(user_id: str, next_path: str | None = None, app_origin: str | None = None) -> str:
+    client_id, _, redirect_uri = _google_config()
+    if not all((client_id, redirect_uri)):
+        raise AuthError("Google sign-in is not configured on this server.", 503)
+    state = secrets.token_urlsafe(32)
+    verifier = _verifier()
+    db.save_oauth_state(state, verifier, _return_target(next_path or "/taste-graph", app_origin), purpose="gmail", user_id=user_id)
+    params = {
+        "client_id": client_id,
+        "redirect_uri": _gmail_redirect_uri(),
+        "response_type": "code",
+        "scope": f"openid email profile {GMAIL_READONLY_SCOPE}",
+        "state": state,
+        "code_challenge": _challenge(verifier),
+        "code_challenge_method": "S256",
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent select_account",
     }
     return f"{GOOGLE_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
@@ -191,6 +226,45 @@ def complete_google_auth(code: str, state: str, cookie_header: str | None) -> tu
     )
     session_token = db.create_session(user["id"])
     return user, session_token, oauth_state["next_path"]
+
+
+def complete_gmail_auth(code: str, state: str, cookie_header: str | None, user_id: str) -> tuple[str, str, str]:
+    if not code or not state:
+        raise AuthError("Google did not return a complete Gmail authorization response.")
+    if not google_oauth_state_matches(cookie_header, state):
+        raise AuthError("Your Gmail connection could not be validated. Please connect Gmail again.")
+    oauth_state = db.consume_oauth_state(state)
+    if not oauth_state or oauth_state.get("purpose") != "gmail" or oauth_state.get("user_id") != user_id:
+        raise AuthError("Your Gmail connection expired or belongs to a different session. Please connect Gmail again.")
+    client_id, client_secret, redirect_uri = _google_config()
+    if not all((client_id, client_secret, redirect_uri)):
+        raise AuthError("Google sign-in is not configured on this server.", 503)
+    try:
+        tokens = _post_form_json(
+            GOOGLE_TOKEN_URL,
+            {
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": _gmail_redirect_uri(),
+                "grant_type": "authorization_code",
+                "code_verifier": oauth_state["code_verifier"],
+            },
+        )
+        access_token = str(tokens.get("access_token") or "")
+        refresh_token = str(tokens.get("refresh_token") or "")
+        if not access_token or not refresh_token:
+            raise AuthError("Google did not issue an offline Gmail token. Please connect Gmail again and approve access.")
+        profile = _get_userinfo(access_token)
+    except AuthError:
+        raise
+    except (urllib.error.URLError, urllib.error.HTTPError, ValueError, json.JSONDecodeError) as error:
+        raise AuthError("Google could not complete the Gmail connection. Check the Gmail read-only scope and callback URI.") from error
+    email = str(profile.get("email") or "").strip().lower()
+    verified = profile.get("email_verified")
+    if not email or verified not in {True, "true", "True", 1, "1"}:
+        raise AuthError("Google did not return a verified Gmail account email.")
+    return email, refresh_token, oauth_state["next_path"]
 
 
 def current_user(cookie_header: str | None) -> dict[str, Any] | None:

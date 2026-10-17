@@ -269,7 +269,7 @@ class AgenticFlowContracts(unittest.TestCase):
                        "shipping_cost": 0, "delivery_days": 2, "stock": 2,
                        "variants": [{"color": "red", "size": "M", "available": True, "stock": 2, "price": 2000}]}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": direct_page}):
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": direct_page}):
             checked, complete = agent._one(product)
         self.assertTrue(complete)
         ranked, _ = RankingAgent().run([checked], brief)
@@ -279,7 +279,7 @@ class AgenticFlowContracts(unittest.TestCase):
         self.assertEqual(_mission_decision(ranked, brief)["status"], "no_safe_fit")
 
         direct_page["variants"][0].pop("price")
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": direct_page}):
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": direct_page}):
             checked, complete = agent._one(product)
         self.assertTrue(complete)
         ranked, _ = RankingAgent().run([checked], brief)
@@ -288,7 +288,7 @@ class AgenticFlowContracts(unittest.TestCase):
 
         for ambiguous_price in ("From ₹1,500", "₹1,500–₹2,000"):
             direct_page["variants"][0]["price"] = ambiguous_price
-            with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": direct_page}):
+            with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": direct_page}):
                 checked, complete = agent._one(product)
             self.assertTrue(complete)
             ranked, _ = RankingAgent().run([checked], brief)
@@ -327,7 +327,7 @@ class AgenticFlowContracts(unittest.TestCase):
         product = ExtractionAgent()._from_live({"title": "Acme Widget X1", "url": "https://shop.example/x1",
                                                 "data": {"name": "Acme Widget X1", "shipping_cost": 100}}, 0)
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "name": "Acme Widget X1", "price": 1000, "stock": 2, "delivery_days": 2, "shipping_cost": 100,
         }}):
             checked, completed = agent._one(product)
@@ -346,7 +346,7 @@ class AgenticFlowContracts(unittest.TestCase):
         product = ExtractionAgent()._from_live({"title": "Acme Widget X1", "url": "https://shop.example/x1",
                                                 "data": {"name": "Acme Widget X1", "price": 1000}}, 0)
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "name": "Acme Widget X1", "price": 1000, "shipping_cost": 100, "stock": 2,
         }}):
             checked, completed = agent._one(product)
@@ -367,7 +367,7 @@ class AgenticFlowContracts(unittest.TestCase):
         }, 0)
         self.assertIsNone(product["currency"])
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Widget X1", "price": 1000,
             "stock": 2, "delivery_days": 2, "shipping_cost": 0,
         }}):
@@ -385,7 +385,7 @@ class AgenticFlowContracts(unittest.TestCase):
                    "price": 1000, "currency": "INR", "brand": "Fake Brand", "seller": "Fake Seller",
                    "seller_reliability": 0.99, "source_kind": "live_web"}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Office Chair", "price": 1000,
             "currency": "INR", "brand": "Acme", "seller": "Real Seller", "seller_reliability": 0.42,
         }}):
@@ -394,7 +394,7 @@ class AgenticFlowContracts(unittest.TestCase):
         self.assertEqual((checked["brand"], checked["seller"], checked["seller_reliability"]),
                          ("Acme", "Real Seller", 0.42))
 
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Office Chair", "price": 1000, "currency": "INR",
         }}):
             checked, completed = agent._one(product)
@@ -411,7 +411,7 @@ class AgenticFlowContracts(unittest.TestCase):
                    "price": 1000, "currency": "INR", "source_kind": "live_web"}
         agent = ResearchAgent()
         for quote in ("From ₹1,000", "₹1,000 - ₹1,500", "₹1,000/month"):
-            with self.subTest(quote=quote), patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+            with self.subTest(quote=quote), patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
                 "pageType": "productDetail", "name": "Acme Office Chair", "price": quote, "currency": "INR",
             }}):
                 checked, completed = agent._one(product)
@@ -419,7 +419,7 @@ class AgenticFlowContracts(unittest.TestCase):
                 self.assertIsNone(checked.get("price_verification"))
                 self.assertIsNone(verified_price_offer(checked, "url:https://shop.example/products/chair", "2026-09-25T00:00:00Z"))
 
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Office Chair", "price": "₹1,000", "currency": "INR",
         }}):
             checked, completed = agent._one(product)
@@ -435,7 +435,7 @@ class AgenticFlowContracts(unittest.TestCase):
             "rating": 4.9, "source_kind": "live_web",
         }
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Office Chair", "price": 1500,
             "currency": "INR", "rating": 3.2, "delivery_days": 10, "stock": 0,
         }}):
@@ -456,7 +456,7 @@ class AgenticFlowContracts(unittest.TestCase):
         self.assertFalse(ranked[0]["stock_fit"])
         self.assertEqual(_mission_decision(ranked, brief)["status"], "no_safe_fit")
 
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Office Chair", "price": 1000, "currency": "INR",
         }}):
             checked, completed = agent._one(product)
@@ -475,7 +475,7 @@ class AgenticFlowContracts(unittest.TestCase):
                    "colors": ["blue"], "sizes": ["M"],
                    "variants": [{"color": "blue", "size": "M", "available": True, "stock": 2}]}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Acme Shirt", "price": 1000,
             "delivery_days": 2, "stock": 2, "colors": ["blue"], "sizes": ["M"],
             "variants": [{"color": "blue", "size": "M", "available": False, "stock": 0}],
@@ -494,7 +494,7 @@ class AgenticFlowContracts(unittest.TestCase):
                    "description": "100% polyester; linen-look weave, contains no linen", "price": 1000,
                    "delivery_days": 2, "stock": 2, "source_kind": "live_web"}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "pageType": "productDetail", "name": "Linen-look Overshirt", "price": 1000,
             "delivery_days": 2, "stock": 2, "material": "polyester",
             "features": ["100% polyester", "linen-look weave, contains no linen"],
@@ -512,7 +512,7 @@ class AgenticFlowContracts(unittest.TestCase):
 
         agent = ResearchAgent()
         product = {"id": "phone", "name": "Acme Widget X1", "url": "https://shop.example/case", "price": 1000}
-        with patch.object(agent.anakin, "scrape_inline", return_value={"generatedJson": {
+        with patch.object(agent.client, "scrape_inline", return_value={"generatedJson": {
             "name": "Acme Widget X1 Case", "price": 1000, "stock": 2,
         }}):
             checked, completed = agent._one(product)
@@ -526,7 +526,7 @@ class AgenticFlowContracts(unittest.TestCase):
         agent = ResearchAgent()
         product = {"id": "chair", "name": "SIHOO M102C Ergonomic Office Chair – Store Name", "url": "https://shop.example/products/m102c", "price": 1000}
         direct = {"generatedJson": {"pageType": "productDetail", "name": "SIHOO M102C Ergonomic Office Chair", "price": 1000, "currency": "Rs."}}
-        with patch.object(agent.anakin, "scrape_inline", return_value=direct):
+        with patch.object(agent.client, "scrape_inline", return_value=direct):
             checked, completed = agent._one(product)
         self.assertTrue(completed)
         self.assertEqual(checked["price_verification"], "matched")
@@ -534,14 +534,14 @@ class AgenticFlowContracts(unittest.TestCase):
 
         wrapped = {"id": "caper", "name": "Buy Caper High Back Mesh Office Chair (Black) @33% OFF Online | Wooden Street", "url": "https://shop.example/product/caper", "price": 7999}
         direct = {"generatedJson": {"pageType": "productDetail", "name": "Caper High Back Mesh Office Chair (Black)", "price": 7999, "currency": "INR"}}
-        with patch.object(agent.anakin, "scrape_inline", return_value=direct):
+        with patch.object(agent.client, "scrape_inline", return_value=direct):
             checked, completed = agent._one(wrapped)
         self.assertTrue(completed)
         self.assertEqual(checked["name"], "Caper High Back Mesh Office Chair (Black)")
         self.assertEqual(checked["price_verification"], "matched")
 
         listing = {"generatedJson": {"pageType": "productListing", "name": "SIHOO M102C Ergonomic Office Chair", "price": 1000}}
-        with patch.object(agent.anakin, "scrape_inline", return_value=listing):
+        with patch.object(agent.client, "scrape_inline", return_value=listing):
             _, completed = agent._one(product)
         self.assertFalse(completed)
 
@@ -825,7 +825,7 @@ class AgenticFlowContracts(unittest.TestCase):
             "total_price": 900,
             "features": [],
         }
-        with patch.object(agent.anakin, "scrape_inline", return_value={}):
+        with patch.object(agent.client, "scrape_inline", return_value={}):
             enriched, completed = agent._one(product)
 
         self.assertFalse(completed)
@@ -855,7 +855,7 @@ class AgenticFlowContracts(unittest.TestCase):
                 return {"generatedJson": {"name": f"Option {index}", "price": 900}}
             return {}
 
-        with patch.object(agent.anakin, "scrape_inline", side_effect=scrape) as scraper:
+        with patch.object(agent.client, "scrape_inline", side_effect=scrape) as scraper:
             enriched, event, source = agent.run(products, {"mode": "live"})
 
         checked = {call.args[0] for call in scraper.call_args_list}
@@ -874,15 +874,15 @@ class AgenticFlowContracts(unittest.TestCase):
         wrong_item = {"title": "Ergonomic gaming mouse", "url": "https://shop.example/products/ergo-mouse"}
         product = {"title": "Acme Ergo Chair", "url": "https://shop.example/products/acme-ergo-chair", "snippet": "Price ₹9,000"}
         agent = SearchAgent()
-        agent.anakin.api_key = "test"
+        agent.client.api_key = "test"
         brief = {"category": "Office chair", "description": "An ergonomic office chair", "budget": 12000,
                  "arrive_by": "within 5 days", "location": "Bengaluru", "must_have": ["back support"]}
         with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(
-            agent.anakin, "scrape_inline", return_value={
+            agent.client, "scrape_inline", return_value={
                 "generatedJson": {"name": "Aurora teal ergonomic chair"}, "markdown": "Cookie settings and privacy choices"
             },
         ), patch.object(
-            agent.anakin, "search", side_effect=[{"results": [listing, article, tracker, wrong_item]}, {"results": [product]}, {"results": []}],
+            agent.client, "search", side_effect=[{"results": [listing, article, tracker, wrong_item]}, {"results": [product]}, {"results": []}],
         ) as search:
             sources, event, meta = agent.run(brief, "https://social.example/posts/aurora")
 
@@ -901,7 +901,7 @@ class AgenticFlowContracts(unittest.TestCase):
 
         agent = ResearchAgent()
         product = {"id": "search-only", "name": "Linen Overshirt", "url": "https://retailer.example/overshirt", "price": 900}
-        with patch.object(agent.anakin, "scrape_inline", return_value={"markdown": "Welcome to our summer sale"}):
+        with patch.object(agent.client, "scrape_inline", return_value={"markdown": "Welcome to our summer sale"}):
             enriched, completed = agent._one(product)
 
         self.assertFalse(completed)
@@ -920,9 +920,9 @@ class AgenticFlowContracts(unittest.TestCase):
         self.assertEqual(_mission_decision(ranked, brief)["status"], "no_safe_fit")
 
         agent = SearchAgent()
-        agent.anakin.api_key = "test"
+        agent.client.api_key = "test"
         with patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(
-            agent.anakin, "search", return_value={"results": [{"title": cover["name"], "url": cover["url"]}]}
+            agent.client, "search", return_value={"results": [{"title": cover["name"], "url": cover["url"]}]}
         ):
             sources, _, _ = agent.run(brief, None)
         self.assertEqual(sources, [])
@@ -935,13 +935,13 @@ class AgenticFlowContracts(unittest.TestCase):
         from backend.workflow import SearchAgent, _requested_product_noun
 
         agent = SearchAgent()
-        agent.anakin.api_key = "test"
+        agent.client.api_key = "test"
         for description, noun in (("Find a laptop I can use daily", "laptop"),
                                   ("A sofa that fits my living room", "sofa")):
             brief = {"category": "Shopping", "description": description}
             self.assertEqual(_requested_product_noun(brief), noun)
             with self.subTest(noun=noun), patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live"}), patch.object(
-                agent.anakin, "search", return_value={"results": [{"title": f"Acme {noun}", "url": f"https://shop.example/products/{noun}", "snippet": "Price ₹9,000"}]}
+                agent.client, "search", return_value={"results": [{"title": f"Acme {noun}", "url": f"https://shop.example/products/{noun}", "snippet": "Price ₹9,000"}]}
             ):
                 sources, _, _ = agent.run(brief, None)
             self.assertEqual(len(sources), 1)

@@ -7,6 +7,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import urllib.error
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
@@ -16,7 +17,7 @@ from typing import Any, Callable
 from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
-from .clients import AnakinClient, BriefModel, parse_price
+from .clients import BriefModel, get_search_client, parse_price, search_failure
 from .catalog import FixtureCatalogClient
 from .db import db, now_iso
 from .location import LocationAgent
@@ -846,7 +847,7 @@ class SearchAgent:
     name = "Search agent"
 
     def __init__(self) -> None:
-        self.anakin = AnakinClient()
+        self.client = get_search_client()
 
     def run(self, brief: dict[str, Any], post_url: str | None) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
         if brief.get("items"):
@@ -875,13 +876,13 @@ class SearchAgent:
                     "delivery_pincode": brief.get("pincode"),
                 },
             )
-        if not self.anakin.configured:
-            raise RuntimeError("Anakin live extraction is not configured. Add ANAKIN_API_KEY and restart the API.")
+        if not self.client.configured:
+            raise RuntimeError(f"{self.client.name.title()} is not configured. Add {self.client.name.upper()}_API_KEY to .env and restart the API.")
         source_context = ""
         scrape_status = "not_requested"
         if post_url:
             try:
-                scraped = self.anakin.scrape_inline(post_url)
+                scraped = self.client.scrape_inline(post_url)
                 details = scraped.get("generatedJson") or {}
                 if isinstance(details, dict) and isinstance(details.get("data"), dict):
                     details = details["data"]
@@ -893,7 +894,7 @@ class SearchAgent:
                 # a live cross-store search. The UI records that the page itself
                 # could not be used as evidence.
                 scrape_status = "unavailable"
-        category = str(brief.get("category") or "product")
+        category = str(brief.get("category") or "product").replace("_", " ")
         subject = str(brief.get("description") or category)[:120]
         product_noun = _requested_product_noun(brief)
         terms = " ".join(str(brief.get(field) or "") for field in ("wearer", "brand", "color", "size", "fabric") if brief.get(field))
@@ -927,9 +928,11 @@ class SearchAgent:
         last_error: Exception | None = None
         for query in queries:
             try:
-                response = self.anakin.search(query, num_results=10)
+                response = self.client.search(query, num_results=10)
             except Exception as error:
                 last_error = error
+                if isinstance(error, urllib.error.HTTPError) and error.code in {401, 402, 403, 429, 432, 433}:
+                    break
                 continue
             successful += 1
             data = response.get("data") if isinstance(response, dict) else None
@@ -965,7 +968,7 @@ class SearchAgent:
                     candidates.append(raw)
                     seen_urls.add(url)
         if not successful and last_error:
-            raise RuntimeError("Anakin live search failed. Check ANAKIN_API_KEY and network access.") from last_error
+            raise RuntimeError(search_failure(self.client.name, last_error)) from last_error
         by_host: dict[str, list[dict[str, Any]]] = {}
         for raw in candidates:
             host = urlparse(str(raw.get("url") or raw.get("link"))).hostname or ""
@@ -977,7 +980,7 @@ class SearchAgent:
         return sources, {"agent": self.name, "status": "complete" if sources else "waiting", "detail": detail}, {
             "mode": "live",
             "scrape": scrape_status,
-            "providers": provider_status(live_configured=True),
+            "providers": provider_status(live_configured=True, provider=self.client.name),
             "delivery_verification": "source_reported_only",
             "delivery_pincode": brief.get("pincode"),
             "search": {"queries": successful, "retrieved": retrieved, "product_candidates": len(sources)},
@@ -1128,7 +1131,7 @@ class AnalysisAgent:
 
 
 def _scraped_mapping(value: Any) -> dict[str, Any]:
-    """Extract a safe structured mapping from an Anakin scrape response."""
+    """Extract a safe structured mapping from a provider scrape response."""
     if isinstance(value, dict):
         for key in ("generatedJson", "generated_json", "product", "result"):
             nested = value.get(key)
@@ -1177,7 +1180,7 @@ class ResearchAgent:
     name = "Research agent"
 
     def __init__(self) -> None:
-        self.anakin = AnakinClient()
+        self.client = get_search_client()
 
     @staticmethod
     def _host(url: str) -> str:
@@ -1280,7 +1283,7 @@ class ResearchAgent:
         enriched["url"] = url
         host = self._host(url)
         try:
-            scraped = self.anakin.scrape_inline(url, max_wait_seconds=45)
+            scraped = self.client.scrape_inline(url, max_wait_seconds=45)
         except Exception:
             enriched["research_status"] = "waiting"
             enriched["research_sources"] = [{"name": host, "status": "unavailable", "detail": "Direct page research could not be completed"}]
@@ -1896,7 +1899,7 @@ def _targeted_cross_store_offers(products: list[dict[str, Any]], brief: dict[str
     query = f"Find other Indian retailer product detail pages for the exact {name} by {brand}, {identifier}. Return purchase pages for this same item, not articles or category pages."
     report["status"] = "searching"
     try:
-        response = AnakinClient().search(query, num_results=10)
+        response = get_search_client().search(query, num_results=10)
         data = response.get("data") if isinstance(response, dict) else None
         results = response.get("results") or (data.get("results") if isinstance(data, dict) else []) or []
         if not isinstance(results, list):

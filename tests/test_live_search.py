@@ -11,7 +11,7 @@ from backend.workflow import ExtractionAgent, ResearchAgent, SearchAgent, _missi
 
 class LiveSearchTests(unittest.TestCase):
     def setUp(self):
-        mode = patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_MODE": "live", "ANAKIN_API_KEY": "test"})
+        mode = patch.dict(os.environ, {"SHOPPINGHELP_SEARCH_PROVIDER": "anakin", "SHOPPINGHELP_SEARCH_MODE": "live", "ANAKIN_API_KEY": "test"})
         mode.start()
         self.addCleanup(mode.stop)
 
@@ -23,7 +23,7 @@ class LiveSearchTests(unittest.TestCase):
             {"title": "Office Chair Guide", "url": "https://example.in/blog/office-chair-guide"},
             {"title": "India Brand Office Chair", "url": "https://chairbrand.com/products/chair", "snippet": "Buy this chair for ₹8,999"},
         ]
-        with patch.object(agent.anakin, "search", return_value={"results": results}) as search:
+        with patch.object(agent.client, "search", return_value={"results": results}) as search:
             products, _, _ = agent.run({"category": "Office chair", "description": "ergonomic office chair", "budget": 12000}, None)
 
         self.assertEqual([item["url"] for item in products], [results[0]["url"], results[3]["url"]])
@@ -35,10 +35,10 @@ class LiveSearchTests(unittest.TestCase):
             {"title": "Men Solid White Shirt", "url": "https://www.flipkart.com/products/shirt"},
             {"title": "Men Crew Neck White T-Shirt", "url": "https://www.flipkart.com/products/tshirt"},
         ]
-        with patch.object(agent.anakin, "search", return_value={"results": results}):
+        with patch.object(agent.client, "search", return_value={"results": results}):
             products, _, _ = agent.run({"category": "Shirt", "description": "white shirt"}, None)
         self.assertEqual([product["url"] for product in products], [results[0]["url"]])
-        with patch.object(agent.anakin, "search", return_value={"results": results}):
+        with patch.object(agent.client, "search", return_value={"results": results}):
             products, _, _ = agent.run({"category": "T-shirt", "description": "white t-shirt"}, None)
         self.assertEqual([product["url"] for product in products], [results[1]["url"]])
 
@@ -53,7 +53,7 @@ class LiveSearchTests(unittest.TestCase):
             "name": "Wakefit Gravita Ergonomic Chair for Work | Single Lock and Recline | Nylon Base | Mesh Office Adjustable Arm Chair",
             "pageType": "productDetail", "price": "5499", "currency": "₹",
         }}}
-        with patch.object(agent.anakin, "scrape_inline", return_value=scraped):
+        with patch.object(agent.client, "scrape_inline", return_value=scraped):
             checked, ok = agent._one(product)
 
         self.assertTrue(ok)
@@ -84,7 +84,7 @@ class LiveSearchTests(unittest.TestCase):
                    "price": 1200, "currency": "INR"},
                    "html": '<script type="application/ld+json">' + json.dumps(schema) + '</script>'}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value=scraped):
+        with patch.object(agent.client, "scrape_inline", return_value=scraped):
             checked, ok = agent._one(product)
         self.assertTrue(ok)
         self.assertEqual(checked["image"], "https://store.in/images/acme-shirt-main.jpg")
@@ -110,14 +110,14 @@ class LiveSearchTests(unittest.TestCase):
         raw = {"finalUrl": product["url"], "generatedJson": {"data": {"products": [{"name": "Unrelated chair", "price": 100}]}},
                "html": '<script type="application/ld+json">' + json.dumps(schema) + '</script>'}
         agent = ResearchAgent()
-        with patch.object(agent.anakin, "scrape_inline", return_value=raw):
+        with patch.object(agent.client, "scrape_inline", return_value=raw):
             checked, ok = agent._one(product)
         self.assertTrue(ok)
         self.assertEqual(checked["price"], 7490)
         self.assertEqual(checked["currency"], "INR")
         self.assertEqual(checked["stock"], 0)
         for final_url in ["https://www.flipkart.com/search?q=chair", "https://www.flipkart.com/other/p/itm999"]:
-            with self.subTest(final_url=final_url), patch.object(agent.anakin, "scrape_inline", return_value={**raw, "finalUrl": final_url}):
+            with self.subTest(final_url=final_url), patch.object(agent.client, "scrape_inline", return_value={**raw, "finalUrl": final_url}):
                 _, ok = agent._one(product)
             self.assertFalse(ok)
 

@@ -415,7 +415,7 @@ const DRAWER_STYLES = `
   .talk-drawer__status-icon { color: #1d7657; }
   .talk-drawer__messages { scrollbar-color: #bfd2c5 transparent; }
   .talk-drawer__welcome { color: #6a7a73; }
-  .talk-drawer__call-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #b7dfc8; border-radius: 12px; background: #e9f7ef; }
+  .talk-drawer__call-card { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #b7dfc8; border-radius: 12px; background: #e9f7ef; }
   .talk-drawer__call-card strong { display: inline-flex; align-items: center; gap: 6px; color: #173d30; font-size: 11px; }
   .talk-drawer__call-card p { margin: 4px 0 0; color: #6a7a73; font-size: 10px; line-height: 1.4; }
   .talk-drawer__call-card small { display: block; margin-top: 5px; color: #456358; font-size: 10px; line-height: 1.4; }

@@ -1,6 +1,6 @@
 """Provider-neutral contracts for retailer and delivery integrations.
 
-The current production source is Anakin's web search/scraper and the local
+Sources include Tavily or Anakin web search/extraction and the local
 fixture catalog. This module keeps the rest of the workflow independent from
 those providers so dedicated marketplace adapters can be added without
 changing ranking, clarification, or checkout code.
@@ -195,10 +195,10 @@ def normalize_product(raw: dict[str, Any], *, provider: str, pincode: str | None
     )
 
 
-def provider_status(*, live_configured: bool = False, fixture_enabled: bool = False) -> dict[str, Any]:
+def provider_status(*, live_configured: bool = False, fixture_enabled: bool = False, provider: str = "anakin") -> dict[str, Any]:
     return {
         "configured": bool(live_configured or fixture_enabled),
-        "providers": (["anakin"] if live_configured else []) + (["fixture_catalog"] if fixture_enabled else []),
+        "providers": ([provider] if live_configured else []) + (["fixture_catalog"] if fixture_enabled else []),
         "dedicated_marketplace_adapters": [],
         "delivery_verification": "source_reported_only" if live_configured else "fixture_only" if fixture_enabled else "unavailable",
     }
