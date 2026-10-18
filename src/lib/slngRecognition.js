@@ -74,7 +74,7 @@ export class LocalWavRecognition {
       source.start();
       const pcm = await renderer.startRendering();
       if (this.cancelled) return;
-      const reply = await transcribeAudio(encodeWav(pcm), this.controller.signal);
+      const reply = await (this.transcribeAudio || transcribeAudio)(encodeWav(pcm), this.controller.signal);
       if (this.cancelled) return;
       if (!reply.text?.trim()) throw new Error('No speech was detected. Speak closer to the microphone and try again.');
       this.onresult?.({ resultIndex: 0, results: [{ 0: { transcript: reply.text }, isFinal: true }] });

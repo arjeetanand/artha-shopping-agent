@@ -19,6 +19,49 @@ export function getSpeechRecognition(voice) {
   return window.SpeechRecognition || window.webkitSpeechRecognition || (supportsLocalWavRecording() ? LocalWavRecognition : null);
 }
 
+export function createSpeechRecognition({ provider, transcribeAudio, onTranscript, onEnd, onError }) {
+  const Recognition = getSpeechRecognition({ provider: provider === 'whisper_local' ? 'local' : provider });
+  if (!Recognition) return null;
+
+  const recognition = new Recognition();
+  const local = recognition instanceof LocalWavRecognition;
+  let stream;
+  recognition.onresult = (event) => {
+    const result = event.results[event.resultIndex ?? event.results.length - 1];
+    if (result) onTranscript?.(result[0]?.transcript, result.isFinal);
+  };
+  recognition.onend = () => {
+    stopMicrophone(stream);
+    stream = null;
+    onEnd?.();
+  };
+  recognition.onerror = onError;
+
+  if (local) {
+    recognition.transcribeAudio = transcribeAudio;
+    const startRecording = recognition.start.bind(recognition);
+    const abortRecording = recognition.abort.bind(recognition);
+    recognition.start = async () => {
+      try {
+        stream = await requestMicrophone();
+        await startRecording(stream.getAudioTracks()[0]);
+      } catch (error) {
+        stopMicrophone(stream);
+        stream = null;
+        onError?.(error);
+        onEnd?.();
+      }
+    };
+    recognition.abort = () => {
+      abortRecording();
+      stopMicrophone(stream);
+      stream = null;
+    };
+  }
+
+  return recognition;
+}
+
 export async function requestMicrophone() {
   if (!window.isSecureContext) {
     throw new Error('Microphone access needs the local app address or HTTPS.');
