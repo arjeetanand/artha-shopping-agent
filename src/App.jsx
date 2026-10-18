@@ -2091,6 +2091,7 @@ function DiscoverView({
     <div ref={discoverRef} className="discover-page">
       <section className="voice-first-home" aria-label="Voice shopping with Artha">
         <HomeVoiceAssistant
+          key={user?.id || 'guest'}
           user={user}
           health={health}
           onSearchComplete={onAssistantSearchResult}
@@ -2634,12 +2635,14 @@ function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn, onToas
     <div className="page-stack">
       <BagsPurchaseTracker
         plans={plans}
+        user={user}
         onDiscover={onDiscover}
+        onSignIn={onSignIn}
         onOpenPlan={(plan) => setSelectedPlanDetail(plan)}
         onToast={onToast}
       />
 
-      {!user ? (
+      {!user && plans.length > 0 ? (
         <div className="plans-guest-banner">
           <div className="plans-guest-banner__info">
             <span className="plans-guest-banner__dot" />
@@ -2675,7 +2678,9 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
         <div className="page-heading__copy">
           <div className="page-heading__tab">
             <span className="page-heading__tag">Your collection</span>
-            <span className="page-heading__count">{saved.length} {saved.length === 1 ? 'saved item' : 'saved items'}</span>
+            <span className="page-heading__count">
+              {saved.length ? `${saved.length} ${saved.length === 1 ? 'saved item' : 'saved items'}` : missingSavedCount ? `${missingSavedCount} older ${missingSavedCount === 1 ? 'save' : 'saves'}` : '0 saved items'}
+            </span>
           </div>
           <h1 className="page-heading__title">
             Your saved finds
@@ -2691,7 +2696,7 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
         </button>
       </div>
 
-      {missingSavedCount > 0 ? (
+      {missingSavedCount > 0 && saved.length > 0 ? (
         <p className="saved-page__notice" role="status">
           {missingSavedCount} older {missingSavedCount === 1 ? 'save was' : 'saves were'} stored without product details and can’t be reopened here.
         </p>
@@ -2762,8 +2767,12 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
           <span className="empty-state__icon">
             <Icon name="bookmark" size={28} />
           </span>
-          <h2 className="empty-state__title">No saved picks yet.</h2>
-          <p className="empty-state__text">Click the bookmark icon on any product to save it while you compare retailer sources.</p>
+          <h2 className="empty-state__title">{missingSavedCount ? 'Your older save needs a fresh look.' : 'No saved picks yet.'}</h2>
+          <p className="empty-state__text">
+            {missingSavedCount
+              ? `${missingSavedCount} older ${missingSavedCount === 1 ? 'save was' : 'saves were'} kept, but their product details are no longer available. Search again and save a current retailer listing.`
+              : 'Bookmark a retailer find while you compare its price, size, and delivery details.'}
+          </p>
           <span className="empty-state__annotation">“Every good find starts with a quick bookmark.”</span>
           <button type="button" className="stamp-action-button stamp-action-button--lime empty-state__btn" onClick={onDiscover}>
             <span className="stamp-action-button__label">Find items</span>

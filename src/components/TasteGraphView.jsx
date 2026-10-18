@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
+import { getConnectionNotice, hasMeaningfulTasteGraphData } from '../lib/tasteGraph';
 import { getTasteGraph, getTasteProfile, syncRetailerAccount, getProfileConnections, getTasteMemories, getProfileInvoices, invoiceDownloadUrl, cancelRetailerSync, disconnectRetailer, removeTasteMemory, reindexTasteMemories, beginGmailConnect, syncGmail, cancelGmailSync, disconnectGmail, submitRetailerExtensionBatch, finishRetailerExtensionTab, cancelRetailerExtensionTab, cancelRetailerExtensionSync, disconnectRetailerExtension } from '../lib/api';
 import '../taste-graph.css';
 
@@ -67,6 +68,30 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [loadData]);
+
+  useEffect(() => {
+    const workspace = containerRef.current;
+    if (!workspace || typeof ResizeObserver === 'undefined') return undefined;
+    let previousWidth = workspace.clientWidth;
+    let previousHeight = workspace.clientHeight;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      const dx = (width - previousWidth) / 2;
+      const dy = (height - previousHeight) / 2;
+      if (dx || dy) {
+        simNodesRef.current.forEach((node) => {
+          node.x += dx;
+          node.y += dy;
+        });
+        transformRef.current.x += dx;
+        transformRef.current.y += dy;
+      }
+      previousWidth = width;
+      previousHeight = height;
+    });
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, []);
 
   const hasActiveSync = (profile?.connected_accounts || []).some(connection => ACTIVE_SYNC_STATES.has(connection.status) && connection.details?.connector !== 'extension-local');
   useEffect(() => {
@@ -591,6 +616,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
   };
 
   const metrics = graphData.metrics || {};
+  const hasGraphData = hasMeaningfulTasteGraphData(graphData.nodes);
   const depthScore = profile?.stats?.context_depth_score ?? 0;
   const connections = profile?.connected_accounts || [];
   const connectionMap = new Map(connections.map((c) => [c.provider.toLowerCase(), c]));
@@ -696,8 +722,9 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
                 onClick={onClose}
                 className="taste-os-btn-icon"
                 aria-label="Back to Discover"
+                title="Back to Discover"
               >
-                <span>Back to Discover</span>
+                <Icon name="close" size={16} />
               </button>
             )}
           </div>
@@ -790,11 +817,10 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           {connections.filter(connection => connection.details?.message).map(connection => (
             <div key={connection.provider} className="mb-2 flex flex-wrap items-center gap-2">
               <strong className="capitalize">{connection.provider}</strong>
-              <span>{connection.details.message}</span>
+              <span>{getConnectionNotice(connection.details.message)}</span>
               {connection.details.cutoff && <span>From {connection.details.cutoff} · {connection.details.orders || 0} orders · {connection.details.invoice_support === false ? 'invoice PDFs not included' : `${connection.details.invoices || 0} invoices`} · {connection.details.coverage_complete ? 'History checked' : 'Coverage incomplete'}</span>}
               {connection.provider === 'gmail' && connection.details.messages_scanned > 0 && <span>{connection.details.messages_scanned} emails checked · {connection.details.invoices || 0} invoice PDFs imported</span>}
               {(connection.details.missing_invoices > 0) && <span>{connection.details.missing_invoices} invoices unavailable</span>}
-              {connection.details.log_file && <span className="basis-full break-all text-[11px] text-[#596159]">Debug log: <code>{connection.details.log_file}</code></span>}
               {connection.details.log_error && <span className="text-[#A94F32]">Log unavailable ({connection.details.log_error})</span>}
               <button type="button" className="taste-os-chip-btn" onClick={async () => {
                 try {
@@ -828,7 +854,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
       )}
 
       {/* Main Canvas & Sidebar Container */}
-      <div ref={containerRef} className="taste-graph-view__workspace">
+      <div ref={containerRef} className={`taste-graph-view__workspace ${!loading && !errorMsg && !hasGraphData ? 'is-empty' : ''}`}>
         <button type="button" onClick={() => setShowProfileMobile((current) => !current)} className="absolute left-4 top-4 z-20 rounded-lg border border-[#DED9CC] bg-[#FFFEFA]/95 px-3 py-2 text-xs font-semibold text-[#A94F32] shadow-sm md:hidden">
           {showProfileMobile ? 'Hide Taste DNA' : 'Show Taste DNA'}
         </button>
@@ -841,6 +867,16 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           onMouseUp={handleMouseUp}
           className="taste-graph-view__canvas"
         />
+
+        {!loading && !errorMsg && !hasGraphData ? (
+          <div className="taste-graph-view__empty" role="status">
+            <span className="taste-graph-view__empty-mark"><Icon name="spark" size={18} /></span>
+            <p className="section-kicker">Your style profile</p>
+            <h2>Your style map starts here.</h2>
+            <p>Save a find, start a voice brief, or connect a retailer. Artha will build this map from the preferences you choose to share.</p>
+            <button type="button" className="stamp-action-button" onClick={onClose}>Start a voice brief <Icon name="arrow" size={15} /></button>
+          </div>
+        ) : null}
 
         {/* Hover / Select Floating Card */}
         {(selectedNode || hoveredNode) && (

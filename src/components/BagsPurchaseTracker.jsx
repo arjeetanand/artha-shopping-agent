@@ -39,7 +39,7 @@ export function planToBag(plan, index = 0) {
   };
 }
 
-export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToast }) {
+export function BagsPurchaseTracker({ plans = [], user, onDiscover, onSignIn, onOpenPlan, onToast }) {
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'archived' | 'all'
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
@@ -179,10 +179,18 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
           <span className="bags-tracker__empty-icon"><Icon name="box" size={24} /></span>
           <h3>{plans.length ? 'No matching plans found' : 'No purchase plans yet'}</h3>
           <p>{plans.length ? 'Try clearing your search query or create a new research brief with Artha.' : 'Research a brief, choose retailer items, and save your first purchase plan.'}</p>
-          <button type="button" className="primary-button" onClick={onDiscover}>
-            <span>Start a new brief</span>
-            <Icon name="arrow" size={16} />
-          </button>
+          <div className="bags-tracker__empty-actions">
+            <button type="button" className="primary-button" onClick={onDiscover}>
+              <span>Start a new brief</span>
+              <Icon name="arrow" size={16} />
+            </button>
+            {!user && plans.length === 0 ? (
+              <button type="button" className="secondary-button" onClick={onSignIn}>
+                <Icon name="user" size={14} />
+                <span>Sign in to sync plans</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 

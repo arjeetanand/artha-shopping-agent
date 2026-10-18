@@ -9,6 +9,7 @@ import {
   warmVoice,
 } from '../lib/api.js';
 import { createSpeechRecognition } from '../lib/speechRecognition.js';
+import { readAssistantSessionId, storeAssistantSessionId } from '../lib/assistantSessionStore.js';
 import { Icon } from './Icon';
 
 const STATE_LABELS = {
@@ -52,6 +53,8 @@ export function HomeVoiceAssistant({
   const audioRef = useRef(null);
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const voiceTranscriptRef = useRef('');
+  const sendVoiceOnEndRef = useRef(false);
 
   const stopAudio = () => {
     if (audioRef.current) {
@@ -129,10 +132,13 @@ export function HomeVoiceAssistant({
 
   useEffect(() => {
     let active = true;
-    getAssistantSession()
+    const storedSessionId = readAssistantSessionId(user?.id);
+    getAssistantSession(storedSessionId ? { sessionId: storedSessionId } : undefined)
       .then((data) => {
         if (!active || !data) return;
-        setSessionId(data.session_id || data.id || '');
+        const id = data.session_id || data.id || '';
+        setSessionId(id);
+        storeAssistantSessionId(user?.id, id);
         if (Array.isArray(data.messages) && data.messages.length > 0) {
           setMessages(data.messages);
         }
@@ -147,6 +153,7 @@ export function HomeVoiceAssistant({
     return () => {
       active = false;
       recognitionRef.current?.abort?.();
+      sendVoiceOnEndRef.current = false;
       abortRef.current?.abort?.();
       stopAudio();
     };
@@ -158,6 +165,11 @@ export function HomeVoiceAssistant({
 
   const handleResetSession = async () => {
     stopAudio();
+    sendVoiceOnEndRef.current = false;
+    voiceTranscriptRef.current = '';
+    recognitionRef.current?.abort?.();
+    abortRef.current?.abort?.();
+    setVoiceState('ready');
     setVoiceNotice('');
     setTranscript('');
     setSelectedRefId('');
@@ -165,7 +177,9 @@ export function HomeVoiceAssistant({
     setShowUploadFallback(false);
     try {
       const data = await getAssistantSession({ reset: true });
-      setSessionId(data.session_id || data.id || '');
+      const id = data.session_id || data.id || '';
+      setSessionId(id);
+      storeAssistantSessionId(user?.id, id);
       setMessages(data.messages || [{ role: 'assistant', text: `What are you looking for today, ${firstName}?` }]);
       setSessionState({ ...(data.state || {}), history: data.history || {} });
       if (autoSpeak && data.greeting) {
@@ -177,6 +191,7 @@ export function HomeVoiceAssistant({
   };
 
   const toggleMicrophone = () => {
+    if (voiceState === 'thinking' || voiceState === 'speaking') return;
     stopAudio();
     setVoiceNotice('');
     if (voiceState === 'listening') {
@@ -184,11 +199,14 @@ export function HomeVoiceAssistant({
       return;
     }
     if (voiceState === 'transcribing') {
+      sendVoiceOnEndRef.current = false;
       abortRef.current?.abort?.();
       setVoiceState('ready');
       return;
     }
 
+    voiceTranscriptRef.current = '';
+    sendVoiceOnEndRef.current = true;
     warmVoice().catch(() => {});
     const recognition = createSpeechRecognition({
       provider: health?.voice?.stt_provider || 'whisper_local',
@@ -198,35 +216,50 @@ export function HomeVoiceAssistant({
         setVoiceState('transcribing');
         return transcribeAudio(blob, controller.signal);
       },
-      onTranscript: (spokenText, isFinal) => {
+      onTranscript: (spokenText) => {
         const cleaned = String(spokenText || '').trim();
         if (!cleaned) return;
-        setTranscript((prev) => (prev && !isFinal ? `${prev} ${cleaned}`.trim() : cleaned));
+        voiceTranscriptRef.current = cleaned;
+        setTranscript(cleaned);
       },
       onEnd: () => {
         setVoiceState((current) => (current === 'listening' || current === 'transcribing' ? 'ready' : current));
+        const shouldSend = sendVoiceOnEndRef.current;
+        sendVoiceOnEndRef.current = false;
+        const spokenText = voiceTranscriptRef.current.trim();
+        if (shouldSend && spokenText) void submitTurn(spokenText);
       },
       onError: (err) => {
+        sendVoiceOnEndRef.current = false;
+        voiceTranscriptRef.current = '';
         setVoiceState('ready');
         setVoiceNotice(err?.message || 'Local microphone transcription failed. You can edit or type below.');
       },
     });
 
     if (!recognition) {
+      sendVoiceOnEndRef.current = false;
       setVoiceNotice('Local WAV microphone capture is unavailable in this browser context. Use the text box below.');
       return;
     }
     recognitionRef.current = recognition;
     setVoiceState('listening');
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (error) {
+      sendVoiceOnEndRef.current = false;
+      setVoiceState('ready');
+      setVoiceNotice(error.message || 'The microphone could not start. You can continue by typing.');
+    }
   };
 
   const submitTurn = async (overrideMessage = null) => {
     const textToSend = String(overrideMessage !== null ? overrideMessage : transcript).trim();
-    if (!textToSend || voiceState === 'thinking') return;
+    if (!textToSend || voiceState === 'thinking' || voiceState === 'speaking') return;
     stopAudio();
     setVoiceNotice('');
-    if (overrideMessage === null) setTranscript('');
+    setTranscript('');
+    voiceTranscriptRef.current = '';
 
     const optimisticMessages = [...messages, { role: 'user', text: textToSend }];
     setMessages(optimisticMessages);
@@ -237,7 +270,9 @@ export function HomeVoiceAssistant({
         session_id: sessionId,
         message: textToSend,
       });
-      setSessionId(response.session_id || sessionId);
+      const nextSessionId = response.session_id || sessionId;
+      setSessionId(nextSessionId);
+      storeAssistantSessionId(user?.id, nextSessionId);
       if (Array.isArray(response.messages)) {
         setMessages(response.messages);
       }
@@ -281,6 +316,9 @@ export function HomeVoiceAssistant({
         reference_id: targetId,
         item_hint: clothingNote || sessionState.product || 'T-shirt',
       });
+      const nextSessionId = response.session_id || sessionId;
+      setSessionId(nextSessionId);
+      storeAssistantSessionId(user?.id, nextSessionId);
       if (Array.isArray(response.messages)) setMessages(response.messages);
       if (response.state) setSessionState({ ...response.state, history: response.history || sessionState.history || {} });
       if (response.search_result && typeof onSearchComplete === 'function') {
@@ -318,6 +356,9 @@ export function HomeVoiceAssistant({
         friend_name: sessionState.friend_name || 'Paras',
       });
       if (res.session) {
+        const nextSessionId = res.session.session_id || res.session.id || sessionId;
+        setSessionId(nextSessionId);
+        storeAssistantSessionId(user?.id, nextSessionId);
         setMessages(res.session.messages || messages);
         setSessionState({ ...(res.session.state || sessionState), history: sessionState.history || {} });
         setShowUploadFallback(false);
@@ -384,7 +425,7 @@ export function HomeVoiceAssistant({
             />
             Speak replies
           </label>
-          <button type="button" className="ghost-button" onClick={handleResetSession}>
+          <button type="button" className="ghost-button" onClick={handleResetSession} disabled={voiceState === 'thinking'}>
             New Conversation
           </button>
         </div>
@@ -435,19 +476,27 @@ export function HomeVoiceAssistant({
             type="button"
             className={`primary-mic-button ${voiceState === 'listening' ? 'recording' : ''}`}
             onClick={toggleMicrophone}
+            disabled={voiceState === 'thinking' || voiceState === 'speaking'}
+            aria-pressed={voiceState === 'listening' || voiceState === 'transcribing'}
             data-testid="home-mic-button"
           >
             <Icon name={voiceState === 'listening' ? 'waveform' : 'mic'} size={28} />
             {voiceState === 'listening'
-              ? 'Stop listening'
+              ? 'Finish & send'
               : voiceState === 'transcribing'
               ? 'Cancel transcription'
+              : voiceState === 'thinking'
+              ? 'Artha is thinking'
+              : voiceState === 'speaking'
+              ? 'Artha is speaking'
               : 'Start speaking'}
           </button>
           <span className="mic-caption">
             {voiceState === 'listening'
-              ? 'Listening now · tap to finish'
-              : 'Your transcript stays editable before it is sent.'}
+              ? 'Listening now · tap to finish and send'
+              : voiceState === 'thinking' || voiceState === 'speaking'
+              ? 'Artha will reply here and speak the answer aloud.'
+              : 'Speak naturally. Your message is sent when you finish.'}
           </span>
           {voiceState === 'ready' && !transcript ? (
             <span className="voice-example">Try: “I like my friend Paras’s dressing sense.”</span>
@@ -465,7 +514,11 @@ export function HomeVoiceAssistant({
               data-testid="editable-transcript-input"
               rows={2}
               value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
+              disabled={voiceState === 'thinking' || voiceState === 'speaking'}
+              onChange={(e) => {
+                setTranscript(e.target.value);
+                voiceTranscriptRef.current = e.target.value;
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -502,7 +555,7 @@ export function HomeVoiceAssistant({
                 type="button"
                 className="primary-send-button"
                 data-testid="send-turn-button"
-                disabled={!transcript.trim() || voiceState === 'thinking'}
+                disabled={!transcript.trim() || voiceState === 'thinking' || voiceState === 'speaking'}
                 onClick={() => submitTurn()}
               >
                 {voiceState === 'thinking' ? 'Processing…' : 'Send'}
