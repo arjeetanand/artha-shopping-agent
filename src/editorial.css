@@ -477,6 +477,7 @@
     radial-gradient(ellipse at 8% 0%, rgba(182, 254, 0, .16), transparent 46%),
     linear-gradient(145deg, #fff 0%, #f0efe7 100%);
   box-shadow: 0 28px 80px rgba(3, 65, 2, .09);
+  animation: voice-hero-arrive 650ms cubic-bezier(.2, .75, .25, 1) both;
 }
 
 .home-voice-assistant--primary .home-voice-header { grid-area: header; }
@@ -559,6 +560,85 @@
 }
 .voice-text-fallback > textarea { margin-top: 10px; }
 .voice-text-fallback .transcript-actions { margin-top: 8px; }
+.voice-style-story {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px;
+  border: 1px solid rgba(3, 65, 2, .12);
+  border-radius: 15px;
+  background: rgba(250, 249, 245, .82);
+  animation: voice-story-arrive 520ms 120ms cubic-bezier(.2, .75, .25, 1) both;
+}
+.voice-style-story__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-forest);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.voice-style-story__heading span:last-child { color: var(--muted); font-size: 7px; }
+.voice-style-story__gallery {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 12px;
+  perspective: 900px;
+}
+.voice-style-card {
+  position: relative;
+  width: 100%;
+  max-width: 140px;
+  height: 142px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(3, 65, 2, .12);
+  border-radius: 11px;
+  background: #eee9dc;
+  box-shadow: 0 9px 18px rgba(3, 65, 2, .12);
+  transition: transform 220ms ease;
+  animation: voice-style-float 6s ease-in-out infinite;
+}
+.voice-style-card--shirt { transform: rotate(-5deg); animation-delay: -1.4s; }
+.voice-style-card--trousers { transform: translateY(-6px) rotate(1deg); animation-delay: -3.7s; }
+.voice-style-card--loafers { transform: rotate(5deg); animation-delay: -2.5s; }
+.voice-style-card:hover { transform: translateY(-7px) rotate(0deg) scale(1.03); }
+.voice-style-card__image {
+  position: absolute;
+  inset: 0;
+  background-image: url('/assets/editorial-outfit-triptych.png');
+  background-repeat: no-repeat;
+  background-size: 300% auto;
+}
+.voice-style-card--shirt .voice-style-card__image { background-position: 0% 50%; }
+.voice-style-card--trousers .voice-style-card__image { background-position: 50% 50%; }
+.voice-style-card--loafers .voice-style-card__image { background-position: 100% 50%; }
+.voice-style-card figcaption {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  left: 6px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: rgba(3, 65, 2, .91);
+  color: var(--color-lime);
+  font-family: var(--mono);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-align: center;
+}
+.voice-style-story__caption {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
 .voice-first-home__tools {
   max-width: 1320px;
   margin: 18px auto 0;
@@ -577,6 +657,18 @@
 }
 .voice-first-home__composer { margin-top: 16px; }
 
+@keyframes voice-hero-arrive {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes voice-story-arrive {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes voice-style-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -6px; }
+}
 @keyframes voice-orb-pulse {
   50% { box-shadow: 0 0 0 17px rgba(250, 128, 5, .12), 0 18px 34px rgba(3, 65, 2, .2); }
 }
@@ -596,6 +688,10 @@
   .home-voice-assistant--primary .home-voice-title { font-size: clamp(38px, 10vw, 52px); }
   .home-voice-assistant--primary .home-voice-thread { min-height: 150px; max-height: 280px; }
   .home-voice-assistant--primary .primary-mic-button { width: 150px; }
+  .voice-style-story { gap: 8px; padding: 10px; }
+  .voice-style-story__gallery { gap: 8px; }
+  .voice-style-card { height: 118px; }
+  .voice-style-story__caption { font-size: 10px; }
   .voice-example { font-size: 16px; }
   .voice-text-fallback .transcript-actions,
   .voice-text-fallback .instagram-confirm-bar { flex-direction: column; }
@@ -603,6 +699,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .home-voice-assistant--primary,
+  .voice-style-story,
+  .voice-style-card {
+    animation: none !important;
+    transition: none !important;
+    translate: none;
+  }
   .home-voice-assistant--primary .primary-mic-button,
   .home-voice-assistant--primary .primary-mic-button.recording { animation: none; transition: none; }
 }

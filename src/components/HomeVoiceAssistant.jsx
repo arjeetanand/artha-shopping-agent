@@ -440,6 +440,29 @@ export function HomeVoiceAssistant({
             <div className="turn-text">{msg.text}</div>
           </div>
         ))}
+        {messages.length === 1 && voiceState === 'ready' && !transcript && !instagramPosts.length && !confirmedRef ? (
+          <aside className="voice-style-story" aria-label="Example of a voice brief becoming a shopping shortlist">
+            <div className="voice-style-story__heading">
+              <span>OUTFIT EXAMPLE · LINEN LAYERS</span>
+              <span>NOT A LIVE RESULT</span>
+            </div>
+            <div className="voice-style-story__gallery">
+              <figure className="voice-style-card voice-style-card--shirt">
+                <div className="voice-style-card__image" role="img" aria-label="Linen shirt" />
+                <figcaption>LINEN SHIRT</figcaption>
+              </figure>
+              <figure className="voice-style-card voice-style-card--trousers">
+                <div className="voice-style-card__image" role="img" aria-label="Neutral trousers" />
+                <figcaption>RELAXED FIT</figcaption>
+              </figure>
+              <figure className="voice-style-card voice-style-card--loafers">
+                <div className="voice-style-card__image" role="img" aria-label="Leather loafers" />
+                <figcaption>EARTH TONES</figcaption>
+              </figure>
+            </div>
+            <p className="voice-style-story__caption">Say what you like. Artha finds real options to compare.</p>
+          </aside>
+        ) : null}
         <div ref={messagesEndRef} />
       </div>
 
