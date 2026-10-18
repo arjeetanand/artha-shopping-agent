@@ -597,7 +597,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
   const gmailQueryState = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('gmail') : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#FAF9F5] text-[#034102]">
+    <div className="taste-graph-view">
       {gmailQueryState === 'connected' && (
         <div className="taste-os-gmail-banner flex items-center justify-between gap-3 px-7 py-2.5 text-xs font-semibold">
           <div className="flex items-center gap-2.5">
@@ -608,26 +608,24 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
         </div>
       )}
       {/* Top Navigation & Status Bar */}
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-[#B6FE00]/30 bg-[#034102] px-6 py-3.5 text-[#F4F3EF]">
-        <div className="flex items-center gap-4">
+      <header className="taste-graph-view__header">
+        <div className="taste-graph-view__intro">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B6FE00] text-[#034102] shadow-md shadow-black/20">
-              <Icon name="network" size={22} className="text-[#034102]" />
-            </div>
+            <span className="taste-graph-view__mark"><Icon name="network" size={20} /></span>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-extrabold text-[#B6FE00] tracking-tight uppercase" style={{ fontFamily: "'Barlow Condensed', 'Antonio', sans-serif" }}>
-                  Shopping OS: Taste &amp; Context Graph
+                <h1 className="taste-graph-view__title">
+                  Your style profile
                 </h1>
-                <span className="rounded-full bg-[#B6FE00]/15 px-2.5 py-0.5 text-[11px] font-bold text-[#B6FE00] border border-[#B6FE00]/40 uppercase tracking-wider">
+                <span className="taste-graph-view__badge">
                   Private Taste Memory
                 </span>
-                <span className="rounded-full bg-[#FA8005]/20 px-2.5 py-0.5 text-[11px] font-bold text-[#FA8005] border border-[#FA8005]/40 uppercase tracking-wider">
+                <span className="taste-graph-view__badge taste-graph-view__badge--gmail">
                   Gmail: Shopping-Only Filter
                 </span>
               </div>
-              <p className="text-xs text-[#E3EAE4] opacity-90">
-                Retailer accounts read six months of order history; Gmail imports categorized shopping receipts &amp; PDFs while ignoring finance and job emails.
+              <p className="taste-graph-view__description">
+                Your preferences, saved inspirations, and connected shopping accounts in one private place.
               </p>
             </div>
           </div>
@@ -643,7 +641,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
                   cx="20"
                   cy="20"
                   r="16"
-                  stroke="#B6FE00"
+                  stroke="#EE8062"
                   strokeWidth="4"
                   strokeDasharray="100"
                   strokeDashoffset={100 - Math.min(depthScore, 100)}
@@ -652,15 +650,15 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
                   className="transition-all duration-700 ease-out"
                 />
               </svg>
-              <span className="absolute text-xs font-black text-[#B6FE00]">{depthScore}%</span>
+              <span className="absolute text-xs font-black taste-graph-view__score">{depthScore}%</span>
             </div>
             <div>
-              <div className="text-[11px] font-extrabold uppercase tracking-wider text-[#B6FE00]" style={{ fontFamily: "'Barlow Condensed', 'Antonio', sans-serif" }}>
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-[#EE8062]">
                 Context Depth
               </div>
               <div className="text-xs text-[#F4F3EF] opacity-90">
-                <span className="font-bold text-[#B6FE00]">{metrics.total_nodes || 0}</span> nodes •{' '}
-                <span className="font-bold text-[#B6FE00]">{metrics.total_edges || 0}</span> links
+                <span className="font-bold text-[#EE8062]">{metrics.total_nodes || 0}</span> nodes •{' '}
+                <span className="font-bold text-[#EE8062]">{metrics.total_edges || 0}</span> links
               </div>
             </div>
           </div>
@@ -697,9 +695,9 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
                 type="button"
                 onClick={onClose}
                 className="taste-os-btn-icon"
-                aria-label="Close"
+                aria-label="Back to Discover"
               >
-                <Icon name="close" size={18} />
+                <span>Back to Discover</span>
               </button>
             )}
           </div>
@@ -707,7 +705,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
       </header>
 
       {/* Connected Retailer Hubs Strip */}
-      <div className="flex flex-nowrap items-center gap-3 overflow-x-auto border-b border-[#E5E1D7] bg-[#EBE8DE] px-6 py-2.5 md:flex-wrap text-[#222A24]">
+      <div className="taste-graph-view__connections">
         <span className="text-xs font-medium text-[#596159] flex items-center gap-1.5 shrink-0">
           <Icon name="shoppingBag" size={14} /> Retailer Hubs:
         </span>
@@ -830,7 +828,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
       )}
 
       {/* Main Canvas & Sidebar Container */}
-      <div ref={containerRef} className="relative flex-1 overflow-hidden bg-[#F5F3ED]">
+      <div ref={containerRef} className="taste-graph-view__workspace">
         <button type="button" onClick={() => setShowProfileMobile((current) => !current)} className="absolute left-4 top-4 z-20 rounded-lg border border-[#DED9CC] bg-[#FFFEFA]/95 px-3 py-2 text-xs font-semibold text-[#A94F32] shadow-sm md:hidden">
           {showProfileMobile ? 'Hide Taste DNA' : 'Show Taste DNA'}
         </button>
@@ -841,7 +839,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          className="h-full w-full block select-none"
+          className="taste-graph-view__canvas"
         />
 
         {/* Hover / Select Floating Card */}
@@ -873,7 +871,7 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
         )}
 
         {/* Floating Taste DNA Legend & Summary */}
-        <div className={`${showProfileMobile ? 'block' : 'hidden'} absolute left-4 right-4 top-16 z-10 max-h-[45vh] overflow-y-auto rounded-2xl border border-[#E5E1D7] bg-[#FFFEFA]/95 p-4 shadow-xl backdrop-blur-md md:top-6 md:right-6 md:left-auto md:block md:max-h-[calc(100vh-260px)] md:w-80 text-[#222A24]`}>
+        <div className={`taste-graph-view__profile ${showProfileMobile ? 'block' : 'hidden'} absolute left-4 right-4 top-16 z-10 max-h-[45vh] overflow-y-auto rounded-2xl border border-[#E5E1D7] bg-[#FFFEFA]/95 p-4 shadow-xl backdrop-blur-md md:top-6 md:right-6 md:left-auto md:block md:max-h-[calc(100vh-260px)] md:w-80 text-[#222A24]`}>
           <div className="flex items-center justify-between mb-3 border-b border-[#E5E1D7] pb-2">
             <h2 className="text-xs font-bold uppercase tracking-wider text-[#222A24] flex items-center gap-1.5">
               <Icon name="spark" size={14} className="text-[#A94F32]" />

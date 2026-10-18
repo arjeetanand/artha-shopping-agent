@@ -1,15 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Icon } from './Icon';
-import { Card3D } from './Card3D';
 import { formatPrice, productTotal } from '../data';
 
-const COLOR_PALETTE = [
-  { color: '#F8D148', colorLight: '#FFF8D6', textColor: '#8C6C00' },
-  { color: '#1EA7FD', colorLight: '#E5F5FF', textColor: '#026AA7' },
-  { color: '#F04D99', colorLight: '#FFE8F3', textColor: '#9E165A' },
-  { color: '#8B5CF6', colorLight: '#F3E8FF', textColor: '#5B21B6' },
-  { color: '#10B981', colorLight: '#ECFDF5', textColor: '#065F46' },
-];
+const COLOR_PALETTE = [{ color: '#E9785C', colorLight: '#F8E6DF', textColor: '#252720' }];
 
 export function planToBag(plan, index = 0) {
   const palette = COLOR_PALETTE[index % COLOR_PALETTE.length];
@@ -20,7 +13,6 @@ export function planToBag(plan, index = 0) {
     price: productTotal(item),
     delivery: item.delivery_label || 'Confirm at retailer',
     url: item.url,
-    iconColor: '#0694D6',
   }));
   const sellers = [...new Set(items.map((item) => item.seller))];
   const savedTotal = Number(plan?.total);
@@ -41,7 +33,6 @@ export function planToBag(plan, index = 0) {
     itemCount: `${items.length} saved ${items.length === 1 ? 'item' : 'items'}`,
     totalPrice: formatPrice(numericTotal),
     numericTotal,
-    stickers: ['🛍️', '📦', '🔎', '✨'],
     status: 'active',
     items,
     rawPlan: plan,
@@ -83,7 +74,7 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
         <div className="bags-tracker__brand-row">
           <div className="bags-tracker__logo">
             <span className="bags-tracker__logo-dot" />
-            <span className="bags-tracker__logo-text">ARTHA PURCHASE PLANS</span>
+            <span className="bags-tracker__logo-text">Your plans</span>
           </div>
           <div className="bags-tracker__view-controls">
             <button
@@ -109,10 +100,10 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
 
         <div className="bags-tracker__hero-text">
           <div className="bags-tracker__kicker-tab">
-            <span className="bags-tracker__folder-badge">FOLDER // PURCHASE PLANS</span>
+            <span className="bags-tracker__folder-badge">Purchase plans</span>
             <span className="bags-tracker__count-tag">{allBags.length} {allBags.length === 1 ? 'plan' : 'plans'}</span>
           </div>
-          <h1 className="bags-tracker__title">YOUR SHORTLIST, ORGANIZED TO BUY.</h1>
+          <h1 className="bags-tracker__title">Your plans, ready when you are.</h1>
           <p className="bags-tracker__subtitle">Consolidate verified retailer finds into clear purchase shortlists before buying. Real purchases happen with the merchant.</p>
           <span className="bags-tracker__annotation">“One clean plan, ready for retailer checkout.”</span>
         </div>
@@ -125,11 +116,11 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
               value={activeTab}
               onChange={(e) => setActiveTab(e.target.value)}
               className="bags-tracker__select"
-              aria-label="Filter bags"
+              aria-label="Filter plans"
             >
               <option value="active">Active</option>
               <option value="archived">Archived</option>
-              <option value="all">All Bags</option>
+              <option value="all">All plans</option>
             </select>
             <Icon name="chevron" size={13} className="bags-tracker__select-chevron" />
           </div>
@@ -138,7 +129,7 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
             <Icon name="search" size={16} className="bags-tracker__search-icon" />
             <input
               type="text"
-              placeholder="Search bag or item…"
+              placeholder="Search plan or item…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bags-tracker__search-input"
@@ -185,11 +176,11 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
       {/* ── Empty state fallback ── */}
       {filteredBags.length === 0 && (
         <div className="bags-tracker__empty">
-          <span className="bags-tracker__empty-icon">🎒</span>
-          <h3>{plans.length ? 'No matching bags found' : 'No saved bags yet'}</h3>
+          <span className="bags-tracker__empty-icon"><Icon name="box" size={24} /></span>
+          <h3>{plans.length ? 'No matching plans found' : 'No purchase plans yet'}</h3>
           <p>{plans.length ? 'Try clearing your search query or create a new research brief with Artha.' : 'Research a brief, choose retailer items, and save your first purchase plan.'}</p>
           <button type="button" className="primary-button" onClick={onDiscover}>
-            <span>New Research Brief</span>
+            <span>Start a new brief</span>
             <Icon name="arrow" size={16} />
           </button>
         </div>
@@ -214,7 +205,7 @@ export function BagFolderCard({
   onResearch,
 }) {
   return (
-    <Card3D maxTilt={9} scale={1.02} className="bags-tracker__card-wrapper">
+    <div className="bags-tracker__card-wrapper">
       <article
         className="bag-folder"
         style={{
@@ -223,38 +214,6 @@ export function BagFolderCard({
           '--folder-text': bag.textColor,
         }}
       >
-        {/* Folder Silhouette Tab */}
-        <div className="bag-folder__tab">
-          <span className="bag-folder__tab-inner" />
-        </div>
-
-        {/* Pop-out Cutout Stickers Header */}
-        <div className="bag-folder__stickers" aria-hidden="true">
-          {bag.stickers.map((stk, i) => (
-            <span key={i} className={`bag-folder__sticker bag-folder__sticker--${i + 1}`}>
-              {stk}
-            </span>
-          ))}
-        </div>
-
-        {/* Stacked Retailer Tier Cards peeking out */}
-        <div className="bag-folder__tiers">
-          {bag.items.slice(0, 3).map((item, idx) => (
-            <div
-              key={item.id}
-              className="bag-folder__tier-item"
-              style={{ transform: `translateY(${idx * 7}px) scale(${1 - idx * 0.03})` }}
-            >
-              <div className="bag-folder__retailer-badge" style={{ backgroundColor: item.iconColor }}>
-                {item.seller.charAt(0)}
-              </div>
-              <span className="bag-folder__tier-seller">{item.seller}</span>
-              <span className="bag-folder__tier-dot">⋮</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Front White Overlay Pocket */}
         <div className="bag-folder__pocket">
           <div className="bag-folder__pocket-header">
             <h3 className="bag-folder__pocket-title">{bag.title}</h3>
@@ -272,7 +231,7 @@ export function BagFolderCard({
               className="bag-folder__view-btn"
               onClick={() => onInspect?.(bag)}
             >
-              <span>View Bag</span>
+              <span>View plan</span>
               <Icon name="arrow" size={14} />
             </button>
             {onResearch && bag.briefQuery ? (
@@ -299,7 +258,7 @@ export function BagFolderCard({
           </div>
         </div>
       </article>
-    </Card3D>
+    </div>
   );
 }
 
@@ -379,7 +338,7 @@ export function BagDetailModal({
               }}
             >
               <Icon name="link" size={14} />
-              <span>Share Bag</span>
+              <span>Share plan</span>
             </button>
             {onResearch && bag.briefQuery ? (
               <button
@@ -391,7 +350,7 @@ export function BagDetailModal({
                 }}
               >
                 <Icon name="spark" size={15} />
-                <span>Research This Bag</span>
+                <span>Research this plan</span>
               </button>
             ) : (
               <button

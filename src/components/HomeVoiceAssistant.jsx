@@ -359,13 +359,13 @@ export function HomeVoiceAssistant({
     <section id="home-voice-assistant" className="home-voice-assistant home-voice-assistant--primary" aria-label="Voice Shopping Assistant">
       <div className="home-voice-header">
         <div>
-          <div className="eyebrow">Voice First · Personal Style Search</div>
+          <div className="eyebrow">Your personal shopping assistant</div>
           <h1 className="home-voice-title">
-            Talk us through<br />
-            <span>your next look.</span>
+            Tell me the look.<br />
+            <span>I’ll find the pieces.</span>
           </h1>
           <p className="home-voice-subtitle">
-            Start with one sentence. Artha asks the right follow-up questions, then checks real retailer options. Mention a friend’s style or share an Instagram post to guide the search.
+            Speak naturally. Artha asks what matters, then compares real retailer options. Mention a friend’s style—like Paras’s—or share an Instagram post.
           </p>
         </div>
         <div className="home-voice-controls-bar">
@@ -528,30 +528,11 @@ export function HomeVoiceAssistant({
         {messages.length === 1 && voiceState === 'ready' && !transcript && !instagramPosts.length && !confirmedRef ? (
           <aside className="voice-style-story" aria-label="Example of a voice brief becoming a shopping shortlist">
             <div className="voice-style-story__heading">
-              <span>OUTFIT EXAMPLE · LINEN LAYERS</span>
-              <span>NOT A LIVE RESULT</span>
+              <span>TRY A VOICE BRIEF</span>
+              <span>EXAMPLE</span>
             </div>
-            <div className="voice-style-story__gallery" role="group" aria-label="A sample outfit shown as separate style cues">
-              <div className="voice-style-story__track">
-                {[0, 1].map((set) => (
-                  <div className="voice-style-story__set" key={set} aria-hidden={set === 1}>
-                    <figure className="voice-style-card voice-style-card--shirt">
-                      <div className="voice-style-card__image" aria-hidden="true" />
-                      <figcaption>LINEN SHIRT</figcaption>
-                    </figure>
-                    <figure className="voice-style-card voice-style-card--trousers">
-                      <div className="voice-style-card__image" aria-hidden="true" />
-                      <figcaption>RELAXED FIT</figcaption>
-                    </figure>
-                    <figure className="voice-style-card voice-style-card--loafers">
-                      <div className="voice-style-card__image" aria-hidden="true" />
-                      <figcaption>EARTH TONES</figcaption>
-                    </figure>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <p className="voice-style-story__caption">Say what you like. Artha finds real options to compare.</p>
+            <p className="voice-style-story__phrase">“I like my friend Paras’s dressing sense. Find me a relaxed outfit for a Goa weekend.”</p>
+            <p className="voice-style-story__caption">Add a budget, size, or public Instagram link as you talk.</p>
           </aside>
         ) : null}
         <div ref={messagesEndRef} />

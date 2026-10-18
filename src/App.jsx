@@ -12,7 +12,6 @@ import { HowArthaWorks } from './components/HowArthaWorks';
 import {
   DEFAULT_INTENT,
   DEFAULT_RESULT,
-  SHOPPING_THEMES,
   SUGGESTED_SEARCHES,
   formatDate,
   formatPrice,
@@ -47,27 +46,19 @@ import {
 } from './lib/api';
 
 const SAVED_KEY = 'artha:saved:v1';
+const SAVED_PRODUCTS_KEY = 'artha:saved-products:v1';
 const LEGACY_SAVED_KEY = 'saathi:saved:v2';
 const PENDING_SEARCH_KEY = 'artha:pending-search:v1';
 const MAX_REFERENCE_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_REFERENCE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const NAV_ITEMS = [
   { id: 'discover', label: 'Discover', icon: 'search' },
-  { id: 'taste-graph', label: 'Taste OS', icon: 'network' },
+  { id: 'taste-graph', label: 'Your style', icon: 'network' },
   { id: 'saved', label: 'Saved', icon: 'bookmark' },
-  { id: 'plans', label: 'Purchase plans', icon: 'box' },
+  { id: 'plans', label: 'Plans', icon: 'box' },
   { id: 'orders', label: 'Orders', icon: 'truck' },
   { id: 'usage', label: 'Usage', icon: 'chart' },
 ];
-const SECTION_TITLES = {
-  discover: 'Discover',
-  'taste-graph': 'Shopping OS: Taste & Context Graph',
-  saved: 'Saved picks',
-  plans: 'Purchase plans',
-  orders: 'Orders & tracking',
-  usage: 'Usage & runtime',
-};
-
 function missionFromIntent(intent) {
   const mission = intent?.mission || {};
   return {
@@ -102,6 +93,15 @@ function readSavedIds() {
     const raw = window.localStorage.getItem(SAVED_KEY) || window.localStorage.getItem(LEGACY_SAVED_KEY) || '[]';
     const value = JSON.parse(raw);
     return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function readSavedProducts() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(SAVED_PRODUCTS_KEY) || '[]');
+    return Array.isArray(value) ? value.filter((product) => product?.id) : [];
   } catch {
     return [];
   }
@@ -335,8 +335,8 @@ function TearOffMenuPanel({
         <div className="tearoff-menu-panel__perforation" aria-hidden="true" />
         <div className="tearoff-menu-panel__header">
           <div>
-            <span className="tearoff-menu-panel__kicker">ARTHA // NAVIGATION SHEET</span>
-            <p className="tearoff-menu-panel__tagline">Speak your brief. Artha handles the retailer research.</p>
+            <span className="tearoff-menu-panel__kicker">Explore Artha</span>
+            <p className="tearoff-menu-panel__tagline">Your style, saved finds, and shopping plans.</p>
           </div>
           <button
             ref={closeButtonRef}
@@ -460,6 +460,7 @@ function TearOffMenuPanel({
 
 function TopHeader({
   activeView,
+  onNavigate,
   onReset,
   health,
   user,
@@ -476,10 +477,6 @@ function TopHeader({
     <header className="top-header">
       <div className="top-header__left">
         <Logo onClick={onReset} />
-        <div className="top-header__breadcrumb" aria-label="Current section">
-          <span className="top-header__separator" aria-hidden="true">/</span>
-          <span className="top-header__section">{SECTION_TITLES[activeView]}</span>
-        </div>
         <span
           className={`top-header__mode-pill top-header__mode-pill--${status.tone}`}
           title={status.detail}
@@ -488,6 +485,20 @@ function TopHeader({
           <span>{status.shortLabel}</span>
         </span>
       </div>
+
+      <nav className="top-header__nav" aria-label="Primary navigation">
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`top-header__nav-link ${activeView === item.id ? 'is-active' : ''}`}
+            onClick={() => onNavigate(item.id)}
+            aria-current={activeView === item.id ? 'page' : undefined}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
 
       <div className="top-header__menu">
         <button
@@ -498,7 +509,7 @@ function TopHeader({
           aria-controls="artha-navigation-panel"
           aria-haspopup="dialog"
         >
-          <span>{menuOpen ? 'Close' : 'Browse'}</span>
+          <span>{menuOpen ? 'Close' : 'Menu'}</span>
           <Icon name={menuOpen ? 'close' : 'chevron'} size={14} />
         </button>
       </div>
@@ -1266,190 +1277,6 @@ function ClarificationNote({ intent, onAnswer, onEdit, isSearching }) {
       <small>Answer here or use a quick answer. Artha starts retailer research once the required details are clear.</small>
       <button type="button" className="quiet-action clarification-note__edit" onClick={onEdit}>Edit shopping brief <Icon name="arrow" size={14} /></button>
     </aside>
-  );
-}
-
-function ShoppingThemeShowcase({ onSelectBrief }) {
-  const [activeIndex, setActiveIndex] = useState(0);
-  const touchStartXRef = useRef(null);
-  const themes = SHOPPING_THEMES;
-  const activeTheme = themes[activeIndex] || themes[0];
-
-  const handlePrev = () => {
-    setActiveIndex((current) => (current - 1 + themes.length) % themes.length);
-  };
-
-  const handleNext = () => {
-    setActiveIndex((current) => (current + 1) % themes.length);
-  };
-
-  const handleTouchStart = (event) => {
-    touchStartXRef.current = event.touches?.[0]?.clientX ?? null;
-  };
-
-  const handleTouchEnd = (event) => {
-    if (touchStartXRef.current === null) return;
-    const endX = event.changedTouches?.[0]?.clientX ?? touchStartXRef.current;
-    const delta = endX - touchStartXRef.current;
-    touchStartXRef.current = null;
-    if (Math.abs(delta) > 44) {
-      if (delta < 0) handleNext();
-      else handlePrev();
-    }
-  };
-
-  return (
-    <section
-      className="theme-showcase paper-texture-surface"
-      aria-labelledby="theme-showcase-heading"
-      style={{
-        '--theme-bg': activeTheme.bg,
-        '--theme-text': activeTheme.text,
-        '--theme-accent': activeTheme.accent,
-        '--theme-badge-bg': activeTheme.badgeBg,
-        '--theme-badge-text': activeTheme.badgeText,
-      }}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
-      <div className="theme-showcase__inner">
-        <div className="theme-showcase__top-bar">
-          <div className="theme-showcase__label-group">
-            <span className="theme-showcase__example-pill">
-              EDITORIAL EXAMPLE · SAMPLE SHOPPING MISSION (NOT LIVE SEARCH RESULTS)
-            </span>
-            <span className="theme-showcase__counter" aria-live="polite">
-              {String(activeIndex + 1).padStart(2, '0')} / {String(themes.length).padStart(2, '0')} — {activeTheme.label.toUpperCase()}
-            </span>
-          </div>
-
-          {/* Visible Previous / Next Controls for Mobile & Desktop */}
-          <div className="theme-showcase__arrows" role="group" aria-label="Theme carousel controls">
-            <button
-              type="button"
-              className="theme-showcase__arrow-btn"
-              onClick={handlePrev}
-              aria-label="Previous shopping theme"
-            >
-              <span aria-hidden="true">←</span>
-              <span>Prev</span>
-            </button>
-            <button
-              type="button"
-              className="theme-showcase__arrow-btn"
-              onClick={handleNext}
-              aria-label="Next shopping theme"
-            >
-              <span>Next</span>
-              <span aria-hidden="true">→</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Theme Selector Tabs with Obvious Selected State */}
-        <div className="theme-showcase__tabs" role="tablist" aria-label="Shopping mission themes">
-          {themes.map((theme, idx) => {
-            const isSelected = idx === activeIndex;
-            return (
-              <button
-                type="button"
-                key={theme.id}
-                role="tab"
-                aria-selected={isSelected}
-                className={`theme-showcase__tab ${isSelected ? 'is-selected' : ''}`}
-                onClick={() => setActiveIndex(idx)}
-              >
-                <span className="theme-showcase__tab-dot" aria-hidden="true" />
-                <span className="theme-showcase__tab-name">{theme.label}</span>
-                {isSelected ? <span className="theme-showcase__tab-status">Selected</span> : null}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Prominent Single Active Theme Stage */}
-        <div className="theme-showcase__stage" role="tabpanel" aria-label={`${activeTheme.label} shopping mission showcase`}>
-          <div className="theme-showcase__copy">
-            <span className="theme-showcase__kicker">{activeTheme.kicker}</span>
-            <h2 id="theme-showcase-heading" className="theme-showcase__title">
-              {activeTheme.title}
-            </h2>
-            <p className="theme-showcase__subtitle">{activeTheme.subtitle}</p>
-
-            <ul className="theme-showcase__highlights" aria-label="Sample research highlights">
-              {activeTheme.highlights.map((item) => (
-                <li key={item}>
-                  <Icon name="check" size={14} />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="theme-showcase__brief-box">
-              <div className="theme-showcase__brief-meta">
-                <span className="theme-showcase__brief-tag">SUGGESTED BRIEF</span>
-                <span className="theme-showcase__brief-constraints">
-                  {activeTheme.occasion} · Budget {activeTheme.budget} · {activeTheme.location}
-                </span>
-              </div>
-              <p className="theme-showcase__brief-quote">“{activeTheme.brief}”</p>
-              <div className="theme-showcase__cta-row">
-                <button
-                  type="button"
-                  className="stamp-action-button"
-                  onClick={() => onSelectBrief(activeTheme.brief)}
-                >
-                  <span className="stamp-action-button__ring" aria-hidden="true" />
-                  <span className="stamp-action-button__label">Try this brief</span>
-                  <Icon name="arrow" size={16} />
-                </button>
-                <span className="theme-showcase__annotation" aria-hidden="true">
-                  {activeTheme.annotation}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="theme-showcase__visual">
-            <div className="theme-showcase__collage">
-              <div className="theme-showcase__folder-card">
-                <div className="theme-showcase__folder-top">
-                  <span>SAMPLE CURATION // {activeTheme.label.toUpperCase()}</span>
-                  <span className="theme-showcase__verdict-pill">{activeTheme.verdictLabel}</span>
-                </div>
-                <div className="theme-showcase__main-photo">
-                  <img
-                    src={activeTheme.image}
-                    alt={activeTheme.imageAlt}
-                    loading="lazy"
-                    decoding="async"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                </div>
-                <div className="theme-showcase__cutout-float">
-                  <img
-                    src={activeTheme.cutoutImage}
-                    alt=""
-                    aria-hidden="true"
-                    loading="lazy"
-                    decoding="async"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                </div>
-                <div className="theme-showcase__price-sticker">
-                  <small>EDITORIAL SAMPLE</small>
-                  <strong>{activeTheme.priceTag}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -2308,10 +2135,6 @@ function DiscoverView({
       </section>
 
       {/* Show Theme Showcase right after Hero when idle, or after Results when searching */}
-      {!hasActiveSearchContext ? (
-        <ShoppingThemeShowcase onSelectBrief={onPickPrompt} />
-      ) : null}
-
       {/* ── Calm, Practical Results & Trust Workspace ── */}
       {(hasActiveSearchContext || plans.length > 0) ? (
       <div className="discover-layout">
@@ -2385,17 +2208,17 @@ function DiscoverView({
                   <div className="home-bags-showcase__header">
                     <div className="home-bags-showcase__title-wrap">
                       <span className="section-kicker">
-                        <Icon name="spark" size={13} /> {plans.length ? 'Your saved bags' : 'Starter missions'}
+                        <Icon name="spark" size={13} /> {plans.length ? 'Your purchase plans' : 'Starter briefs'}
                       </span>
-                      <h2 id="home-bags-title">{plans.length ? 'Continue a saved bag' : 'Start a shopping mission'}</h2>
+                      <h2 id="home-bags-title">{plans.length ? 'Continue a shopping plan' : 'Start a shopping mission'}</h2>
                       <p>
                         {plans.length
-                          ? 'Your saved items, retailer links, and totals, loaded from your account.'
+                          ? 'Your saved items, retailer links, and totals, ready to revisit.'
                           : 'Choose a brief to start. Artha will find retailer items and check prices when you launch a mission.'}
                       </p>
                     </div>
                     <span className="home-bags-showcase__hint">
-                      {plans.length ? 'View a saved bag or research it again' : 'Choose a brief to run Artha'}
+                      {plans.length ? 'Open a plan or research it again' : 'Choose a brief to run Artha'}
                     </span>
                   </div>
 
@@ -2414,10 +2237,10 @@ function DiscoverView({
                       })}
                     </div>
                   ) : isSessionLoading || isPlansLoading ? (
-                    <p className="home-bags-showcase__empty" role="status">Loading your saved bags…</p>
+                    <p className="home-bags-showcase__empty" role="status">Loading your purchase plans…</p>
                   ) : (
                     <div className="home-bags-showcase__empty">
-                      <p>No saved bags yet. Start with one of these briefs:</p>
+                        <p>No purchase plans yet. Start with one of these briefs:</p>
                       <div className="home-bags-showcase__suggestions">
                         {SUGGESTED_SEARCHES.map((prompt) => (
                           <button
@@ -2509,12 +2332,7 @@ function DiscoverView({
       </div>
       ) : null}
 
-      {/* When an active search is shown, keep Theme Showcase accessible below Results */}
-      {hasActiveSearchContext ? (
-        <ShoppingThemeShowcase onSelectBrief={onPickPrompt} />
-      ) : null}
-
-      {/* ── Three Editorial Story Chapters, How Artha Works, and Oversized Footer ── */}
+      {/* How it works and footer */}
       <HowArthaWorks onNavigate={onNavigate} />
 
       {/* Floating mobile action bar */}
@@ -2814,6 +2632,13 @@ function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn, onToas
 
   return (
     <div className="page-stack">
+      <BagsPurchaseTracker
+        plans={plans}
+        onDiscover={onDiscover}
+        onOpenPlan={(plan) => setSelectedPlanDetail(plan)}
+        onToast={onToast}
+      />
+
       {!user ? (
         <div className="plans-guest-banner">
           <div className="plans-guest-banner__info">
@@ -2826,13 +2651,6 @@ function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn, onToas
           </button>
         </div>
       ) : null}
-
-      <BagsPurchaseTracker
-        plans={plans}
-        onDiscover={onDiscover}
-        onOpenPlan={(plan) => setSelectedPlanDetail(plan)}
-        onToast={onToast}
-      />
 
       {selectedPlanDetail ? (
         <div className="plans-detail-drawer" style={{ marginTop: 32 }}>
@@ -2849,28 +2667,35 @@ function PlansView({ user, isSessionLoading, plans, onDiscover, onSignIn, onToas
 
 function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTogglePlan, selectedIds }) {
   const saved = products.filter((product) => savedIds.includes(product.id));
+  const missingSavedCount = savedIds.length - saved.length;
 
   return (
     <div className="page-stack saved-page">
       <div className="page-heading page-heading--editorial">
         <div className="page-heading__copy">
           <div className="page-heading__tab">
-            <span className="page-heading__tag">FOLDER // BOOKMARKS &amp; INSPIRATION</span>
-            <span className="page-heading__count">{saved.length} {saved.length === 1 ? 'FIND' : 'FINDS'}</span>
+            <span className="page-heading__tag">Your collection</span>
+            <span className="page-heading__count">{saved.length} {saved.length === 1 ? 'saved item' : 'saved items'}</span>
           </div>
           <h1 className="page-heading__title">
-            KEEP THE GOOD FINDS
+            Your saved finds
             <br />
-            CLOSE AT HAND.
+            all in one place.
           </h1>
           <p className="page-heading__sub">Bookmarked retailer discoveries from your searches. Add them into your plan or open them directly.</p>
           <span className="page-heading__annotation">“Save what catches your eye, compare the sources later.”</span>
         </div>
         <button type="button" className="stamp-action-button stamp-action-button--lime" onClick={onDiscover}>
-          <span className="stamp-action-button__label">DISCOVER MORE</span>
+          <span className="stamp-action-button__label">Discover more</span>
           <Icon name="arrow" size={16} />
         </button>
       </div>
+
+      {missingSavedCount > 0 ? (
+        <p className="saved-page__notice" role="status">
+          {missingSavedCount} older {missingSavedCount === 1 ? 'save was' : 'saves were'} stored without product details and can’t be reopened here.
+        </p>
+      ) : null}
 
       {saved.length ? (
         <div className="saved-grid">
@@ -2937,11 +2762,11 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
           <span className="empty-state__icon">
             <Icon name="bookmark" size={28} />
           </span>
-          <h2 className="empty-state__title">NO SAVED PICKS YET.</h2>
+          <h2 className="empty-state__title">No saved picks yet.</h2>
           <p className="empty-state__text">Click the bookmark icon on any product to save it while you compare retailer sources.</p>
           <span className="empty-state__annotation">“Every good find starts with a quick bookmark.”</span>
           <button type="button" className="stamp-action-button stamp-action-button--lime empty-state__btn" onClick={onDiscover}>
-            <span className="stamp-action-button__label">FIND ITEMS NOW</span>
+            <span className="stamp-action-button__label">Find items</span>
             <Icon name="arrow" size={16} />
           </button>
         </div>
@@ -3012,7 +2837,20 @@ function OrdersView({ user, isSessionLoading, retailerOrders, orders, ordersLoad
 
   if (!user) {
     return (
-      <div className="page-stack">
+      <div className="page-stack orders-page">
+        <div className="page-heading page-heading--editorial">
+          <div className="page-heading__copy">
+            <div className="page-heading__tab">
+              <span className="page-heading__tag">Your orders</span>
+              <span className="page-heading__count">0 orders</span>
+            </div>
+            <h1 className="page-heading__title">Your purchases,<br />in one place.</h1>
+            <p className="page-heading__sub">Sign in to see retailer order history and keep your purchases together.</p>
+          </div>
+          <button type="button" className="stamp-action-button stamp-action-button--lime" onClick={onDiscover}>
+            <span className="stamp-action-button__label">Discover more</span><Icon name="arrow" size={16} />
+          </button>
+        </div>
         <SignInPrompt onSignIn={onSignIn} />
       </div>
     );
@@ -3023,19 +2861,19 @@ function OrdersView({ user, isSessionLoading, retailerOrders, orders, ordersLoad
       <div className="page-heading page-heading--editorial">
         <div className="page-heading__copy">
           <div className="page-heading__tab">
-            <span className="page-heading__tag">FOLDER // ORDERS &amp; FULFILLMENT</span>
-            <span className="page-heading__count">{retailerOrders.length + orders.length} {retailerOrders.length + orders.length === 1 ? 'ORDER' : 'ORDERS'}</span>
+            <span className="page-heading__tag">Your orders</span>
+            <span className="page-heading__count">{retailerOrders.length + orders.length} {retailerOrders.length + orders.length === 1 ? 'order' : 'orders'}</span>
           </div>
           <h1 className="page-heading__title">
-            YOUR PURCHASES,
+            Your purchases,
             <br />
-            IN ONE PLACE.
+            in one place.
           </h1>
           <p className="page-heading__sub">Real order history from connected retailer accounts and Gmail receipts. Local test checkouts stay separate.</p>
           <span className="page-heading__annotation">“Real purchases happen at the retailer. Live updates track here.”</span>
         </div>
         <button type="button" className="stamp-action-button stamp-action-button--lime" onClick={onDiscover}>
-          <span className="stamp-action-button__label">FIND SOMETHING ELSE</span>
+          <span className="stamp-action-button__label">Find something else</span>
           <Icon name="arrow" size={16} />
         </button>
       </div>
@@ -3186,13 +3024,13 @@ function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntime
       <div className="page-heading page-heading--editorial usage-heading">
         <div className="page-heading__copy">
           <div className="page-heading__tab">
-            <span className="page-heading__tag">FOLDER // SYSTEM LEDGER &amp; TOKENS</span>
-            <span className="page-heading__count">{formatUsageCount(totals.requests || 0)} REQUESTS</span>
+            <span className="page-heading__tag">Usage overview</span>
+            <span className="page-heading__count">{formatUsageCount(totals.requests || 0)} requests</span>
           </div>
           <h1 className="page-heading__title">
-            RESEARCH METER &amp;
+            Research meter &amp;
             <br />
-            RUNTIME TELEMETRY.
+            runtime activity.
           </h1>
           <p className="page-heading__sub">Transparent accounting of every AI model call, query token, search provider hit, and voice synthesis session.</p>
           <span className="page-heading__annotation">“Every query, token, and store search accounted for.”</span>
@@ -3203,7 +3041,7 @@ function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntime
           onClick={() => onRefresh().catch(() => {})}
           disabled={isLoading}
         >
-          <span className="stamp-action-button__label">{isLoading ? 'UPDATING…' : 'REFRESH LEDGER'}</span>
+          <span className="stamp-action-button__label">{isLoading ? 'Updating…' : 'Refresh ledger'}</span>
           <Icon name="refresh" size={16} className={isLoading ? 'animate-spin' : ''} />
         </button>
       </div>
@@ -3456,6 +3294,7 @@ export default function App() {
   const [searchStage, setSearchStage] = useState(0);
   const [searchError, setSearchError] = useState('');
   const [savedIds, setSavedIds] = useState(readSavedIds);
+  const [savedProducts, setSavedProducts] = useState(readSavedProducts);
   const [plans, setPlans] = useState([]);
   const [isPlansLoading, setIsPlansLoading] = useState(true);
   const [orders, setOrders] = useState([]);
@@ -3513,8 +3352,11 @@ export default function App() {
   }, [user?.id]);
 
   const selectedProducts = useMemo(
-    () => result.products.filter((product) => selectedIds.includes(product.id)),
-    [result.products, selectedIds],
+    () => {
+      const catalog = new Map([...savedProducts, ...result.products].map((product) => [product.id, product]));
+      return selectedIds.map((id) => catalog.get(id)).filter(Boolean);
+    },
+    [result.products, savedProducts, selectedIds],
   );
 
   const refreshOrders = useCallback(async () => {
@@ -3590,6 +3432,14 @@ export default function App() {
       /* Private browsing can deny storage. */
     }
   }, [savedIds]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SAVED_PRODUCTS_KEY, JSON.stringify(savedProducts));
+    } catch {
+      /* Private browsing can deny storage. */
+    }
+  }, [savedProducts]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -3939,7 +3789,7 @@ export default function App() {
   const toggleSaved = useCallback(
     async (id) => {
       const wasSaved = savedIds.includes(id);
-      const product = result.products.find(item => item.id === id);
+      const product = result.products.find(item => item.id === id) || savedProducts.find(item => item.id === id);
       if (user && product?.url) {
         try {
           const url = new URL(product.url);
@@ -3955,9 +3805,12 @@ export default function App() {
         } catch (error) {setToast(error.message || 'Could not update your taste memory.');return;}
       }
       setSavedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+      setSavedProducts((current) => wasSaved
+        ? current.filter((item) => item.id !== id)
+        : product ? [...current.filter((item) => item.id !== id), product] : current);
       setToast(wasSaved ? 'Removed from saved picks and taste memory.' : user ? 'Saved to your taste memory.' : 'Saved locally. Sign in to teach Artha your taste.');
     },
-    [savedIds,result.products,tasteMemories,user],
+    [savedIds,result.products,savedProducts,tasteMemories,user],
   );
 
   const handleSelectAll = useCallback(() => {
@@ -4280,7 +4133,7 @@ export default function App() {
       />
     ) : activeView === 'saved' ? (
       <SavedView
-        products={result.products}
+        products={savedProducts}
         savedIds={savedIds}
         onSave={toggleSaved}
         onDiscover={startNewSearch}
@@ -4334,6 +4187,7 @@ export default function App() {
       <div className="app-shell app-shell--editorial">
       <TopHeader
         activeView={activeView}
+        onNavigate={navigateToView}
         onReset={startNewSearch}
         health={health}
         user={user}
