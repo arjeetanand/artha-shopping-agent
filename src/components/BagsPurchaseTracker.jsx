@@ -83,7 +83,7 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
         <div className="bags-tracker__brand-row">
           <div className="bags-tracker__logo">
             <span className="bags-tracker__logo-dot" />
-            <span className="bags-tracker__logo-text">Artha BagSync</span>
+            <span className="bags-tracker__logo-text">ARTHA PURCHASE PLANS</span>
           </div>
           <div className="bags-tracker__view-controls">
             <button
@@ -108,9 +108,15 @@ export function BagsPurchaseTracker({ plans = [], onDiscover, onOpenPlan, onToas
         </div>
 
         <div className="bags-tracker__hero-text">
-          <h1 className="bags-tracker__title">My Bags</h1>
-          <p className="bags-tracker__subtitle">Manage your shopping lists and track your purchases across retailers</p>
+          <div className="bags-tracker__kicker-tab">
+            <span className="bags-tracker__folder-badge">FOLDER // PURCHASE PLANS</span>
+            <span className="bags-tracker__count-tag">{allBags.length} {allBags.length === 1 ? 'plan' : 'plans'}</span>
+          </div>
+          <h1 className="bags-tracker__title">YOUR SHORTLIST, ORGANIZED TO BUY.</h1>
+          <p className="bags-tracker__subtitle">Consolidate verified retailer finds into clear purchase shortlists before buying. Real purchases happen with the merchant.</p>
+          <span className="bags-tracker__annotation">“One clean plan, ready for retailer checkout.”</span>
         </div>
+
 
         {/* ── Filter / Search Bar ── */}
         <div className="bags-tracker__controls-row">

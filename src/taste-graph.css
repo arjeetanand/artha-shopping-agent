@@ -4,34 +4,38 @@
 @source "./components/TasteGraphView.jsx";
 
 /* ==========================================================================
-   Taste OS — Gen-Z Neo-Minimalist & Kinetic Craft Theme
+   Taste OS — Sweet-Tape Inspired Tactile Knowledge Graph Theme
    Target Route: /taste-graph & /taste-graph?gmail=connected
    ========================================================================== */
 
 :root {
-  --tos-bg-canvas: #F6F4EE;
-  --tos-bg-surface: rgba(255, 254, 250, 0.9);
-  --tos-bg-elevated: #FFFEFA;
-  --tos-header-bg: linear-gradient(135deg, #101D17 0%, #182C22 50%, #1F382C 100%);
-  --tos-dock-bg: rgba(242, 239, 232, 0.86);
-  --tos-accent: #B85233;
-  --tos-accent-hover: #9B4125;
-  --tos-accent-glow: rgba(184, 82, 51, 0.35);
-  --tos-emerald: #1E7A56;
-  --tos-ink: #161D18;
-  --tos-muted: #565F58;
-  --tos-border: rgba(34, 42, 36, 0.08);
-  --tos-border-luminous: rgba(255, 255, 255, 0.74);
+  --tos-bg-canvas: #FAF9F5;
+  --tos-bg-surface: #F4F3EF;
+  --tos-bg-elevated: #FFFFFF;
+  --tos-header-bg: #034102;
+  --tos-dock-bg: #F4F3EF;
+  --tos-accent: #B6FE00;
+  --tos-accent-hover: #a1e200;
+  --tos-accent-glow: rgba(182, 254, 0, 0.45);
+  --tos-orange: #FA8005;
+  --tos-blue: #50CBFF;
+  --tos-coral: #FF7B5F;
+  --tos-cobalt: #2E3EAC;
+  --tos-forest: #034102;
+  --tos-ink: #034102;
+  --tos-muted: #536458;
+  --tos-border: rgba(3, 65, 2, 0.12);
+  --tos-border-strong: #034102;
   --tos-spring-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --tos-shadow-sm: 0 2px 10px -2px rgba(18, 32, 25, 0.08), 0 1px 3px rgba(18, 32, 25, 0.04);
-  --tos-shadow-md: 0 20px 44px -10px rgba(18, 32, 25, 0.16), 0 6px 16px -3px rgba(18, 32, 25, 0.08);
-  --tos-shadow-glow: 0 4px 18px rgba(184, 82, 51, 0.38);
+  --tos-shadow-sm: 0 2px 10px -2px rgba(3, 65, 2, 0.08), 0 1px 3px rgba(3, 65, 2, 0.04);
+  --tos-shadow-md: 0 16px 36px -10px rgba(3, 65, 2, 0.14), 0 4px 14px -3px rgba(3, 65, 2, 0.08);
+  --tos-shadow-glow: 0 4px 18px rgba(182, 254, 0, 0.35);
 }
 
 @keyframes tos-slide-up {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
+    transform: translateY(12px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -39,25 +43,28 @@
   }
 }
 
-/* Base Canvas & Anti-AI Background */
+/* Base Canvas & Tactile Warm-Paper Surface */
 .fixed.inset-0.z-50 {
   background:
-    radial-gradient(circle at 18% 22%, rgba(184, 82, 51, 0.06) 0%, transparent 40%),
-    radial-gradient(circle at 82% 78%, rgba(45, 91, 209, 0.05) 0%, transparent 45%),
-    radial-gradient(circle at 50% 50%, #FAF8F4 0%, #F1EEE6 60%, #E7E2D5 100%);
-  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    radial-gradient(circle at 18% 22%, rgba(182, 254, 0, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 82% 78%, rgba(80, 203, 255, 0.07) 0%, transparent 45%),
+    radial-gradient(circle at 50% 50%, #FAF9F5 0%, #F4F3EF 70%, #ECEAE2 100%);
+  font-family: 'Inter Tight', -apple-system, BlinkMacSystemFont, sans-serif;
   letter-spacing: -0.01em;
 }
 
-/* Subtle Kinetic Grain Texture */
+/* Subtle Crumpled Paper Texture */
 .fixed.inset-0.z-50::before {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: radial-gradient(rgba(34, 42, 36, 0.08) 1px, transparent 0);
-  background-size: 28px 28px;
-  opacity: 0.35;
+  background-image:
+    radial-gradient(rgba(3, 65, 2, 0.06) 1px, transparent 0),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='0.65'/%3E%3C/svg%3E");
+  background-size: 24px 24px, 220px 220px;
+  opacity: 0.12;
+  mix-blend-mode: multiply;
   z-index: 1;
 }
 
@@ -65,16 +72,18 @@
 .taste-os-gmail-banner {
   position: relative;
   z-index: 25;
-  background: linear-gradient(90deg, #163024 0%, #1E7A56 50%, #163024 100%);
-  border-bottom: 1px solid rgba(163, 229, 185, 0.25);
-  box-shadow: 0 4px 16px rgba(22, 48, 36, 0.2);
+  background: #034102;
+  border-bottom: 2px solid var(--tos-accent);
+  box-shadow: 0 4px 16px rgba(3, 65, 2, 0.25);
   animation: tos-slide-up 240ms var(--tos-spring-ease);
+  color: #F4F3EF;
 }
 .taste-os-gmail-banner code {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(182, 254, 0, 0.22);
+  color: #B6FE00;
   padding: 1px 6px;
   border-radius: 6px;
-  font-family: "DM Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
 }
 
@@ -83,9 +92,10 @@
   position: relative;
   z-index: 20;
   background: var(--tos-header-bg);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: 0 8px 32px rgba(12, 22, 17, 0.28);
-  padding: 14px 28px;
+  border-bottom: 2px solid rgba(182, 254, 0, 0.28);
+  box-shadow: 0 6px 24px rgba(3, 65, 2, 0.22);
+  padding: 12px clamp(16px, 3vw, 36px);
+  color: #F4F3EF;
 }
 
 /* Retailer Hub Dock */
@@ -93,96 +103,100 @@
   position: relative;
   z-index: 15;
   background: var(--tos-dock-bg);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border-bottom: 1px solid rgba(34, 42, 36, 0.07);
-  box-shadow: 0 4px 16px rgba(22, 38, 31, 0.03);
-  padding: 10px 28px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1.5px solid rgba(3, 65, 2, 0.1);
+  box-shadow: 0 4px 14px rgba(3, 65, 2, 0.04);
+  padding: 10px clamp(16px, 3vw, 36px);
 }
 
 /* Hub Capsule Chips */
 .fixed.inset-0.z-50 > div.flex-nowrap > div.rounded-xl {
   border-radius: 9999px;
-  padding: 6px 8px 6px 14px;
-  background: rgba(255, 254, 250, 0.96);
-  border: 1px solid rgba(34, 42, 36, 0.09);
+  padding: 6px 12px 6px 14px;
+  background: #FAF9F5;
+  border: 1.5px solid rgba(3, 65, 2, 0.14);
+  color: var(--tos-ink);
   transition: all 180ms var(--tos-spring-ease);
-  box-shadow: 0 1px 3px rgba(22, 38, 31, 0.04);
+  box-shadow: 0 1px 3px rgba(3, 65, 2, 0.05);
 }
 .fixed.inset-0.z-50 > div.flex-nowrap > div.rounded-xl:hover {
   transform: translateY(-1.5px) scale(1.01);
-  box-shadow: 0 6px 18px rgba(22, 38, 31, 0.1);
-  border-color: rgba(184, 82, 51, 0.35);
+  box-shadow: 0 6px 18px rgba(3, 65, 2, 0.1);
+  border-color: var(--tos-forest);
 }
 
 /* Connection Telemetry Strip ([aria-live="polite"]) */
 .fixed.inset-0.z-50 div[aria-live="polite"] {
   position: relative;
   z-index: 14;
-  background: rgba(255, 254, 250, 0.86);
+  background: rgba(250, 249, 245, 0.94);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(34, 42, 36, 0.08);
-  padding: 10px 28px;
+  border-bottom: 1.5px solid rgba(3, 65, 2, 0.08);
+  padding: 10px clamp(16px, 3vw, 36px);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .fixed.inset-0.z-50 div[aria-live="polite"] > div {
   margin-bottom: 0 !important;
-  padding: 7px 14px;
+  padding: 8px 16px;
   border-radius: 9999px;
-  background: #FAF8F3;
-  border: 1px solid rgba(34, 42, 36, 0.08);
-  box-shadow: 0 1px 3px rgba(22, 38, 31, 0.03);
+  background: #FAF9F5;
+  border: 1.5px solid rgba(3, 65, 2, 0.1);
+  box-shadow: 0 1px 3px rgba(3, 65, 2, 0.04);
   transition: all 180ms var(--tos-spring-ease);
+  color: var(--tos-ink);
 }
 .fixed.inset-0.z-50 div[aria-live="polite"] > div:hover {
-  background: #FFFEFA;
-  border-color: rgba(30, 122, 86, 0.25);
-  box-shadow: 0 4px 12px rgba(22, 38, 31, 0.06);
+  background: #FFFFFF;
+  border-color: var(--tos-forest);
+  box-shadow: 0 4px 12px rgba(3, 65, 2, 0.08);
 }
 .fixed.inset-0.z-50 div[aria-live="polite"] > div > strong {
   display: inline-flex;
   align-items: center;
-  padding: 2px 9px;
+  padding: 2px 10px;
   border-radius: 9999px;
-  background: #16261F;
-  color: #FFFEFA;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  background: #034102;
+  color: #B6FE00;
+  font-family: 'Barlow Condensed', 'Antonio', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 .fixed.inset-0.z-50 div[aria-live="polite"] > div > button.taste-os-chip-btn {
   margin-left: auto;
 }
 
-/* Snappy Interactive Buttons */
+/* Tactile Stamp Buttons */
 .taste-os-btn-secondary {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.09);
+  border: 1.5px solid rgba(244, 243, 239, 0.35);
+  background: rgba(244, 243, 239, 0.12);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   padding: 8px 18px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #F4F7F5;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #F4F3EF;
   transition: all 180ms var(--tos-spring-ease);
   cursor: pointer;
 }
 .taste-os-btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.32);
-  transform: translateY(-1px) scale(1.02);
+  background: var(--tos-accent);
+  color: var(--tos-forest);
+  border-color: var(--tos-accent);
+  transform: translateY(-1px);
 }
 .taste-os-btn-secondary:active:not(:disabled) {
-  transform: translateY(0) scale(0.97);
+  transform: translateY(1px);
 }
 .taste-os-btn-secondary:disabled {
   opacity: 0.45;
@@ -192,26 +206,29 @@
 .taste-os-btn-primary {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: linear-gradient(135deg, #CF6241 0%, #A94F32 100%);
-  padding: 8px 20px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #FFFFFF;
-  box-shadow: var(--tos-shadow-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  transition: all 200ms var(--tos-spring-ease);
+  border: 2px solid var(--tos-forest);
+  background: var(--tos-accent);
+  padding: 8px 22px;
+  font-family: 'Barlow Condensed', 'Antonio', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tos-forest);
+  box-shadow: 0 4px 0 var(--tos-forest);
+  transition: all 150ms var(--tos-spring-ease);
   cursor: pointer;
 }
 .taste-os-btn-primary:hover {
-  background: linear-gradient(135deg, #DE6D4A 0%, #984328 100%);
-  box-shadow: 0 6px 24px rgba(184, 82, 51, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  transform: translateY(-1.5px) scale(1.03);
+  background: var(--tos-accent-hover);
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--tos-forest);
 }
 .taste-os-btn-primary:active {
-  transform: translateY(0) scale(0.96);
+  transform: translateY(4px);
+  box-shadow: 0 0 0 var(--tos-forest);
 }
 
 .taste-os-btn-icon {
@@ -219,22 +236,22 @@
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
-  width: 38px;
-  height: 38px;
-  color: #B4C2B9;
-  transition: all 200ms var(--tos-spring-ease);
+  border: 1.5px solid rgba(244, 243, 239, 0.3);
+  background: rgba(244, 243, 239, 0.12);
+  width: 40px;
+  height: 40px;
+  color: #F4F3EF;
+  transition: all 180ms var(--tos-spring-ease);
   cursor: pointer;
 }
 .taste-os-btn-icon:hover {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: #FFFFFF;
-  transform: rotate(90deg) scale(1.08);
+  background: var(--tos-accent);
+  border-color: var(--tos-accent);
+  color: var(--tos-forest);
+  transform: rotate(90deg) scale(1.05);
 }
 .taste-os-btn-icon:active {
-  transform: rotate(90deg) scale(0.94);
+  transform: rotate(90deg) scale(0.95);
 }
 
 /* Tactile Micro-Action Chips */
@@ -244,51 +261,52 @@
   gap: 5px;
   margin-left: 6px;
   border-radius: 9999px;
-  background: linear-gradient(180deg, #FFFFFF 0%, #F5F2EA 100%);
-  border: 1px solid rgba(184, 82, 51, 0.28);
-  padding: 3px 11px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #A94F32;
-  box-shadow: 0 1px 2px rgba(22, 38, 31, 0.06);
-  transition: all 160ms var(--tos-spring-ease);
+  background: #FAF9F5;
+  border: 1.5px solid var(--tos-forest);
+  padding: 4px 12px;
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tos-forest);
+  box-shadow: 0 2px 0 var(--tos-forest);
+  transition: all 150ms var(--tos-spring-ease);
   cursor: pointer;
 }
 .taste-os-chip-btn:hover:not(:disabled) {
-  background: #A94F32;
-  border-color: #A94F32;
-  color: #FFFFFF;
-  box-shadow: 0 3px 10px rgba(184, 82, 51, 0.32);
-  transform: translateY(-0.5px) scale(1.04);
+  background: var(--tos-accent);
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--tos-forest);
 }
 .taste-os-chip-btn:active:not(:disabled) {
-  transform: scale(0.94);
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--tos-forest);
 }
 
 /* Filter Capsule Navigation */
 .taste-os-filter-pill {
   border-radius: 9999px;
-  padding: 5px 13px;
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: capitalize;
-  color: #4B554E;
-  background: rgba(255, 255, 255, 0.65);
-  border: 1px solid rgba(34, 42, 36, 0.08);
+  padding: 6px 14px;
+  font-family: 'Barlow Condensed', 'Antonio', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--tos-forest);
+  background: #FAF9F5;
+  border: 1.5px solid rgba(3, 65, 2, 0.18);
   transition: all 160ms var(--tos-spring-ease);
   cursor: pointer;
 }
 .taste-os-filter-pill:hover {
-  background: #FFFEFA;
-  border-color: rgba(34, 42, 36, 0.2);
-  color: #161D18;
+  background: #FFFFFF;
+  border-color: var(--tos-forest);
   transform: translateY(-1px);
 }
 .taste-os-filter-pill.is-active {
-  background: #16261F;
-  border-color: #16261F;
-  color: #FFFEFA;
-  box-shadow: 0 3px 12px rgba(22, 38, 31, 0.25);
+  background: var(--tos-forest);
+  border-color: var(--tos-forest);
+  color: var(--tos-accent);
+  box-shadow: 0 3px 8px rgba(3, 65, 2, 0.22);
 }
 
 .taste-os-reset-btn {
@@ -296,89 +314,50 @@
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  width: 32px;
-  height: 32px;
-  color: #4B554E;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(34, 42, 36, 0.1);
+  width: 36px;
+  height: 36px;
+  color: var(--tos-forest);
+  background: #FAF9F5;
+  border: 1.5px solid var(--tos-forest);
+  box-shadow: 0 2px 0 var(--tos-forest);
   transition: all 180ms var(--tos-spring-ease);
   cursor: pointer;
 }
 .taste-os-reset-btn:hover {
-  background: #FFFEFA;
-  color: #A94F32;
-  border-color: rgba(184, 82, 51, 0.35);
-  transform: rotate(-45deg) scale(1.06);
+  background: var(--tos-accent);
+  transform: rotate(-45deg) scale(1.05);
 }
 .taste-os-reset-btn:active {
-  transform: rotate(-45deg) scale(0.92);
+  transform: rotate(-45deg) scale(0.95);
 }
 
-/* Floating Glassmorphic Bento Drawer & Node Inspector Card */
+/* Floating Manila Bento Drawer & Node Inspector Card */
 .fixed.inset-0.z-50 .absolute.top-4.right-4,
 .fixed.inset-0.z-50 .absolute.bottom-6.left-6 {
-  background: rgba(255, 254, 250, 0.88) !important;
-  backdrop-filter: blur(24px) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
-  border: 1px solid var(--tos-border-luminous) !important;
-  outline: 1px solid rgba(34, 42, 36, 0.08);
-  border-radius: 22px !important;
-  box-shadow: var(--tos-shadow-md) !important;
+  background: #FAF9F5 !important;
+  border: 2px solid var(--tos-forest) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 8px 24px rgba(3, 65, 2, 0.16) !important;
   transition: all 220ms var(--tos-spring-ease);
   animation: tos-slide-up 280ms var(--tos-spring-ease);
-}
-.fixed.inset-0.z-50 .absolute.top-4.right-4:hover {
-  box-shadow: 0 24px 52px -12px rgba(18, 32, 25, 0.2), 0 8px 20px -4px rgba(18, 32, 25, 0.1) !important;
+  color: var(--tos-forest);
 }
 
 /* Bento Sub-Cards Inside Taste DNA Drawer */
-.fixed.inset-0.z-50 .absolute.top-4.right-4 .grid.grid-cols-2 > div {
-  background: rgba(246, 244, 238, 0.78);
-  border: 1px solid rgba(34, 42, 36, 0.08);
-  border-radius: 14px;
-  padding: 10px 12px;
-  transition: transform 160ms var(--tos-spring-ease), border-color 160ms ease;
-}
-.fixed.inset-0.z-50 .absolute.top-4.right-4 .grid.grid-cols-2 > div:hover {
-  transform: translateY(-1px);
-  border-color: rgba(184, 82, 51, 0.28);
-  background: #FFFEFA;
+.fixed.inset-0.z-50 .absolute.top-4.right-4 .rounded-xl,
+.fixed.inset-0.z-50 .absolute.bottom-6.left-6 .rounded-xl {
+  background: #FFFFFF;
+  border: 1.5px solid rgba(3, 65, 2, 0.12);
+  border-radius: 12px;
 }
 
-/* Invoice & Memory Links inside Taste DNA Drawer */
-.fixed.inset-0.z-50 .absolute.top-4.right-4 a[href*="/invoices/"] {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 6px;
-  margin-right: 6px;
-  padding: 4px 11px;
-  border-radius: 9999px;
-  background: #F4F1E8;
-  border: 1px solid rgba(34, 42, 36, 0.1);
-  color: #16261F !important;
-  text-decoration: none !important;
-  font-size: 11px;
-  font-weight: 600;
-  transition: all 160ms var(--tos-spring-ease);
-}
-.fixed.inset-0.z-50 .absolute.top-4.right-4 a[href*="/invoices/"]:hover {
-  background: #16261F;
-  color: #FFFEFA !important;
-  transform: translateY(-1px);
+/* Tactile Heading Style */
+.taste-os-title {
+  font-family: 'Barlow Condensed', 'Antonio', sans-serif !important;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
 }
 
-/* Custom Sleek Scrollbar */
-.fixed.inset-0.z-50 .absolute.top-4.right-4::-webkit-scrollbar {
-  width: 5px;
-}
-.fixed.inset-0.z-50 .absolute.top-4.right-4::-webkit-scrollbar-track {
-  background: transparent;
-}
-.fixed.inset-0.z-50 .absolute.top-4.right-4::-webkit-scrollbar-thumb {
-  background: rgba(34, 42, 36, 0.16);
-  border-radius: 9999px;
-}
-.fixed.inset-0.z-50 .absolute.top-4.right-4::-webkit-scrollbar-thumb:hover {
-  background: rgba(184, 82, 51, 0.45);
+.taste-os-handwriting {
+  font-family: 'Caveat', cursive !important;
 }

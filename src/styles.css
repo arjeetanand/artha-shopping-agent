@@ -7940,16 +7940,97 @@ html {
   border: 2px solid var(--color-lime);
 }
 
-/* ── Dimensional Hero Shopping Collage (Folder + Polaroid + Cutout + Price Tag) ── */
+/* ── Dimensional Hero Shopping Collage (Folder + Polaroid + Cutout + Price Tag + Multi-Plane Parallax) ── */
+.hero-parallax-container {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  min-height: 360px;
+  margin: 0 auto;
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
 .hero-collage {
   position: relative;
   width: 100%;
-  max-width: 420px;
-  min-height: 340px;
-  margin: 0 auto;
-  padding: 18px 12px 18px;
+  min-height: 350px;
+  padding: 22px 14px 22px;
+  transform-style: preserve-3d;
 }
 
+/* Layer 0: Rotating Starburst Stamp */
+.hero-collage__rotating-stamp {
+  position: absolute;
+  top: -24px;
+  left: -20px;
+  z-index: 5;
+  width: 86px;
+  height: 86px;
+  pointer-events: none;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
+}
+
+.hero-collage__rotating-stamp-svg {
+  width: 100%;
+  height: 100%;
+  animation: hero-stamp-spin 20s linear infinite;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.32));
+}
+
+@keyframes hero-stamp-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.hero-collage__rotating-stamp-text {
+  fill: var(--color-lime);
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Layer 0.5: Pinned Research Handwritten Note */
+.hero-collage__pinned-note {
+  position: absolute;
+  left: -16px;
+  bottom: -18px;
+  z-index: 6;
+  max-width: 220px;
+  padding: 8px 12px 10px;
+  background: #FFF8D6;
+  border: 1.5px solid var(--color-forest);
+  border-radius: 4px;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.26);
+  transform-origin: top center;
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.hero-collage__washi-tape {
+  position: absolute;
+  top: -9px;
+  left: 24%;
+  width: 46px;
+  height: 14px;
+  background: rgba(250, 128, 5, 0.7);
+  border: 1px dashed rgba(3, 65, 2, 0.4);
+  transform: rotate(2deg);
+}
+
+.hero-collage__pinned-note-text {
+  font-family: var(--font-handwriting, 'Caveat', cursive);
+  font-size: 16.5px;
+  line-height: 1.25;
+  color: var(--color-forest);
+  font-weight: 700;
+  display: block;
+}
+
+/* Layer 1: Tactile Manila Paper Folder */
 .hero-collage__folder {
   position: relative;
   z-index: 1;
@@ -7957,9 +8038,10 @@ html {
   color: var(--color-forest);
   border: 2.5px solid var(--color-forest);
   border-radius: 0 18px 18px 18px;
-  padding: 14px;
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
-  transform: rotate(-2deg);
+  padding: 16px;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.36);
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
 }
 
 .hero-collage__folder-tab {
@@ -8039,6 +8121,7 @@ html {
   border: 1.5px solid var(--color-forest);
 }
 
+/* Layer 2: Pinned Reference Photograph */
 .hero-collage__polaroid {
   position: relative;
   z-index: 2;
@@ -8050,7 +8133,8 @@ html {
   border: 2px solid var(--color-forest);
   border-radius: 12px;
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
-  transform: rotate(2.5deg);
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
 }
 
 .hero-collage__tape {
@@ -8087,13 +8171,15 @@ html {
   font-size: 11.5px;
 }
 
+/* Layer 3: Dimensional Product Cutout */
 .hero-collage__cutout {
   position: absolute;
   right: 4px;
   bottom: 24px;
   z-index: 3;
-  width: 142px;
-  transform: rotate(-5deg);
+  width: 144px;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
 }
 
 .hero-collage__cutout-card {
@@ -8102,12 +8188,12 @@ html {
   background: #FFFFFF;
   border: 2.5px solid var(--color-forest);
   border-radius: 18px;
-  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.32);
 }
 
 .hero-collage__cutout-img {
   width: 100%;
-  height: 88px;
+  height: 90px;
   object-fit: cover;
   border-radius: 10px;
   display: block;
@@ -8124,9 +8210,20 @@ html {
   color: var(--color-forest);
 }
 
+.hero-collage__cutout-shadow {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.28);
+  filter: blur(12px);
+  z-index: -1;
+  transition: transform 140ms ease;
+}
+
+/* Layer 4: Small Hanging INR Price Label */
 .hero-collage__price-label {
   position: absolute;
-  right: 12px;
+  right: 10px;
   top: 10px;
   z-index: 4;
   display: inline-flex;
@@ -8137,8 +8234,9 @@ html {
   color: #FFFFFF;
   border: 2px solid var(--color-forest);
   border-radius: 14px;
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
-  transform: rotate(4deg);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
 }
 
 .hero-collage__price-hole {
@@ -8169,6 +8267,339 @@ html {
   display: block;
   font-size: 10.5px;
   font-weight: 700;
+}
+
+/* ── Top Header Desktop Quick-Nav Pills ── */
+.top-header__nav-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(244, 243, 239, 0.1);
+  border: 1px solid rgba(244, 243, 239, 0.2);
+  border-radius: 999px;
+  margin-left: 12px;
+}
+
+.top-header__nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(244, 243, 239, 0.85);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 140ms ease;
+  cursor: pointer;
+}
+
+.top-header__nav-pill:hover {
+  background: rgba(182, 254, 0, 0.2);
+  color: var(--color-lime);
+}
+
+.top-header__nav-pill.is-active {
+  background: var(--color-lime);
+  color: var(--color-forest);
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(182, 254, 0, 0.3);
+}
+
+.top-header__nav-pill-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--color-forest);
+  color: var(--color-lime);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.top-header__nav-pill.is-active .top-header__nav-pill-badge {
+  background: var(--color-forest);
+  color: var(--color-lime);
+}
+
+@media (max-width: 1024px) {
+  .top-header__nav-pills {
+    display: none;
+  }
+}
+
+/* ── Editorial Sub-Screen Page Headings (Saved, Plans, Orders, Usage) ── */
+.page-heading--editorial {
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: space-between !important;
+  gap: 24px !important;
+  margin: 10px 0 32px !important;
+  padding-bottom: 24px !important;
+  border-bottom: 2px dashed rgba(3, 65, 2, 0.18) !important;
+}
+
+.page-heading__copy {
+  max-width: 720px;
+}
+
+.page-heading__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.page-heading__tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 6px 6px 0 0;
+  background: var(--color-forest);
+  color: var(--color-lime);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.page-heading__count {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(3, 65, 2, 0.08);
+  border: 1px solid rgba(3, 65, 2, 0.2);
+  color: var(--color-forest);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.page-heading__title {
+  margin: 0 !important;
+  font-family: var(--font-display) !important;
+  font-size: clamp(34px, 4.4vw, 54px) !important;
+  font-weight: 900 !important;
+  line-height: 0.95 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--color-forest) !important;
+  text-transform: uppercase !important;
+}
+
+.page-heading__sub {
+  margin: 10px 0 0 !important;
+  color: var(--ink-secondary) !important;
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+  font-weight: 500 !important;
+}
+
+.page-heading__annotation {
+  display: inline-block;
+  margin-top: 8px;
+  font-family: var(--font-handwriting, 'Caveat', cursive);
+  font-size: 19px;
+  color: var(--color-forest);
+  font-weight: 700;
+  transform: rotate(-1deg);
+}
+
+/* ── Tactile Saved Cards ── */
+.saved-card--folder {
+  position: relative;
+  background: #FAF9F5 !important;
+  border: 2px solid var(--color-forest) !important;
+  border-radius: 0 16px 16px 16px !important;
+  padding: 12px !important;
+  box-shadow: 0 8px 20px rgba(3, 65, 2, 0.1) !important;
+  transition: transform 180ms ease, box-shadow 180ms ease !important;
+}
+
+.saved-card--folder:hover {
+  transform: translateY(-3px) rotate(-0.5deg);
+  box-shadow: 0 14px 28px rgba(3, 65, 2, 0.16) !important;
+}
+
+.saved-card__folder-tab {
+  position: absolute;
+  top: -24px;
+  left: -2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--color-lime);
+  color: var(--color-forest);
+  border: 2px solid var(--color-forest);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.saved-card__folder-pin {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(3, 65, 2, 0.12);
+}
+
+.saved-card__price-tag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  padding: 3px 8px;
+  background: var(--color-orange);
+  color: #FFFFFF;
+  border: 1.5px solid var(--color-forest);
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 800;
+  transform: rotate(2deg);
+}
+
+.saved-card__meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 12px;
+}
+
+.saved-card__price-display {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--color-forest);
+  font-family: var(--font-display);
+}
+
+.saved-card__retailer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-forest);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(3, 65, 2, 0.07);
+  text-decoration: none;
+}
+
+.saved-card__retailer-link:hover {
+  background: var(--color-lime);
+  color: var(--color-forest);
+}
+
+/* ── Empty State Editorial ── */
+.empty-state--editorial {
+  text-align: center;
+  padding: 56px 20px;
+  background: #FAF9F5;
+  border: 2px dashed rgba(3, 65, 2, 0.25);
+  border-radius: 20px;
+}
+
+.empty-state__title {
+  font-family: var(--font-display) !important;
+  font-size: clamp(28px, 3.5vw, 42px) !important;
+  font-weight: 900 !important;
+  color: var(--color-forest) !important;
+  letter-spacing: -0.01em !important;
+  margin: 12px 0 6px !important;
+}
+
+.empty-state__annotation {
+  display: block;
+  margin: 8px 0 18px;
+  font-family: var(--font-handwriting, 'Caveat', cursive);
+  font-size: 20px;
+  color: var(--color-forest);
+  font-weight: 700;
+}
+
+/* ── Bags Purchase Tracker Editorial Headers ── */
+.bags-tracker__kicker-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bags-tracker__folder-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 6px 6px 0 0;
+  background: var(--color-forest);
+  color: var(--color-lime);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bags-tracker__count-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(3, 65, 2, 0.08);
+  border: 1px solid rgba(3, 65, 2, 0.2);
+  color: var(--color-forest);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bags-tracker__title {
+  margin: 0 !important;
+  font-family: var(--font-display) !important;
+  font-size: clamp(32px, 4vw, 50px) !important;
+  font-weight: 900 !important;
+  line-height: 0.95 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--color-forest) !important;
+  text-transform: uppercase !important;
+}
+
+.bags-tracker__subtitle {
+  margin: 8px 0 0 !important;
+  color: var(--ink-secondary) !important;
+  font-size: 14.5px !important;
+}
+
+.bags-tracker__annotation {
+  display: inline-block;
+  margin-top: 6px;
+  font-family: var(--font-handwriting, 'Caveat', cursive);
+  font-size: 18px;
+  color: var(--color-forest);
+  font-weight: 700;
+}
+
+.bags-tracker__logo-text {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--color-forest);
+}
+
+.bags-tracker__logo-dot {
+  background: var(--color-lime) !important;
+  border: 1.5px solid var(--color-forest) !important;
 }
 
 /* ── Shopping-Theme Showcase (Everyday, Work, Occasion, Travel) ── */

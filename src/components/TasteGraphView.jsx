@@ -4,11 +4,11 @@ import { getTasteGraph, getTasteProfile, syncRetailerAccount, getProfileConnecti
 import '../taste-graph.css';
 
 const RETAILER_CONFIG = {
-  amazon: { name: 'Amazon India', color: '#B54708', badge: 'AMZN' },
-  flipkart: { name: 'Flipkart', color: '#2D5BD1', badge: 'FK' },
-  ajio: { name: 'Ajio Luxe', color: '#A94F32', badge: 'AJIO' },
-  myntra: { name: 'Myntra Fashion', color: '#C25E3E', badge: 'MYNT' },
-  instagram: { name: 'Instagram', color: '#A94F32', badge: 'IG' },
+  amazon: { name: 'Amazon India', color: '#FA8005', badge: 'AMZN' },
+  flipkart: { name: 'Flipkart', color: '#2E3EAC', badge: 'FK' },
+  ajio: { name: 'Ajio Luxe', color: '#FF7B5F', badge: 'AJIO' },
+  myntra: { name: 'Myntra Fashion', color: '#034102', badge: 'MYNT' },
+  instagram: { name: 'Instagram', color: '#FA8005', badge: 'IG' },
 };
 const ACTIVE_SYNC_STATES = new Set(['connecting','awaiting_login','syncing','indexing']);
 
@@ -392,8 +392,8 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           const px = source.x + (target.x - source.x) * t;
           const py = source.y + (target.y - source.y) * t;
           ctx.beginPath();
-          ctx.arc(px, py, 2, 0, Math.PI * 2);
-          ctx.fillStyle = isHovered ? '#A94F32' : 'rgba(34, 42, 36, 0.35)';
+          ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = isHovered ? '#B6FE00' : 'rgba(3, 65, 2, 0.35)';
           ctx.fill();
         }
       }
@@ -409,9 +409,9 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
         ctx.globalAlpha = alpha;
 
         // Outer glow
-        const glowRadius = node.radius + (isSelected ? 12 : isHovered ? 8 : 4);
+        const glowRadius = node.radius + (isSelected ? 14 : isHovered ? 9 : 4);
         const glowGrad = ctx.createRadialGradient(node.x, node.y, node.radius * 0.5, node.x, node.y, glowRadius);
-        glowGrad.addColorStop(0, node.color);
+        glowGrad.addColorStop(0, node.color || '#B6FE00');
         glowGrad.addColorStop(1, 'transparent');
         ctx.beginPath();
         ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
@@ -421,12 +421,12 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
         // Node Body
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fillStyle = node.color;
+        ctx.fillStyle = node.color || '#034102';
         ctx.fill();
 
         // Border
-        ctx.strokeStyle = isSelected ? '#1C3027' : isHovered ? '#A94F32' : '#FFFFFF';
-        ctx.lineWidth = isSelected ? 3 : isHovered ? 2.5 : 2;
+        ctx.strokeStyle = isSelected ? '#B6FE00' : isHovered ? '#FA8005' : '#034102';
+        ctx.lineWidth = isSelected ? 3.5 : isHovered ? 2.5 : 2;
         ctx.stroke();
 
         // Inner core ring for root / stores
@@ -434,8 +434,8 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
           const pulse = Math.sin(pulsePhaseRef.current) * 3;
           ctx.beginPath();
           ctx.arc(node.x, node.y, node.radius + 6 + pulse, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(28, 48, 39, 0.35)';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgba(182, 254, 0, 0.45)';
+          ctx.lineWidth = 2.5;
           ctx.stroke();
         }
 
@@ -597,50 +597,54 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
   const gmailQueryState = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('gmail') : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#F5F3ED] text-[#222A24]">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#FAF9F5] text-[#034102]">
       {gmailQueryState === 'connected' && (
-        <div className="taste-os-gmail-banner flex items-center justify-between gap-3 px-7 py-2 text-xs font-medium text-[#FFFEFA]">
+        <div className="taste-os-gmail-banner flex items-center justify-between gap-3 px-7 py-2.5 text-xs font-semibold">
           <div className="flex items-center gap-2.5">
-            <span className="h-2 w-2 rounded-full bg-[#A3E5B9] animate-pulse" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[#B6FE00] animate-pulse" />
             <span><strong>Gmail Connected:</strong> Actively syncing categorized <code>Shopping</code> receipts &amp; invoices into your Taste DNA (Mutual Funds, Credit Card Bills &amp; Job Applications excluded).</span>
           </div>
-          <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[#A3E5B9]">Live Sync</span>
+          <span className="rounded-full bg-[#B6FE00] px-3 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-[#034102]">Live Sync</span>
         </div>
       )}
       {/* Top Navigation & Status Bar */}
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[#2D4539] bg-[#1C3027] px-6 py-3.5 text-[#E9EEE7]">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#A94F32] text-white shadow-md shadow-black/20">
-            <Icon name="network" size={22} className="text-white" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-base font-semibold text-[#FFFEFA] tracking-tight font-serif">Shopping OS: Taste & Context Graph</h1>
-              <span className="rounded-full bg-[#243B31] px-2.5 py-0.5 text-[11px] font-medium text-[#A3E5B9] border border-[#3A5D4D]">
-                Private Taste Memory
-              </span>
-              <span className="rounded-full bg-[#A94F32]/25 px-2.5 py-0.5 text-[11px] font-medium text-[#FCD4C7] border border-[#A94F32]/40">
-                Gmail: Shopping-Only Filter
-              </span>
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-[#B6FE00]/30 bg-[#034102] px-6 py-3.5 text-[#F4F3EF]">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B6FE00] text-[#034102] shadow-md shadow-black/20">
+              <Icon name="network" size={22} className="text-[#034102]" />
             </div>
-            <p className="text-xs text-[#9EACA3]">
-              Retailer accounts read six months of order history; Gmail imports categorized shopping receipts &amp; PDFs while ignoring finance and job emails.
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-extrabold text-[#B6FE00] tracking-tight uppercase" style={{ fontFamily: "'Barlow Condensed', 'Antonio', sans-serif" }}>
+                  Shopping OS: Taste &amp; Context Graph
+                </h1>
+                <span className="rounded-full bg-[#B6FE00]/15 px-2.5 py-0.5 text-[11px] font-bold text-[#B6FE00] border border-[#B6FE00]/40 uppercase tracking-wider">
+                  Private Taste Memory
+                </span>
+                <span className="rounded-full bg-[#FA8005]/20 px-2.5 py-0.5 text-[11px] font-bold text-[#FA8005] border border-[#FA8005]/40 uppercase tracking-wider">
+                  Gmail: Shopping-Only Filter
+                </span>
+              </div>
+              <p className="text-xs text-[#E3EAE4] opacity-90">
+                Retailer accounts read six months of order history; Gmail imports categorized shopping receipts &amp; PDFs while ignoring finance and job emails.
+              </p>
+            </div>
           </div>
         </div>
 
         {/* Depth Score HUD */}
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 rounded-2xl border border-[#3A5D4D] bg-[#243B31]/80 px-4 py-2 shadow-inner">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 rounded-2xl border-2 border-[#B6FE00]/40 bg-[#034102] px-4 py-2 shadow-inner">
             <div className="relative flex h-10 w-10 items-center justify-center">
               <svg className="h-10 w-10 -rotate-90">
-                <circle cx="20" cy="20" r="16" stroke="rgba(255,255,255,0.12)" strokeWidth="3" fill="none" />
+                <circle cx="20" cy="20" r="16" stroke="rgba(244,243,239,0.18)" strokeWidth="3.5" fill="none" />
                 <circle
                   cx="20"
                   cy="20"
                   r="16"
-                  stroke="#A94F32"
-                  strokeWidth="3.5"
+                  stroke="#B6FE00"
+                  strokeWidth="4"
                   strokeDasharray="100"
                   strokeDashoffset={100 - Math.min(depthScore, 100)}
                   strokeLinecap="round"
@@ -648,13 +652,15 @@ export function TasteGraphView({ onClose, onApplyToSearch, onSignIn, searchId })
                   className="transition-all duration-700 ease-out"
                 />
               </svg>
-              <span className="absolute text-xs font-bold text-[#FFFEFA]">{depthScore}%</span>
+              <span className="absolute text-xs font-black text-[#B6FE00]">{depthScore}%</span>
             </div>
             <div>
-              <div className="text-[11px] font-medium uppercase tracking-wider text-[#E58B68]">Context Depth</div>
-              <div className="text-xs text-[#9EACA3]">
-                <span className="font-semibold text-[#FFFEFA]">{metrics.total_nodes || 0}</span> nodes •{' '}
-                <span className="font-semibold text-[#FFFEFA]">{metrics.total_edges || 0}</span> links
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-[#B6FE00]" style={{ fontFamily: "'Barlow Condensed', 'Antonio', sans-serif" }}>
+                Context Depth
+              </div>
+              <div className="text-xs text-[#F4F3EF] opacity-90">
+                <span className="font-bold text-[#B6FE00]">{metrics.total_nodes || 0}</span> nodes •{' '}
+                <span className="font-bold text-[#B6FE00]">{metrics.total_edges || 0}</span> links
               </div>
             </div>
           </div>

@@ -492,7 +492,7 @@ function TopHeader({
         </span>
       </div>
 
-      {/* Hanging Tear-Off Paper-Tab Menu Control */}
+      {/* Hanging Tear-Off Paper-Tab Menu Control & Desktop Quick Nav */}
       <div className="top-header__center">
         <button
           type="button"
@@ -512,18 +512,30 @@ function TopHeader({
           ) : null}
           <Icon name={menuOpen ? 'close' : 'chevron'} size={14} className="hanging-menu-tab__icon" />
         </button>
+
+        <nav className="top-header__nav-pills" aria-label="Sections">
+          {[
+            { id: 'discover', label: 'Discover' },
+            { id: 'taste-graph', label: 'Taste OS' },
+            { id: 'saved', label: 'Saved', count: savedCount },
+            { id: 'plans', label: 'Plans', count: planCount },
+            { id: 'orders', label: 'Orders' },
+            { id: 'usage', label: 'Usage' },
+          ].map((tab) => (
+            <button
+              type="button"
+              key={tab.id}
+              className={`top-header__nav-pill ${activeView === tab.id ? 'is-active' : ''}`}
+              onClick={() => onNavigate(tab.id)}
+            >
+              <span>{tab.label}</span>
+              {tab.count > 0 ? <span className="top-header__nav-pill-badge">{tab.count}</span> : null}
+            </button>
+          ))}
+        </nav>
       </div>
 
       <div className="top-header__actions">
-        <button
-          type="button"
-          className={`talk-button taste-pill-button ${activeView === 'taste-graph' ? 'is-active' : ''}`}
-          onClick={onOpenTasteGraph}
-          aria-label="Open Shopping OS Taste & Context Graph"
-        >
-          <Icon name="network" size={16} />
-          <span>Taste OS</span>
-        </button>
         <button type="button" className="talk-button" onClick={onOpenTalk} aria-label="Talk to Artha">
           <Icon name="waveform" size={16} />
           <span>Talk to Artha</span>
@@ -1282,12 +1294,90 @@ function ClarificationNote({ intent, onAnswer, onEdit, isSearching }) {
 function HeroVisual() {
   const [cutoutFailed, setCutoutFailed] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const [scrollY, setScrollY] = useState(0);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setScrollY(window.scrollY);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handlePointerMove = (e) => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1; // -1 to 1
+    const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1; // -1 to 1
+    setCoords({ x: Math.max(-1, Math.min(1, nx)), y: Math.max(-1, Math.min(1, ny)) });
+  };
+
+  const handlePointerLeave = () => {
+    setCoords({ x: 0, y: 0 });
+  };
+
+  const isReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mx = isReduced ? 0 : coords.x;
+  const my = isReduced ? 0 : coords.y;
+  const scrollOffset = isReduced ? 0 : Math.min(90, scrollY * 0.1);
 
   return (
-    <Card3D maxTilt={6} scale={1.015} glare={false} className="hero-visual__card-wrapper">
+    <div
+      ref={containerRef}
+      className="hero-parallax-container"
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+    >
       <div className="hero-collage" aria-label="Artha shopping research moodboard collage">
-        {/* Layer 1: Tactile Paper Folder */}
-        <div className="hero-collage__folder">
+        {/* Layer 0: Rotating Starburst Stamp */}
+        <div
+          className="hero-collage__rotating-stamp"
+          aria-hidden="true"
+          style={{
+            transform: `translate3d(${mx * 36}px, ${my * -24 + scrollOffset * 0.4}px, 90px) rotate(${mx * 30}deg)`,
+          }}
+        >
+          <svg className="hero-collage__rotating-stamp-svg" viewBox="0 0 100 100">
+            <path
+              id="stamp-circle"
+              d="M 50, 50 m -35, 0 a 35,35 0 1,1 70,0 a 35,35 0 1,1 -70,0"
+              fill="none"
+            />
+            <text className="hero-collage__rotating-stamp-text">
+              <textPath href="#stamp-circle" startOffset="0%">
+                ARTHA RESEARCH • EVIDENCE GATE • VETTED •
+              </textPath>
+            </text>
+            <circle cx="50" cy="50" r="16" fill="#B6FE00" />
+            <polygon points="50,40 53,47 60,47 55,52 57,59 50,55 43,59 45,52 40,47 47,47" fill="#034102" />
+          </svg>
+        </div>
+
+        {/* Layer 0.5: Pinned Research Handwritten Note */}
+        <div
+          className="hero-collage__pinned-note"
+          aria-hidden="true"
+          style={{
+            transform: `translate3d(${mx * -28}px, ${my * 26 + scrollOffset * 0.6}px, 50px) rotate(${-3 + my * 8}deg)`,
+          }}
+        >
+          <span className="hero-collage__washi-tape" />
+          <span className="hero-collage__pinned-note-text">
+            “100% linen weave verified · Bengaluru delivery ready”
+          </span>
+        </div>
+
+        {/* Layer 1: Tactile Manila Paper Folder */}
+        <div
+          className="hero-collage__folder"
+          style={{
+            transform: `perspective(1000px) rotateX(${my * -7}deg) rotateY(${mx * 9}deg) translate3d(${mx * 12}px, ${my * 10 + scrollOffset * 0.3}px, 0px)`,
+          }}
+        >
           <div className="hero-collage__folder-tab">
             <span>FOLDER 01 // SHORTLIST BRIEF</span>
             <span className="hero-collage__folder-code">BLR-560001</span>
@@ -1311,7 +1401,12 @@ function HeroVisual() {
         </div>
 
         {/* Layer 2: Pinned Reference Photograph */}
-        <div className="hero-collage__polaroid">
+        <div
+          className="hero-collage__polaroid"
+          style={{
+            transform: `translate3d(${mx * -22}px, ${my * -18 + scrollOffset * 0.75}px, 36px) rotate(${-4 + mx * 6}deg)`,
+          }}
+        >
           <span className="hero-collage__tape" aria-hidden="true" />
           <div className="hero-collage__polaroid-frame">
             {!photoFailed ? (
@@ -1335,7 +1430,12 @@ function HeroVisual() {
         </div>
 
         {/* Layer 3: Dimensional Product Cutout */}
-        <div className="hero-collage__cutout">
+        <div
+          className="hero-collage__cutout"
+          style={{
+            transform: `translate3d(${mx * 30}px, ${my * 26 + scrollOffset * 1.15}px, 75px) scale(1.03)`,
+          }}
+        >
           <div className="hero-collage__cutout-card">
             {!cutoutFailed ? (
               <img
@@ -1352,11 +1452,23 @@ function HeroVisual() {
             )}
             <span className="hero-collage__cutout-badge">PRODUCT CUTOUT</span>
           </div>
-          <div className="hero-collage__cutout-shadow" aria-hidden="true" />
+          <div
+            className="hero-collage__cutout-shadow"
+            aria-hidden="true"
+            style={{
+              transform: `translate3d(${mx * -12}px, ${my * -8}px, -15px)`,
+            }}
+          />
         </div>
 
         {/* Layer 4: Small Hanging INR Price Label */}
-        <div className="hero-collage__price-label" aria-label="Sample checked price label 2,390 rupees">
+        <div
+          className="hero-collage__price-label"
+          aria-label="Sample checked price label 2,390 rupees"
+          style={{
+            transform: `translate3d(${mx * -16}px, ${my * 20 + scrollOffset * 1.4}px, 105px) rotate(${6 + mx * 18}deg)`,
+          }}
+        >
           <span className="hero-collage__price-hole" aria-hidden="true" />
           <div className="hero-collage__price-copy">
             <span className="hero-collage__price-kicker">LOWEST CHECKED</span>
@@ -1365,7 +1477,7 @@ function HeroVisual() {
           </div>
         </div>
       </div>
-    </Card3D>
+    </div>
   );
 }
 
@@ -3002,19 +3114,23 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
   const saved = products.filter((product) => savedIds.includes(product.id));
 
   return (
-    <div className="page-stack">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">Bookmarks</span>
-          <h1>
-            Keep the good finds
+    <div className="page-stack saved-page">
+      <div className="page-heading page-heading--editorial">
+        <div className="page-heading__copy">
+          <div className="page-heading__tab">
+            <span className="page-heading__tag">FOLDER // BOOKMARKS &amp; INSPIRATION</span>
+            <span className="page-heading__count">{saved.length} {saved.length === 1 ? 'FIND' : 'FINDS'}</span>
+          </div>
+          <h1 className="page-heading__title">
+            KEEP THE GOOD FINDS
             <br />
-            close at hand.
+            CLOSE AT HAND.
           </h1>
-          <p>Bookmarked retailer discoveries from your searches. Add them into your plan or open them directly.</p>
+          <p className="page-heading__sub">Bookmarked retailer discoveries from your searches. Add them into your plan or open them directly.</p>
+          <span className="page-heading__annotation">“Save what catches your eye, compare the sources later.”</span>
         </div>
-        <button type="button" className="primary-button" onClick={onDiscover}>
-          <span>Discover more</span>
+        <button type="button" className="stamp-action-button stamp-action-button--lime" onClick={onDiscover}>
+          <span className="stamp-action-button__label">DISCOVER MORE</span>
           <Icon name="arrow" size={16} />
         </button>
       </div>
@@ -3024,18 +3140,25 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
           {saved.map((product) => {
             const isSelectedInPlan = selectedIds.includes(product.id);
             return (
-              <article className="saved-card" key={product.id}>
+              <article className="saved-card saved-card--folder" key={product.id}>
+                <div className="saved-card__folder-tab">
+                  <span>{product.seller || 'RETAILER FIND'}</span>
+                  <span className="saved-card__folder-pin">{product.location || 'ONLINE'}</span>
+                </div>
                 <div className="saved-card__media">
                   <ProductThumb product={product} />
                   <SourceMark product={product} />
+                  <span className="saved-card__price-tag">{formatPrice(productTotal(product))}</span>
                 </div>
                 <div className="saved-card__body">
-                  <h3>{sanitizeTitle(product.name)}</h3>
-                  <p className="saved-card__price">{formatPrice(productTotal(product))}</p>
-                  <p className="saved-card__delivery">
-                    <Icon name="truck" size={13} />
-                    <span>{product.delivery_label || 'Check store'}</span>
-                  </p>
+                  <h3 className="saved-card__title">{sanitizeTitle(product.name)}</h3>
+                  <div className="saved-card__meta-row">
+                    <span className="saved-card__price-display">{formatPrice(productTotal(product))}</span>
+                    <span className="saved-card__delivery">
+                      <Icon name="truck" size={13} />
+                      <span>{product.delivery_label || 'Check store'}</span>
+                    </span>
+                  </div>
                   <div className="saved-card__actions">
                     <button
                       type="button"
@@ -3045,14 +3168,18 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
                       <Icon name={isSelectedInPlan ? 'check' : 'plus'} size={14} />
                       <span>{isSelectedInPlan ? 'In plan' : 'Add to plan'}</span>
                     </button>
-                    <button
-                      type="button"
-                      className="quiet-action"
-                      onClick={() => onOpenProduct(product)}
-                      disabled={!product.url}
-                    >
-                      <Icon name="external" size={13} />
-                    </button>
+                    {product.url ? (
+                      <a
+                        href={product.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="quiet-action saved-card__retailer-link"
+                        title="View at retailer"
+                      >
+                        <span>Store</span>
+                        <Icon name="external" size={12} />
+                      </a>
+                    ) : null}
                     <button
                       type="button"
                       className="icon-button saved-remove-btn"
@@ -3069,14 +3196,15 @@ function SavedView({ products, savedIds, onSave, onDiscover, onOpenProduct, onTo
           })}
         </div>
       ) : (
-        <div className="empty-state">
+        <div className="empty-state empty-state--editorial">
           <span className="empty-state__icon">
-            <Icon name="bookmark" size={26} />
+            <Icon name="bookmark" size={28} />
           </span>
-          <h2>No saved picks yet.</h2>
-          <p>Click the bookmark icon on any product to save it while you compare retailer sources.</p>
-          <button type="button" className="primary-button empty-state__btn" onClick={onDiscover}>
-            <span>Find items now</span>
+          <h2 className="empty-state__title">NO SAVED PICKS YET.</h2>
+          <p className="empty-state__text">Click the bookmark icon on any product to save it while you compare retailer sources.</p>
+          <span className="empty-state__annotation">“Every good find starts with a quick bookmark.”</span>
+          <button type="button" className="stamp-action-button stamp-action-button--lime empty-state__btn" onClick={onDiscover}>
+            <span className="stamp-action-button__label">FIND ITEMS NOW</span>
             <Icon name="arrow" size={16} />
           </button>
         </div>
@@ -3155,14 +3283,22 @@ function OrdersView({ user, isSessionLoading, retailerOrders, orders, ordersLoad
 
   return (
     <div className="page-stack orders-page">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">Order history</span>
-          <h1>Your purchases, in one place.</h1>
-          <p>Real order history from connected retailer accounts and Gmail receipts. Local test checkouts stay separate.</p>
+      <div className="page-heading page-heading--editorial">
+        <div className="page-heading__copy">
+          <div className="page-heading__tab">
+            <span className="page-heading__tag">FOLDER // ORDERS &amp; FULFILLMENT</span>
+            <span className="page-heading__count">{retailerOrders.length + orders.length} {retailerOrders.length + orders.length === 1 ? 'ORDER' : 'ORDERS'}</span>
+          </div>
+          <h1 className="page-heading__title">
+            YOUR PURCHASES,
+            <br />
+            IN ONE PLACE.
+          </h1>
+          <p className="page-heading__sub">Real order history from connected retailer accounts and Gmail receipts. Local test checkouts stay separate.</p>
+          <span className="page-heading__annotation">“Real purchases happen at the retailer. Live updates track here.”</span>
         </div>
-        <button type="button" className="primary-button" onClick={onDiscover}>
-          <span>Find something else</span>
+        <button type="button" className="stamp-action-button stamp-action-button--lime" onClick={onDiscover}>
+          <span className="stamp-action-button__label">FIND SOMETHING ELSE</span>
           <Icon name="arrow" size={16} />
         </button>
       </div>
@@ -3310,19 +3446,28 @@ function UsageView({ usage, usageWindow, usageRuntime, onWindowChange, onRuntime
 
   return (
     <div className="page-stack usage-page">
-      <div className="page-heading usage-heading">
-        <div>
-          <span className="section-kicker">Operations</span>
-          <h1>
-            Usage you can see.
+      <div className="page-heading page-heading--editorial usage-heading">
+        <div className="page-heading__copy">
+          <div className="page-heading__tab">
+            <span className="page-heading__tag">FOLDER // SYSTEM LEDGER &amp; TOKENS</span>
+            <span className="page-heading__count">{formatUsageCount(totals.requests || 0)} REQUESTS</span>
+          </div>
+          <h1 className="page-heading__title">
+            RESEARCH METER &amp;
             <br />
-            Runtime, without guesswork.
+            RUNTIME TELEMETRY.
           </h1>
-          <p>Track metered AI tokens and unmetered source and voice activity from the same Artha workspace.</p>
+          <p className="page-heading__sub">Transparent accounting of every AI model call, query token, search provider hit, and voice synthesis session.</p>
+          <span className="page-heading__annotation">“Every query, token, and store search accounted for.”</span>
         </div>
-        <button type="button" className="quiet-action usage-refresh" onClick={onRefresh} disabled={isLoading}>
-          <Icon name="waveform" size={15} />
-          <span>{isLoading ? 'Refreshing…' : 'Refresh ledger'}</span>
+        <button
+          type="button"
+          className="stamp-action-button stamp-action-button--lime usage-refresh"
+          onClick={() => onRefresh().catch(() => {})}
+          disabled={isLoading}
+        >
+          <span className="stamp-action-button__label">{isLoading ? 'UPDATING…' : 'REFRESH LEDGER'}</span>
+          <Icon name="refresh" size={16} className={isLoading ? 'animate-spin' : ''} />
         </button>
       </div>
 
