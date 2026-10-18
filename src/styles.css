@@ -9682,15 +9682,38 @@ html {
     width: 100%;
   }
 
+  .hero-parallax-container {
+    max-width: 100%;
+  }
+
   .hero-collage {
-    max-width: 340px;
-    min-height: 290px;
-    padding: 22px 4px 12px;
+    max-width: 100%;
+    min-height: 310px;
+    padding: 22px 6px 14px;
+  }
+
+  .hero-collage__rotating-stamp {
+    left: 2px;
+    top: -18px;
+    width: 72px;
+    height: 72px;
+  }
+
+  .hero-collage__pinned-note {
+    left: 2px;
+    bottom: -12px;
+    max-width: 190px;
   }
 
   .hero-collage__cutout {
-    width: 118px;
+    width: 120px;
+    right: 2px;
     bottom: 18px;
+  }
+
+  .hero-collage__price-label {
+    right: 4px;
+    top: 6px;
   }
 
   .theme-showcase__tabs {
@@ -9699,6 +9722,120 @@ html {
 
   .mobile-plan-bar {
     padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .page-heading--editorial {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 16px !important;
+  }
+
+  .page-heading--editorial .stamp-action-button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .saved-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .top-header {
+    padding: 6px 8px !important;
+    gap: 6px !important;
+  }
+
+  .hanging-menu-tab {
+    min-width: 84px;
+    padding: 5px 10px;
+    font-size: 17px;
+  }
+
+  .tearoff-menu-backdrop {
+    padding: 54px 10px 16px;
+  }
+
+  .tearoff-menu-panel {
+    padding: 16px 14px 18px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35), 5px 5px 0 var(--color-lime);
+  }
+
+  .tearoff-menu-panel__perforation {
+    margin: -16px -14px 12px;
+  }
+
+  .editorial-hero {
+    padding: 12px 10px 42px;
+  }
+
+  .editorial-hero__headline {
+    font-size: clamp(36px, 10.5vw, 48px);
+  }
+
+  .editorial-hero__supporting {
+    font-size: 14.5px;
+  }
+
+  .editorial-hero__annotation {
+    font-size: 18px;
+  }
+
+  .hero-collage__folder {
+    padding: 12px;
+  }
+
+  .hero-collage__folder-tab {
+    font-size: 11.5px;
+    padding: 0 10px;
+  }
+
+  .hero-collage__notes-lines {
+    font-size: 11px;
+  }
+
+  .hero-collage__retailer-chip {
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+
+  .hero-collage__polaroid {
+    width: 74%;
+    padding: 6px 6px 8px;
+  }
+
+  .hero-collage__polaroid-caption {
+    font-size: 10.5px;
+  }
+
+  .hero-collage__cutout {
+    width: 110px;
+  }
+
+  .hero-collage__cutout-img {
+    height: 76px;
+  }
+
+  .hero-collage__price-amount {
+    font-size: 16px;
+  }
+
+  .hero-collage__price-label {
+    padding: 5px 9px;
+  }
+
+  .theme-showcase {
+    padding: 32px 12px 40px;
+  }
+
+  .theme-showcase__tab {
+    font-size: 17px;
+    padding: 6px 10px;
+    min-height: 44px;
+  }
+
+  .story-chapter-card {
+    padding: 16px 14px 20px !important;
   }
 }
 
@@ -9714,6 +9851,36 @@ html {
   .top-header .talk-button {
     min-width: 44px !important;
     padding: 0 10px !important;
+  }
+}
+
+/* Phone Landscape Mode (e.g. 844x390, 800x360) */
+@media (max-height: 500px) and (orientation: landscape) {
+  .editorial-hero {
+    padding: 10px 16px 36px;
+  }
+
+  .editorial-hero__headline {
+    font-size: clamp(28px, 6vw, 38px);
+    margin-bottom: 6px;
+  }
+
+  .editorial-hero__supporting {
+    margin-top: 4px;
+    font-size: 13.5px;
+  }
+
+  .composer--research-sheet textarea {
+    min-height: 52px !important;
+  }
+
+  .hero-collage {
+    min-height: 260px;
+    padding: 16px 4px 10px;
+  }
+
+  .tearoff-menu-panel {
+    max-height: calc(100vh - 48px);
   }
 }
 
