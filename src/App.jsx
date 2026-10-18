@@ -278,7 +278,7 @@ function Logo({ onClick }) {
         <span className="brand-mark__letter brand-mark__letter--4">H</span>
         <span className="brand-mark__letter brand-mark__letter--5">A</span>
       </span>
-      <span className="brand-mark__tag">MOODBOARD</span>
+      <span className="brand-mark__tag">VOICE SHOPPING</span>
     </button>
   );
 }
@@ -336,7 +336,7 @@ function TearOffMenuPanel({
         <div className="tearoff-menu-panel__header">
           <div>
             <span className="tearoff-menu-panel__kicker">ARTHA // NAVIGATION SHEET</span>
-            <p className="tearoff-menu-panel__tagline">Your shopping moodboard, with the research done.</p>
+            <p className="tearoff-menu-panel__tagline">Speak your brief. Artha handles the retailer research.</p>
           </div>
           <button
             ref={closeButtonRef}
@@ -460,22 +460,17 @@ function TearOffMenuPanel({
 
 function TopHeader({
   activeView,
-  onNavigate,
   onReset,
   health,
-  planCount = 0,
-  savedCount = 0,
   user,
   isSessionLoading,
   onSignIn,
   onSignOut,
-  onOpenTalk,
-  onOpenTasteGraph,
+  onOpenVoiceShopping,
   menuOpen,
   onToggleMenu,
 }) {
   const status = searchStatusInfo(health);
-  const totalSavedOrPlans = (planCount || 0) + (savedCount || 0);
 
   return (
     <header className="top-header">
@@ -494,41 +489,24 @@ function TopHeader({
         </span>
       </div>
 
-      {/* Hanging Tear-Off Paper-Tab Menu Control - Centered & Focused */}
-      <div className="top-header__center">
+      <div className="top-header__menu">
         <button
           type="button"
-          className={`hanging-menu-tab ${menuOpen ? 'is-open' : ''}`}
+          className={`header-menu-button ${menuOpen ? 'is-open' : ''}`}
           onClick={onToggleMenu}
           aria-expanded={menuOpen}
           aria-controls="artha-navigation-panel"
           aria-haspopup="dialog"
         >
-          <span className="hanging-menu-tab__teeth" aria-hidden="true" />
-          <span className="hanging-menu-tab__hole" aria-hidden="true" />
-          <span className="hanging-menu-tab__label">Menu</span>
-          {totalSavedOrPlans > 0 ? (
-            <span className="hanging-menu-tab__count" aria-label={`${totalSavedOrPlans} saved items or plans`}>
-              {totalSavedOrPlans}
-            </span>
-          ) : null}
-          <Icon name={menuOpen ? 'close' : 'chevron'} size={14} className="hanging-menu-tab__icon" />
+          <span>{menuOpen ? 'Close' : 'Browse'}</span>
+          <Icon name={menuOpen ? 'close' : 'chevron'} size={14} />
         </button>
       </div>
 
       <div className="top-header__actions">
-        <button
-          type="button"
-          className={`talk-button taste-pill-button ${activeView === 'taste-graph' ? 'is-active' : ''}`}
-          onClick={onOpenTasteGraph}
-          aria-label="Open Shopping OS Taste & Context Graph"
-        >
-          <Icon name="network" size={16} />
-          <span>Taste OS</span>
-        </button>
-        <button type="button" className="talk-button" onClick={onOpenTalk} aria-label="Talk to Artha">
-          <Icon name="waveform" size={16} />
-          <span>Talk to Artha</span>
+        <button type="button" className="talk-button voice-shopping-button" onClick={onOpenVoiceShopping} aria-label="Open voice shopping">
+          <Icon name="mic" size={16} />
+          <span>Voice shopping</span>
         </button>
         {isSessionLoading ? (
           <span className="account-loading" role="status">Checking account…</span>
@@ -796,8 +774,6 @@ function Composer({
   onToggleProfile,
   onOpenTasteGraph,
   health,
-  showVoiceStudio,
-  onToggleVoiceStudio,
 }) {
   const fileInputRef = useRef(null);
   const onFileChange = useCallback(
@@ -979,17 +955,6 @@ function Composer({
               >
                 <Icon name="spark" size={16} />
                 <span>Taste Graph</span>
-              </button>
-            ) : null}
-            {onToggleVoiceStudio ? (
-              <button
-                type="button"
-                className={`secondary-control ${showVoiceStudio ? 'is-selected' : ''}`}
-                onClick={onToggleVoiceStudio}
-                aria-expanded={Boolean(showVoiceStudio)}
-              >
-                <Icon name="mic" size={16} />
-                <span>Voice &amp; Instagram</span>
               </button>
             ) : null}
             <ReferenceChip reference={reference} onRemove={onRemoveReference} />
@@ -1301,234 +1266,6 @@ function ClarificationNote({ intent, onAnswer, onEdit, isSearching }) {
       <small>Answer here or use a quick answer. Artha starts retailer research once the required details are clear.</small>
       <button type="button" className="quiet-action clarification-note__edit" onClick={onEdit}>Edit shopping brief <Icon name="arrow" size={14} /></button>
     </aside>
-  );
-}
-
-function HeroVisual() {
-  const [cutoutFailed, setCutoutFailed] = useState(false);
-  const [photoFailed, setPhotoFailed] = useState(false);
-  const [coords, setCoords] = useState({ x: 0, y: 0 });
-  const [scrollY, setScrollY] = useState(0);
-  const containerRef = useRef(null);
-  const targetRef = useRef({ x: 0, y: 0 });
-  const currentRef = useRef({ x: 0, y: 0 });
-  const rafRef = useRef(null);
-
-  useEffect(() => {
-    const onScroll = () => {
-      setScrollY(window.scrollY);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // MotionSites-inspired 60fps damped spring lerp animation loop
-  useEffect(() => {
-    let running = true;
-    const lerp = (start, end, factor) => start + (end - start) * factor;
-
-    const animate = () => {
-      if (!running) return;
-      const target = targetRef.current;
-      const current = currentRef.current;
-      current.x = lerp(current.x, target.x, 0.08);
-      current.y = lerp(current.y, target.y, 0.08);
-
-      if (Math.abs(target.x - current.x) > 0.0004 || Math.abs(target.y - current.y) > 0.0004) {
-        setCoords({ x: current.x, y: current.y });
-      }
-
-      rafRef.current = requestAnimationFrame(animate);
-    };
-
-    rafRef.current = requestAnimationFrame(animate);
-    return () => {
-      running = false;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
-  const handlePointerMove = (e) => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1; // -1 to 1
-    const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1; // -1 to 1
-    targetRef.current = { x: Math.max(-1, Math.min(1, nx)), y: Math.max(-1, Math.min(1, ny)) };
-  };
-
-  const handlePointerLeave = () => {
-    targetRef.current = { x: 0, y: 0 };
-  };
-
-  const isReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const mx = isReduced ? 0 : coords.x;
-  const my = isReduced ? 0 : coords.y;
-  const scrollOffset = isReduced ? 0 : Math.min(90, scrollY * 0.1);
-
-  return (
-    <div
-      ref={containerRef}
-      className="hero-parallax-container"
-      onPointerMove={handlePointerMove}
-      onPointerLeave={handlePointerLeave}
-    >
-      {/* MotionSites-style Ambient Glowing Light Sphere */}
-      <div
-        className="hero-collage__ambient-glow"
-        aria-hidden="true"
-        style={{
-          transform: `translate3d(${mx * 45}px, ${my * 35}px, -40px)`,
-        }}
-      />
-
-      <div className="hero-collage" aria-label="Artha shopping research moodboard collage">
-        {/* Layer 0: Rotating Starburst Seal */}
-        <div
-          className="hero-collage__rotating-stamp"
-          aria-hidden="true"
-          style={{
-            transform: `translate3d(${mx * 30}px, ${my * -20 + scrollOffset * 0.4}px, 85px) rotate(${mx * 25}deg)`,
-          }}
-        >
-          <svg className="hero-collage__rotating-stamp-svg" viewBox="0 0 100 100">
-            <path
-              id="stamp-circle"
-              d="M 50, 50 m -35, 0 a 35,35 0 1,1 70,0 a 35,35 0 1,1 -70,0"
-              fill="none"
-            />
-            <text className="hero-collage__rotating-stamp-text">
-              <textPath href="#stamp-circle" startOffset="0%">
-                ARTHA RESEARCH • EVIDENCE GATE • VETTED •
-              </textPath>
-            </text>
-            <circle cx="50" cy="50" r="16" fill="#B6FE00" />
-            <polygon points="50,40 53,47 60,47 55,52 57,59 50,55 43,59 45,52 40,47 47,47" fill="#034102" />
-          </svg>
-        </div>
-
-        {/* Layer 0.5: Pinned Research Note */}
-        <div
-          className="hero-collage__pinned-note"
-          aria-hidden="true"
-          style={{
-            transform: `translate3d(${mx * -26}px, ${my * 24 + scrollOffset * 0.6}px, 50px) rotate(${-3 + my * 7}deg)`,
-          }}
-        >
-          <span className="hero-collage__washi-tape" />
-          <span className="hero-collage__pinned-note-text">
-            “100% linen weave verified · Bengaluru delivery ready”
-          </span>
-        </div>
-
-        {/* Layer 1: Tactile Manila Paper Folder Base */}
-        <div
-          className="hero-collage__folder"
-          style={{
-            transform: `perspective(1200px) rotateX(${my * -8}deg) rotateY(${mx * 10}deg) translate3d(${mx * 12}px, ${my * 10 + scrollOffset * 0.3}px, 0px)`,
-          }}
-        >
-          <div className="hero-collage__folder-tab">
-            <span>FOLDER 01 // SHORTLIST BRIEF</span>
-            <span className="hero-collage__folder-code">BLR-560001</span>
-          </div>
-          <div className="hero-collage__folder-body">
-            <div className="hero-collage__folder-header">
-              <span className="hero-collage__stamp-pill">Evidence checked</span>
-              <span className="hero-collage__folder-meta">3 retailer pages compared</span>
-            </div>
-            <div className="hero-collage__notes-lines" aria-hidden="true">
-              <span>✓ 100% breathable linen weave verified</span>
-              <span>✓ Size M in stock · Myntra &amp; Uniqlo</span>
-              <span>! Confirm express pincode cutoff at store</span>
-            </div>
-            <div className="hero-collage__retailers" aria-hidden="true">
-              <span className="hero-collage__retailer-chip" style={{ backgroundColor: '#034102', color: '#B6FE00' }}>Myntra</span>
-              <span className="hero-collage__retailer-chip" style={{ backgroundColor: '#2E3EAC', color: '#F4F3EF' }}>Uniqlo</span>
-              <span className="hero-collage__retailer-chip" style={{ backgroundColor: '#FA8005', color: '#034102' }}>FabIndia</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Layer 2: Pinned Inspiration Polaroid */}
-        <div
-          className="hero-collage__polaroid"
-          style={{
-            transform: `translate3d(${mx * -20}px, ${my * -16 + scrollOffset * 0.75}px, 35px) rotate(${-3 + mx * 5}deg)`,
-          }}
-        >
-          <span className="hero-collage__tape" aria-hidden="true" />
-          <div className="hero-collage__polaroid-frame">
-            {!photoFailed ? (
-              <img
-                className="hero-collage__polaroid-img"
-                src="/assets/editorial-outfit-triptych.png"
-                alt="Saved reference photograph of a linen shirt, relaxed trousers, and loafers"
-                onError={() => setPhotoFailed(true)}
-              />
-            ) : (
-              <div className="hero-collage__fallback-art" aria-hidden="true">
-                <Icon name="image" size={28} />
-                <span>Saved Reference Photo</span>
-              </div>
-            )}
-          </div>
-          <div className="hero-collage__polaroid-caption">
-            <strong>Saved inspiration</strong>
-            <span>Relaxed linen &amp; neutral tones</span>
-          </div>
-        </div>
-
-        {/* Layer 3: Dimensional Product Cutout */}
-        <div
-          className="hero-collage__cutout"
-          style={{
-            transform: `translate3d(${mx * 28}px, ${my * 24 + scrollOffset * 1.15}px, 70px) scale(1.025)`,
-          }}
-        >
-          <div className="hero-collage__cutout-card">
-            {!cutoutFailed ? (
-              <img
-                className="hero-collage__cutout-img"
-                src="/assets/premium-white-sneaker.png"
-                alt="Product cutout of a minimalist everyday leather sneaker"
-                onError={() => setCutoutFailed(true)}
-              />
-            ) : (
-              <svg className="hero-collage__cutout-svg" viewBox="0 0 160 100" aria-hidden="true">
-                <rect x="12" y="20" width="136" height="60" rx="18" fill="#F4F3EF" stroke="#034102" strokeWidth="3" />
-                <path d="M30 62 C55 36, 95 36, 132 62" stroke="#034102" strokeWidth="4" fill="none" />
-              </svg>
-            )}
-            <span className="hero-collage__cutout-badge">PRODUCT CUTOUT</span>
-          </div>
-          <div
-            className="hero-collage__cutout-shadow"
-            aria-hidden="true"
-            style={{
-              transform: `translate3d(${mx * -14}px, ${my * -10}px, -15px)`,
-            }}
-          />
-        </div>
-
-        {/* Layer 4: Small Hanging INR Price Label */}
-        <div
-          className="hero-collage__price-label"
-          aria-label="Sample checked price label 2,390 rupees"
-          style={{
-            transform: `translate3d(${mx * -14}px, ${my * 18 + scrollOffset * 1.35}px, 95px) rotate(${5 + mx * 14}deg)`,
-          }}
-        >
-          <span className="hero-collage__price-hole" aria-hidden="true" />
-          <div className="hero-collage__price-copy">
-            <span className="hero-collage__price-kicker">LOWEST CHECKED</span>
-            <strong className="hero-collage__price-amount">₹2,390</strong>
-            <small className="hero-collage__price-sub">View at retailer ↗</small>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -2472,7 +2209,6 @@ function DiscoverView({
 }) {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
   const [homeInspectBag, setHomeInspectBag] = useState(null);
-  const [showVoiceStudio, setShowVoiceStudio] = useState(false);
 
   const handleBagResearch = useCallback((bag) => {
     if (bag.briefQuery) {
@@ -2526,44 +2262,16 @@ function DiscoverView({
 
   return (
     <div ref={discoverRef} className="discover-page">
-      {/* ── Opening Editorial Hero & Working Brief Composer ── */}
-      <section className="editorial-hero paper-texture-surface" aria-label="Artha shopping research hero">
-        <div className="editorial-hero__inner">
-          {/* Mobile 2 & 3: Headline + Short Explanation */}
-          <div className="editorial-hero__lead">
-            <div className="editorial-hero__kicker-row">
-              <span className="editorial-hero__wordmark-pill">ARTHA</span>
-              <span className="editorial-hero__creative-idea">
-                Your shopping moodboard, with the research done.
-              </span>
-            </div>
+      <section className="voice-first-home" aria-label="Voice shopping with Artha">
+        <HomeVoiceAssistant
+          user={user}
+          health={health}
+          onSearchComplete={onAssistantSearchResult}
+        />
 
-            <h1 className="editorial-hero__headline" aria-label="Find what fits. Know why.">
-              <span className="editorial-hero__headline-line editorial-hero__headline-line--first">
-                Find what fits.
-              </span>
-              <span className="editorial-hero__headline-line editorial-hero__headline-line--second">
-                Know why.
-              </span>
-            </h1>
-
-            <p className="editorial-hero__supporting">
-              Tell Artha what you need. Compare real retailer options, prices, and trade-offs in one thoughtful shortlist.
-            </p>
-
-            <div className="editorial-hero__annotation-bar">
-              <span className="editorial-hero__annotation">
-                “A little more thought in every buy.”
-              </span>
-              <a className="editorial-hero__how-link" href="#how-artha-works">
-                <span>How Artha works</span>
-                <Icon name="arrow" size={14} />
-              </a>
-            </div>
-          </div>
-
-          {/* Mobile 4 / Desktop Left: Working Brief Composer & Primary Action */}
-          <div className="editorial-hero__composer-slot">
+        <details className="voice-first-home__tools">
+          <summary>More filters, reference photos, and retailer links</summary>
+          <div className="voice-first-home__composer">
             <Composer
               voice={voice}
               query={query}
@@ -2594,32 +2302,9 @@ function DiscoverView({
               onToggleProfile={onToggleProfile}
               onOpenTasteGraph={onOpenTasteGraph}
               health={health}
-              showVoiceStudio={showVoiceStudio}
-              onToggleVoiceStudio={() => setShowVoiceStudio((current) => !current)}
             />
-
-            {showVoiceStudio ? (
-              <div className="voice-studio-drawer">
-                <HomeVoiceAssistant
-                  user={user}
-                  health={health}
-                  onSearchComplete={onAssistantSearchResult}
-                />
-              </div>
-            ) : null}
           </div>
-
-          {/* Mobile 5 / Desktop Right: Dimensional Decorative Shopping Collage */}
-          <div className="editorial-hero__collage-slot">
-            <HeroVisual />
-          </div>
-        </div>
-
-        <div className="editorial-hero__curve" aria-hidden="true">
-          <svg viewBox="0 0 1440 64" preserveAspectRatio="none">
-            <path d="M0,0 C420,64 1020,64 1440,0 L1440,64 L0,64 Z" fill="#F4F3EF" />
-          </svg>
-        </div>
+        </details>
       </section>
 
       {/* Show Theme Showcase right after Hero when idle, or after Results when searching */}
@@ -2628,6 +2313,7 @@ function DiscoverView({
       ) : null}
 
       {/* ── Calm, Practical Results & Trust Workspace ── */}
+      {(hasActiveSearchContext || plans.length > 0) ? (
       <div className="discover-layout">
         <section className="main-column">
           <AgentStrip
@@ -2821,6 +2507,7 @@ function DiscoverView({
           showCheckout={!result.intent?.mission}
         />
       </div>
+      ) : null}
 
       {/* When an active search is shown, keep Theme Showcase accessible below Results */}
       {hasActiveSearchContext ? (
@@ -4647,17 +4334,19 @@ export default function App() {
       <div className="app-shell app-shell--editorial">
       <TopHeader
         activeView={activeView}
-        onNavigate={navigateToView}
         onReset={startNewSearch}
         health={health}
-        planCount={plans.length}
-        savedCount={savedIds.length}
         user={user}
         isSessionLoading={isSessionLoading}
         onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
         onSignOut={handleSignOut}
-        onOpenTalk={() => setTalkOpen(true)}
-        onOpenTasteGraph={() => navigateToView(activeView === 'taste-graph' ? 'discover' : 'taste-graph')}
+        onOpenVoiceShopping={() => {
+          if (activeView === 'discover') {
+            document.getElementById('home-voice-assistant')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            navigateToView('discover');
+          }
+        }}
         menuOpen={menuOpen}
         onToggleMenu={() => setMenuOpen((current) => !current)}
       />

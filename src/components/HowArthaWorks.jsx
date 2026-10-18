@@ -44,9 +44,9 @@ const storyChapters = [
   {
     number: '01',
     chapter: 'DESCRIBE',
-    headline: 'Share the need, budget, and inspiration.',
-    body: 'Drop a reference photo, paste an Instagram or store link, or type your shopping brief in plain words. Artha extracts your budget, delivery pincode, size, and fabric preferences before querying a single store.',
-    annotation: '“Paste a link, drop a photo, or just talk.”',
+    headline: 'Tell Artha what you need.',
+    body: 'Start by speaking; Artha asks follow-up questions and captures your budget, delivery pincode, size, and style. Add a reference photo or Instagram/store link if you have one.',
+    annotation: '“Say what you need, then let Artha research.”',
     themeClass: 'story-chapter--describe',
     bg: '#B6FE00',
     ink: '#034102',
@@ -69,8 +69,8 @@ const storyChapters = [
     badge: 'FOLDER 02 // RETAILER EVIDENCE',
     cardTitle: '3 Retailer Pages Compared',
     cardMeta: 'Lowest checked offer: ₹2,190 · 1 store needs pincode check',
-    image: '/assets/neutral-office-chair-fallback.png',
-    imageAlt: 'Compared product card with price tag and verification stamp',
+    image: '/assets/editorial-outfit-triptych.png',
+    imageAlt: 'Neutral linen outfit reference used while comparing retailer options',
     priceTag: 'Evidence checked · ₹2,190',
   },
   {
@@ -178,7 +178,7 @@ export function HowArthaWorks({ onNavigate, onStartBrief }) {
         <div className="how-artha-works__intro">
           <span className="section-kicker">The research, step by step</span>
           <h2 id="how-artha-works-title">From your brief to a clearer choice.</h2>
-          <p>Start with a brief, reference image, or product/style link. Artha researches options; you review the evidence and choose where to buy.</p>
+          <p>Start by speaking or typing a brief, then add a reference image or style link if you have one. Artha researches options; you review the evidence and choose where to buy.</p>
         </div>
 
         <ol className="how-artha-works__steps">

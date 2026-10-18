@@ -9,6 +9,7 @@ import {
   warmVoice,
 } from '../lib/api.js';
 import { createSpeechRecognition } from '../lib/speechRecognition.js';
+import { Icon } from './Icon';
 
 const STATE_LABELS = {
   ready: 'Ready for voice or text',
@@ -355,7 +356,7 @@ export function HomeVoiceAssistant({
   const instagramPosts = sessionState?.instagram_posts || [];
   const confirmedRef = sessionState?.selected_reference || null;
   return (
-    <section className="home-voice-assistant" aria-label="Voice Shopping Assistant">
+    <section id="home-voice-assistant" className="home-voice-assistant home-voice-assistant--primary" aria-label="Voice Shopping Assistant">
       <div className="home-voice-header">
         <div>
           <div className="eyebrow">Voice Shopping · Instagram Style Match</div>
@@ -363,7 +364,7 @@ export function HomeVoiceAssistant({
             What are you looking for today, {firstName}?
           </h1>
           <p className="home-voice-subtitle">
-            Tell Artha what you want, or ask it to match an accessible Instagram post from Paras. If Instagram blocks access, paste the post link or upload a screenshot. Voice uses your existing setup with browser playback fallback; this flow adds no paid service.
+            Start by speaking. Artha will ask follow-up questions, then build a retailer shortlist. You can also ask to match a post from Paras; if Instagram access is unavailable, paste a link or upload a screenshot.
           </p>
         </div>
         <div className="home-voice-controls-bar">
@@ -427,7 +428,7 @@ export function HomeVoiceAssistant({
       </div>
 
       {/* Conversation Timeline */}
-      <div className="home-voice-thread" data-testid="conversation-thread">
+      <div className="home-voice-thread" data-testid="conversation-thread" aria-live="polite">
         {messages.map((msg, idx) => (
           <div
             key={`${msg.role}-${idx}`}
@@ -451,71 +452,78 @@ export function HomeVoiceAssistant({
             onClick={toggleMicrophone}
             data-testid="home-mic-button"
           >
+            <Icon name={voiceState === 'listening' ? 'waveform' : 'mic'} size={28} />
             {voiceState === 'listening'
-              ? 'Stop Recording'
+              ? 'Stop listening'
               : voiceState === 'transcribing'
-              ? 'Cancel Transcribe'
-              : 'Tap to Speak'}
+              ? 'Cancel transcription'
+              : 'Start speaking'}
           </button>
           <span className="mic-caption">
             {voiceState === 'listening'
-              ? 'Recording 16kHz WAV locally… tap again when done'
-              : 'Editable transcript & text fallback'}
+              ? 'Listening now · tap to finish'
+              : 'Your transcript stays editable before it is sent.'}
           </span>
+          {voiceState === 'ready' && !transcript ? (
+            <span className="voice-example">Try: “I like my friend Paras’s dressing sense.”</span>
+          ) : null}
         </div>
 
         <div className="transcript-editor-column">
-          <label htmlFor="editable-voice-transcript" className="sr-only">
-            Editable voice transcript or text message
-          </label>
-          <textarea
-            id="editable-voice-transcript"
-            data-testid="editable-transcript-input"
-            rows={2}
-            value={transcript}
-            onChange={(e) => setTranscript(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                submitTurn();
-              }
-            }}
-            placeholder={`Try: "I like my friend Paras's dressing sense"`}
-          />
-          <div className="transcript-actions">
-            <div className="quick-example-chips">
+          <details className="voice-text-fallback" open={Boolean(transcript)}>
+            <summary>{transcript ? 'Edit transcript or type a message' : 'Type instead'}</summary>
+            <label htmlFor="editable-voice-transcript" className="sr-only">
+              Editable voice transcript or text message
+            </label>
+            <textarea
+              id="editable-voice-transcript"
+              data-testid="editable-transcript-input"
+              rows={2}
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submitTurn();
+                }
+              }}
+              placeholder={`Try: "I like my friend Paras's dressing sense"`}
+            />
+            <div className="transcript-actions">
+              <div className="quick-example-chips">
+                <button
+                  type="button"
+                  className="chip-btn"
+                  onClick={() => setTranscript("I'm going to Goa and want to buy a T-shirt.")}
+                >
+                  “I’m going to Goa and want to buy a T-shirt.”
+                </button>
+                <button
+                  type="button"
+                  className="chip-btn"
+                  onClick={() => setTranscript('Around ₹1,500. Yes, use my usual size M.')}
+                >
+                  “Around ₹1,500. Use size M.”
+                </button>
+                <button
+                  type="button"
+                  className="chip-btn"
+                  onClick={() => setTranscript("I liked something in my friend Paras's recent Instagram post.")}
+                >
+                  “Paras’s recent Instagram post”
+                </button>
+              </div>
               <button
                 type="button"
-                className="chip-btn"
-                onClick={() => setTranscript("I'm going to Goa and want to buy a T-shirt.")}
+                className="primary-send-button"
+                data-testid="send-turn-button"
+                disabled={!transcript.trim() || voiceState === 'thinking'}
+                onClick={() => submitTurn()}
               >
-                “I’m going to Goa and want to buy a T-shirt.”
-              </button>
-              <button
-                type="button"
-                className="chip-btn"
-                onClick={() => setTranscript('Around ₹1,500. Yes, use my usual size M.')}
-              >
-                “Around ₹1,500. Use size M.”
-              </button>
-              <button
-                type="button"
-                className="chip-btn"
-                onClick={() => setTranscript("I liked something in my friend Paras's recent Instagram post.")}
-              >
-                “Paras’s recent Instagram post”
+                {voiceState === 'thinking' ? 'Processing…' : 'Send'}
               </button>
             </div>
-            <button
-              type="button"
-              className="primary-send-button"
-              data-testid="send-turn-button"
-              disabled={!transcript.trim() || voiceState === 'thinking'}
-              onClick={() => submitTurn()}
-            >
-              {voiceState === 'thinking' ? 'Processing…' : 'Send'}
-            </button>
-          </div>
+          </details>
         </div>
       </div>
 

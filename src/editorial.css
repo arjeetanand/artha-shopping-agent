@@ -80,37 +80,29 @@
 .search-mode-dot { width: 7px; height: 7px; border-radius: 50%; background: #7f8c78; }
 .search-mode-dot--live { background: #168348; box-shadow: 0 0 0 3px rgba(22, 131, 72, .12); }
 
-.top-header__center {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  height: 100%;
-  transform: translateX(-50%);
+.top-header__menu {
+  position: static;
+  height: auto;
+  justify-self: end;
+  transform: none;
 }
 
-.hanging-menu-tab {
+.header-menu-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 58px;
-  padding: 0 17px;
-  border: 0;
-  border-right: 1px solid var(--line);
-  border-bottom: 2px solid var(--color-forest);
-  border-left: 1px solid var(--line);
-  background: var(--color-forest);
-  color: var(--color-lime);
-  font-family: var(--mono);
-  font-size: 10px;
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid rgba(244, 243, 239, .3);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-paper);
+  font-family: var(--font-body);
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: .08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
-
-.hanging-menu-tab__teeth,
-.hanging-menu-tab__hole { display: none; }
-.hanging-menu-tab__count { display: grid; width: 19px; height: 19px; place-items: center; border-radius: 50%; background: var(--color-lime); color: var(--color-forest); font-size: 9px; }
-.hanging-menu-tab__icon { color: currentColor; }
 
 .top-header__actions { gap: 8px; }
 .top-header__actions .talk-button,
@@ -362,8 +354,8 @@
   .top-header { min-height: 62px; padding-inline: 16px; }
   .top-header__left { gap: 8px; }
   .top-header__mode-pill { display: none; }
-  .top-header__center { position: static; height: auto; margin-left: auto; transform: none; }
-  .hanging-menu-tab { min-height: 40px; padding-inline: 10px; border: 1px solid var(--color-forest); font-size: 9px; }
+  .top-header__menu { position: static; height: auto; margin-left: 0; transform: none; }
+  .header-menu-button { min-height: 40px; padding-inline: 10px; font-size: 11px; }
   .top-header__actions { gap: 5px; }
   .top-header__actions .talk-button,.top-header__actions .quiet-action { min-width: 40px; min-height: 40px; padding-inline: 8px; }
   .top-header__actions .talk-button span,.top-header__actions .quiet-action span { display: none; }
@@ -403,8 +395,7 @@
   .brand-mark { gap: 6px; }
   .brand-mark__text { font-size: 27px; }
   .brand-mark__tag { padding: 3px 5px; font-size: 7px; }
-  .hanging-menu-tab { gap: 5px; padding-inline: 7px; }
-  .hanging-menu-tab__count { width: 16px; height: 16px; }
+  .header-menu-button { gap: 5px; padding-inline: 7px; }
   .top-header__actions .talk-button,.top-header__actions .quiet-action { min-width: 36px; min-height: 40px; padding-inline: 6px; }
   .top-header__actions .account-cluster { gap: 4px; }
   .top-header__actions .account-logout { min-width: 36px; }
@@ -459,4 +450,159 @@
   .top-header__actions .taste-pill-button { display: none; }
   .top-header__actions { gap: 2px; }
   .top-header__left { gap: 0; }
+}
+
+/* Voice is the product entry point; secondary search controls stay out of its way. */
+.voice-first-home {
+  max-width: 1520px;
+  margin: 0 auto;
+  padding: clamp(18px, 3vw, 42px);
+}
+
+.home-voice-assistant--primary {
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, .92fr);
+  grid-template-areas:
+    "header header"
+    "context context"
+    "composer thread"
+    "notice notice"
+    "instagram instagram";
+  gap: 22px clamp(22px, 3.5vw, 44px);
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: clamp(22px, 4vw, 54px);
+  border: 1px solid rgba(3, 65, 2, .12);
+  border-radius: 26px;
+  background:
+    radial-gradient(ellipse at 8% 0%, rgba(182, 254, 0, .16), transparent 46%),
+    linear-gradient(145deg, #fff 0%, #f0efe7 100%);
+  box-shadow: 0 28px 80px rgba(3, 65, 2, .09);
+}
+
+.home-voice-assistant--primary .home-voice-header { grid-area: header; }
+.home-voice-assistant--primary .home-voice-context-strip { grid-area: context; }
+.home-voice-assistant--primary .home-voice-composer {
+  grid-area: composer;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+}
+.home-voice-assistant--primary .home-voice-thread {
+  grid-area: thread;
+  align-content: start;
+  min-height: 260px;
+  max-height: 360px;
+  padding: 18px;
+  border-color: rgba(3, 65, 2, .1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .84);
+}
+.home-voice-assistant--primary .voice-warning-banner { grid-area: notice; }
+.home-voice-assistant--primary .instagram-reference-panel { grid-area: instagram; }
+.home-voice-assistant--primary .home-voice-title {
+  max-width: 15ch;
+  font-size: clamp(42px, 5vw, 64px);
+  line-height: .95;
+}
+.home-voice-assistant--primary .home-voice-subtitle { max-width: 68ch; font-size: 14px; }
+.home-voice-assistant--primary .home-voice-controls-bar { align-items: flex-start; }
+.home-voice-assistant--primary .mic-button-column {
+  justify-items: center;
+  text-align: center;
+}
+.home-voice-assistant--primary .primary-mic-button {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: clamp(148px, 16vw, 190px);
+  min-height: 0;
+  aspect-ratio: 1;
+  margin: 2px auto 8px;
+  padding: 22px;
+  border: 8px solid rgba(182, 254, 0, .28);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #236d18, #034102 68%);
+  box-shadow: 0 0 0 10px rgba(182, 254, 0, .12), 0 18px 34px rgba(3, 65, 2, .2);
+  color: white;
+  font-size: 16px;
+}
+.home-voice-assistant--primary .primary-mic-button:hover { transform: translateY(-2px); }
+.home-voice-assistant--primary .primary-mic-button:focus-visible {
+  outline: 4px solid var(--accent-blue);
+  outline-offset: 7px;
+}
+.home-voice-assistant--primary .primary-mic-button.recording {
+  border-color: rgba(250, 128, 5, .42);
+  background: radial-gradient(circle at 35% 28%, #d96006, #963800 68%);
+  animation: voice-orb-pulse 1.6s ease-in-out infinite;
+}
+.home-voice-assistant--primary .mic-caption { max-width: 34ch; font-size: 12px; }
+.voice-example {
+  max-width: 36ch;
+  margin-top: 5px;
+  color: var(--muted);
+  font-family: var(--font-hand);
+  font-size: 17px;
+  line-height: 1.3;
+}
+.voice-text-fallback { width: 100%; }
+.voice-text-fallback > summary {
+  width: fit-content;
+  margin: 6px auto 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .76);
+  color: var(--color-forest);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.voice-text-fallback > textarea { margin-top: 10px; }
+.voice-text-fallback .transcript-actions { margin-top: 8px; }
+.voice-first-home__tools {
+  max-width: 1320px;
+  margin: 18px auto 0;
+}
+.voice-first-home__tools > summary {
+  width: fit-content;
+  margin: 0 auto;
+  padding: 10px 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .55);
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.voice-first-home__composer { margin-top: 16px; }
+
+@keyframes voice-orb-pulse {
+  50% { box-shadow: 0 0 0 17px rgba(250, 128, 5, .12), 0 18px 34px rgba(3, 65, 2, .2); }
+}
+
+@media (max-width: 760px) {
+  .voice-first-home { padding: 18px 14px 24px; }
+  .voice-first-home__composer .composer-suggestions { align-items: flex-start; }
+  .voice-first-home__composer .composer-suggestions__list { min-width: 0; }
+  .home-voice-assistant--primary {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "header" "context" "composer" "thread" "notice" "instagram";
+    gap: 18px;
+    padding: 24px 18px;
+    border-radius: 20px;
+  }
+  .home-voice-assistant--primary .home-voice-header { gap: 16px; }
+  .home-voice-assistant--primary .home-voice-title { font-size: clamp(38px, 10vw, 52px); }
+  .home-voice-assistant--primary .home-voice-thread { min-height: 150px; max-height: 280px; }
+  .home-voice-assistant--primary .primary-mic-button { width: 150px; }
+  .voice-example { font-size: 16px; }
+  .voice-text-fallback .transcript-actions,
+  .voice-text-fallback .instagram-confirm-bar { flex-direction: column; }
+  .voice-text-fallback .primary-send-button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-voice-assistant--primary .primary-mic-button,
+  .home-voice-assistant--primary .primary-mic-button.recording { animation: none; transition: none; }
 }

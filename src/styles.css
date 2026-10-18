@@ -7027,7 +7027,7 @@ html {
   top: 0 !important;
   z-index: 90 !important;
   display: grid !important;
-  grid-template-columns: 1fr auto 1fr !important;
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
   align-items: center !important;
   gap: 12px !important;
   min-height: 60px !important;
@@ -7124,85 +7124,37 @@ html {
 .search-mode-dot--demo { background: var(--color-orange); }
 .search-mode-dot--unavailable { background: var(--color-coral); }
 
-/* Hanging Tear-Off Paper-Tab Menu Button */
-.top-header__center {
+/* Browse menu button */
+.top-header__menu {
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  justify-content: flex-end;
+  align-items: center;
 }
 
-.hanging-menu-tab {
+.header-menu-button {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-width: 112px;
-  min-height: 46px;
-  padding: 8px 18px 8px;
-  background: #FAF9F5;
-  color: var(--color-forest);
-  border: 2px solid var(--color-forest);
-  border-radius: 4px 4px 16px 16px;
-  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.28);
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
+  min-height: 40px;
+  padding: 0 13px;
+  background: transparent;
+  color: var(--color-paper);
+  border: 1px solid rgba(244, 243, 239, 0.3);
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
   text-transform: uppercase;
-  transform: translateY(3px) rotate(-1deg);
-  transition: transform 180ms var(--spring-ease), background-color 180ms ease, box-shadow 180ms ease;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
 }
 
-.hanging-menu-tab:hover,
-.hanging-menu-tab.is-open {
+.header-menu-button:hover,
+.header-menu-button.is-open {
   background: var(--color-lime);
   color: var(--color-forest);
-  transform: translateY(6px) rotate(0deg);
-  box-shadow: 0 7px 0 rgba(0, 0, 0, 0.34);
-}
-
-.hanging-menu-tab__teeth {
-  position: absolute;
-  top: -5px;
-  left: 4px;
-  right: 4px;
-  height: 6px;
-  background-image: radial-gradient(circle at 5px 0, transparent 3.2px, #FAF9F5 3.5px);
-  background-size: 10px 6px;
-  background-repeat: repeat-x;
-  pointer-events: none;
-}
-
-.hanging-menu-tab:hover .hanging-menu-tab__teeth,
-.hanging-menu-tab.is-open .hanging-menu-tab__teeth {
-  background-image: radial-gradient(circle at 5px 0, transparent 3.2px, var(--color-lime) 3.5px);
-}
-
-.hanging-menu-tab__hole {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-forest);
-  opacity: 0.85;
-}
-
-.hanging-menu-tab__label {
-  line-height: 1;
-}
-
-.hanging-menu-tab__count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--color-forest);
-  color: var(--color-lime);
-  font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 800;
+  border-color: var(--color-lime);
 }
 
 .top-header__actions {
@@ -7979,13 +7931,6 @@ html {
   background: var(--color-lime) !important;
   border-color: var(--color-lime) !important;
   color: var(--color-forest) !important;
-}
-
-.voice-studio-drawer {
-  margin-top: 14px;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 2px solid var(--color-lime);
 }
 
 .home-voice-assistant {
@@ -9934,7 +9879,7 @@ html {
 
 @media (max-width: 768px) {
   .top-header {
-    grid-template-columns: auto auto 1fr !important;
+    grid-template-columns: minmax(0, 1fr) auto auto !important;
     padding: 6px 12px !important;
     gap: 8px !important;
   }
@@ -9947,12 +9892,10 @@ html {
     display: none !important;
   }
 
-  .hanging-menu-tab {
-    min-width: 92px;
+  .header-menu-button {
     min-height: 44px;
-    padding: 6px 12px;
-    font-size: 18px;
-    transform: translateY(2px);
+    padding-inline: 10px;
+    font-size: 11px;
   }
 
   .top-header .talk-button,
@@ -10046,10 +9989,10 @@ html {
     gap: 6px !important;
   }
 
-  .hanging-menu-tab {
-    min-width: 84px;
-    padding: 5px 10px;
-    font-size: 17px;
+  .header-menu-button {
+    gap: 5px;
+    padding-inline: 8px;
+    font-size: 10px;
   }
 
   .tearoff-menu-backdrop {
@@ -10195,7 +10138,7 @@ html {
 
   .editorial-hero__headline-line--first,
   .editorial-hero__headline-line--second,
-  .hanging-menu-tab,
+  .header-menu-button,
   .hero-collage__folder,
   .hero-collage__polaroid,
   .hero-collage__cutout,
