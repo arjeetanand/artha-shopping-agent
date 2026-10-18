@@ -2135,6 +2135,30 @@ function DiscoverView({
         </details>
       </section>
 
+      {!hasActiveSearchContext && !plans.length && !isPlansLoading && !isSessionLoading ? (
+        <section className="discover-starter-briefs" aria-labelledby="discover-starter-briefs-title">
+          <div className="discover-starter-briefs__inner">
+            <div className="discover-starter-briefs__intro">
+              <span className="section-kicker">Quick starts</span>
+              <h2 id="discover-starter-briefs-title">What are you looking for?</h2>
+            </div>
+            <div className="discover-starter-briefs__list">
+              {SUGGESTED_SEARCHES.map((prompt) => (
+                <button
+                  type="button"
+                  className="discover-starter-briefs__item"
+                  key={prompt}
+                  onClick={() => handleBagResearch({ briefQuery: prompt })}
+                >
+                  <span>{prompt}</span>
+                  <Icon name="arrow" size={15} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {/* Show Theme Showcase right after Hero when idle, or after Results when searching */}
       {/* ── Calm, Practical Results & Trust Workspace ── */}
       {(hasActiveSearchContext || plans.length > 0) ? (
