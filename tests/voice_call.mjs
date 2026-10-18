@@ -265,7 +265,7 @@ try {
   emptySearch = true;
   await page.reload();
   await page.getByRole('textbox', { name: 'Shopping brief' }).fill('Find an office chair under ₹4000 in Bengaluru within five days');
-  await page.getByRole('button', { name: 'Find sources' }).click();
+  await page.getByRole('button', { name: /Find (my options|sources)/i }).click();
   await page.getByText('No purchasable product page found.').waitFor();
   assert.equal(await page.getByText('No retailer sources were found for that brief.').count(), 0);
   const recordingPage = await browser.newPage({ permissions: ['microphone'] });

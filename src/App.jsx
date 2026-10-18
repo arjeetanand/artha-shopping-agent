@@ -12,6 +12,7 @@ import { HowArthaWorks } from './components/HowArthaWorks';
 import {
   DEFAULT_INTENT,
   DEFAULT_RESULT,
+  SHOPPING_THEMES,
   SUGGESTED_SEARCHES,
   formatDate,
   formatPrice,
@@ -238,79 +239,45 @@ function referencePayload(reference) {
   return { name: reference.name, mime_type: reference.type, data_base64: encoded };
 }
 
+function searchStatusInfo(health) {
+  const isLive = health?.search_mode === 'live' && health?.search_configured;
+  const isFixture = health?.search_mode === 'fixture';
+  if (isLive) {
+    return {
+      mode: 'live',
+      shortLabel: 'Live retailer search',
+      detail: 'Live retailer search · confirm final price & stock at checkout',
+      tone: 'live',
+    };
+  }
+  if (isFixture) {
+    return {
+      mode: 'demo',
+      shortLabel: 'Demo catalog',
+      detail: 'Demo catalog · sample products for local preview',
+      tone: 'demo',
+    };
+  }
+  return {
+    mode: 'unavailable',
+    shortLabel: 'Search service unavailable',
+    detail: 'Search service unavailable · provider not configured',
+    tone: 'unavailable',
+  };
+}
+
 function Logo({ onClick }) {
   return (
     <button type="button" className="brand-mark" onClick={onClick} aria-label="Go to Artha discover">
-      <span className="brand-mark__text">Artha</span>
+      <span className="brand-mark__text" aria-hidden="true">
+        <span className="brand-mark__letter brand-mark__letter--1">A</span>
+        <span className="brand-mark__letter brand-mark__letter--2">R</span>
+        <span className="brand-mark__letter brand-mark__letter--3">T</span>
+        <span className="brand-mark__letter brand-mark__letter--4">H</span>
+        <span className="brand-mark__letter brand-mark__letter--5">A</span>
+      </span>
+      <span className="brand-mark__tag">MOODBOARD</span>
     </button>
-  );
-}
-
-function NavRail({ activeView, onNavigate, onReset, health, planCount, savedCount = 0, location }) {
-  const live = health?.search_mode === 'live' && health?.search_configured;
-  const production = health?.environment === 'production';
-  return (
-    <aside className="nav-rail">
-      <div className="nav-rail__top">
-        <Logo onClick={onReset} />
-        <div className="nav-rail__location" title={`Delivery location context: ${location || 'Bangalore, 560001'}`}>
-          <Icon name="truck" size={12} />
-          <span>{location || 'Bangalore 560001'}</span>
-        </div>
-      </div>
-      <nav className="nav-links" aria-label="Primary navigation">
-        {NAV_ITEMS.map((item) => (
-          <button
-            type="button"
-            key={item.id}
-            className={`nav-link ${activeView === item.id ? 'is-active' : ''}`}
-            onClick={() => onNavigate(item.id)}
-            aria-current={activeView === item.id ? 'page' : undefined}
-          >
-            <Icon name={item.icon} size={19} />
-            <span>{item.label}</span>
-            {item.id === 'plans' && planCount > 0 ? <em>{planCount}</em> : null}
-            {item.id === 'saved' && savedCount > 0 ? <em>{savedCount}</em> : null}
-          </button>
-        ))}
-      </nav>
-      <div className="nav-rail__bottom">
-        <div className="connection-status">
-          <span className={`connection-dot ${live ? 'is-live' : ''}`} />
-          <div className="connection-status__text">
-            <strong>{production ? 'Production API' : 'Local API'}</strong>
-            <small>{health?.search_mode === 'fixture' ? 'Demo catalog' : live ? `${usageProviderName(health?.search_provider)} live search` : 'Search provider not ready'} · {health?.ai?.provider === 'gemini' ? 'Gemini' : 'Ollama'}</small>
-          </div>
-        </div>
-        <div className="nav-rail__rule" />
-        <p className="nav-rail__motto">
-          Source-linked choices
-          <br />
-          for deliberate buyers.
-        </p>
-      </div>
-    </aside>
-  );
-}
-
-function MobileNav({ activeView, onNavigate, planCount, savedCount = 0 }) {
-  return (
-    <nav className="mobile-nav" aria-label="Mobile navigation">
-      {NAV_ITEMS.map((item) => (
-        <button
-          type="button"
-          key={item.id}
-          className={activeView === item.id ? 'is-active' : ''}
-          onClick={() => onNavigate(item.id)}
-          aria-current={activeView === item.id ? 'page' : undefined}
-        >
-          <Icon name={item.icon} size={20} />
-          <span>{item.id === 'plans' ? 'Plans' : item.label}</span>
-          {item.id === 'plans' && planCount > 0 ? <em>{planCount}</em> : null}
-          {item.id === 'saved' && savedCount > 0 ? <em>{savedCount}</em> : null}
-        </button>
-      ))}
-    </nav>
   );
 }
 
@@ -319,15 +286,234 @@ function AccountAvatar({ user }) {
   return <span className="account-avatar account-avatar--initials">{initials(user?.name)}</span>;
 }
 
-function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, onOpenTalk, onOpenTasteGraph }) {
+function TearOffMenuPanel({
+  open,
+  onClose,
+  activeView,
+  onNavigate,
+  onReset,
+  health,
+  planCount = 0,
+  savedCount = 0,
+  location,
+  user,
+  isSessionLoading,
+  onSignIn,
+  onSignOut,
+  onOpenTalk,
+}) {
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  useDialogFocusTrap(open, dialogRef, closeButtonRef, onClose);
+
+  if (!open) return null;
+  const status = searchStatusInfo(health);
+
+  const handleSelectView = (viewId) => {
+    onNavigate(viewId);
+    onClose();
+  };
+
+  return (
+    <div
+      className="tearoff-menu-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <aside
+        id="artha-navigation-panel"
+        ref={dialogRef}
+        className="tearoff-menu-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Artha navigation menu"
+      >
+        <div className="tearoff-menu-panel__perforation" aria-hidden="true" />
+        <div className="tearoff-menu-panel__header">
+          <div>
+            <span className="tearoff-menu-panel__kicker">ARTHA // NAVIGATION SHEET</span>
+            <p className="tearoff-menu-panel__tagline">Your shopping moodboard, with the research done.</p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="tearoff-menu-panel__close"
+            onClick={onClose}
+            aria-label="Close menu"
+          >
+            <Icon name="close" size={18} />
+            <span>Close</span>
+          </button>
+        </div>
+
+        <nav className="tearoff-menu-panel__nav" aria-label="Primary navigation">
+          {NAV_ITEMS.map((item, idx) => {
+            const isActive = activeView === item.id;
+            const badgeCount = item.id === 'plans' ? planCount : item.id === 'saved' ? savedCount : 0;
+            return (
+              <button
+                type="button"
+                key={item.id}
+                className={`tearoff-nav-item ${isActive ? 'is-active' : ''}`}
+                onClick={() => handleSelectView(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+              >
+                <span className="tearoff-nav-item__index" aria-hidden="true">
+                  {String(idx + 1).padStart(2, '0')}
+                </span>
+                <span className="tearoff-nav-item__label">{item.label}</span>
+                {badgeCount > 0 ? (
+                  <span className="tearoff-nav-item__badge">{badgeCount}</span>
+                ) : null}
+                <span className="tearoff-nav-item__arrow" aria-hidden="true">
+                  <Icon name="arrow" size={17} />
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="tearoff-menu-panel__footer">
+          <div className="tearoff-menu-panel__status-row">
+            <span className={`search-mode-dot search-mode-dot--${status.tone}`} />
+            <div>
+              <strong>{status.shortLabel}</strong>
+              <small>
+                {location ? `Delivering to ${location}` : 'Bengaluru 560001 default context'} · Real purchases happen at the retailer
+              </small>
+            </div>
+          </div>
+
+          <div className="tearoff-menu-panel__account">
+            {isSessionLoading ? (
+              <span className="account-loading" role="status">Checking account…</span>
+            ) : user ? (
+              <div className="tearoff-menu-panel__user-row">
+                <div className="account-identity">
+                  <AccountAvatar user={user} />
+                  <div>
+                    <strong className="account-identity__name">{user.name}</strong>
+                    {user.email ? <small className="account-identity__email">{user.email}</small> : null}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="tearoff-menu-panel__auth-btn"
+                  onClick={() => {
+                    onClose();
+                    onSignOut();
+                  }}
+                >
+                  <Icon name="logout" size={15} />
+                  <span>Sign out</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="tearoff-menu-panel__signin-cta"
+                onClick={() => {
+                  onClose();
+                  onSignIn();
+                }}
+              >
+                <Icon name="user" size={16} />
+                <span>Sign in with Google to save plans</span>
+                <Icon name="arrow" size={15} />
+              </button>
+            )}
+          </div>
+
+          <div className="tearoff-menu-panel__quick-actions">
+            <button
+              type="button"
+              className="tearoff-menu-panel__action-chip"
+              onClick={() => {
+                onReset();
+                onClose();
+              }}
+            >
+              <Icon name="plus" size={15} />
+              <span>Start new brief</span>
+            </button>
+            <button
+              type="button"
+              className="tearoff-menu-panel__action-chip"
+              onClick={() => {
+                onClose();
+                onOpenTalk();
+              }}
+            >
+              <Icon name="waveform" size={15} />
+              <span>Talk to Artha</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function TopHeader({
+  activeView,
+  onNavigate,
+  onReset,
+  health,
+  planCount = 0,
+  savedCount = 0,
+  user,
+  isSessionLoading,
+  onSignIn,
+  onSignOut,
+  onOpenTalk,
+  onOpenTasteGraph,
+  menuOpen,
+  onToggleMenu,
+}) {
+  const status = searchStatusInfo(health);
+  const totalSavedOrPlans = (planCount || 0) + (savedCount || 0);
+
   return (
     <header className="top-header">
-      <span className="mobile-brand" aria-label="Artha">ARTHA</span>
-      <div className="top-header__breadcrumb">
-        <span className="top-header__crumb-app">Artha</span>
-        <span className="top-header__separator">/</span>
-        <span className="top-header__section">{SECTION_TITLES[activeView]}</span>
+      <div className="top-header__left">
+        <Logo onClick={onReset} />
+        <div className="top-header__breadcrumb" aria-label="Current section">
+          <span className="top-header__separator" aria-hidden="true">/</span>
+          <span className="top-header__section">{SECTION_TITLES[activeView]}</span>
+        </div>
+        <span
+          className={`top-header__mode-pill top-header__mode-pill--${status.tone}`}
+          title={status.detail}
+        >
+          <span className={`search-mode-dot search-mode-dot--${status.tone}`} />
+          <span>{status.shortLabel}</span>
+        </span>
       </div>
+
+      {/* Hanging Tear-Off Paper-Tab Menu Control */}
+      <div className="top-header__center">
+        <button
+          type="button"
+          className={`hanging-menu-tab ${menuOpen ? 'is-open' : ''}`}
+          onClick={onToggleMenu}
+          aria-expanded={menuOpen}
+          aria-controls="artha-navigation-panel"
+          aria-haspopup="dialog"
+        >
+          <span className="hanging-menu-tab__teeth" aria-hidden="true" />
+          <span className="hanging-menu-tab__hole" aria-hidden="true" />
+          <span className="hanging-menu-tab__label">Menu</span>
+          {totalSavedOrPlans > 0 ? (
+            <span className="hanging-menu-tab__count" aria-label={`${totalSavedOrPlans} saved items or plans`}>
+              {totalSavedOrPlans}
+            </span>
+          ) : null}
+          <Icon name={menuOpen ? 'close' : 'chevron'} size={14} className="hanging-menu-tab__icon" />
+        </button>
+      </div>
+
       <div className="top-header__actions">
         <button
           type="button"
@@ -351,12 +537,12 @@ function TopHeader({ activeView, user, isSessionLoading, onSignIn, onSignOut, on
               <span className="account-identity__name">{user.name}</span>
             </div>
             <button type="button" className="quiet-action account-logout" onClick={onSignOut}>
-              <Icon name="logout" size={15} /> Sign out
+              <Icon name="logout" size={15} /> <span>Sign out</span>
             </button>
           </div>
         ) : (
           <button type="button" className="quiet-action sign-in-btn" onClick={onSignIn}>
-            <Icon name="user" size={15} /> Sign in
+            <Icon name="user" size={15} /> <span>Sign in</span>
           </button>
         )}
       </div>
@@ -607,6 +793,9 @@ function Composer({
   useProfile,
   onToggleProfile,
   onOpenTasteGraph,
+  health,
+  showVoiceStudio,
+  onToggleVoiceStudio,
 }) {
   const fileInputRef = useRef(null);
   const onFileChange = useCallback(
@@ -626,6 +815,17 @@ function Composer({
 
   const canSearch = Boolean(query.trim() || postUrl.trim() || reference?.dataUrl || socialTheme);
   const setMissionField = (field, value) => onMissionChange({ ...mission, [field]: value });
+  const status = searchStatusInfo(health);
+
+  const handlePromptClick = (prompt) => {
+    if (prompt === 'Find something like this photo' && !reference?.dataUrl) {
+      setQuery(prompt);
+      fileInputRef.current?.click();
+      onPickPrompt(prompt);
+      return;
+    }
+    onPickPrompt(prompt);
+  };
 
   return (
     <div className="composer-container">
@@ -634,38 +834,77 @@ function Composer({
         isLoading={isExtractingTheme}
         onClear={onClearSocialTheme}
       />
-      <form className="composer" onSubmit={onSearch}>
-        <label className="sr-only" htmlFor="shopping-brief">
-          {hasResults ? 'Follow-up preference' : 'Shopping brief'}
+      <form className="composer composer--research-sheet" onSubmit={onSearch}>
+        <div className="composer__sheet-header">
+          <div className="composer__sheet-id">
+            <span className="composer__sheet-stamp">BRIEF SHEET // 01</span>
+            <span className="composer__sheet-note">Research happens here · Real purchases happen at the retailer</span>
+          </div>
+          <div className={`composer__service-badge composer__service-badge--${status.tone}`} aria-label="Search mode">
+            <span className={`search-mode-dot search-mode-dot--${status.tone}`} />
+            <span>{status.detail}</span>
+          </div>
+        </div>
+
+        <label className="composer__textarea-label" htmlFor="shopping-brief">
+          <span className="sr-only">{hasResults ? 'Follow-up preference' : 'Shopping brief'}</span>
+          <span className="composer__prompt-kicker" aria-hidden="true">
+            {hasResults ? 'FOLLOW-UP BRIEF' : 'WHAT DO YOU NEED TO FIND?'}
+          </span>
         </label>
         <textarea
           id="shopping-brief"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={hasResults ? 'Ask a follow-up (e.g., show me options under ₹11,000 or make the delivery window tighter)…' : 'Describe what you need (e.g., a breathable linen shirt under ₹2,500 for a work trip)…'}
+          placeholder={
+            hasResults
+              ? 'Ask a follow-up (e.g., show me options under ₹11,000 or make the delivery window tighter)…'
+              : 'Describe what you need (e.g., Linen shirt under ₹2,500 for Bengaluru, or attach a reference photo)…'
+          }
           rows={2}
         />
+
         <fieldset className="mission-brief">
-            <legend>{hasResults ? 'Adjust your mission, then refine' : 'Mission brief'}</legend>
-            <label>
-              <span>Occasion</span>
-              <input value={mission.occasion} onChange={(event) => setMissionField('occasion', event.target.value)} placeholder="Wedding, work, dinner, trip…" />
-            </label>
-            <label>
-              <span>Budget</span>
-              <input value={mission.budget} onChange={(event) => setMissionField('budget', event.target.value)} maxLength={40} placeholder="₹2,000 or 2k" />
-            </label>
-            <label>
-              <span>Arrive by</span>
-              <input value={mission.arrive_by_date} onChange={(event) => setMissionField('arrive_by_date', event.target.value)} type="date" min={new Date().toISOString().slice(0, 10)} />
-            </label>
-            <label>
-              <span>Pincode</span>
-              <input value={mission.pincode} onChange={(event) => setMissionField('pincode', event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="560001" />
-            </label>
-          </fieldset>
+          <legend>{hasResults ? 'Adjust your mission, then refine' : 'Mission constraints (optional)'}</legend>
+          <label>
+            <span>Budget</span>
+            <input
+              value={mission.budget}
+              onChange={(event) => setMissionField('budget', event.target.value)}
+              maxLength={40}
+              placeholder="₹2,500 or 2.5k"
+            />
+          </label>
+          <label>
+            <span>Pincode / City</span>
+            <input
+              value={mission.pincode}
+              onChange={(event) => setMissionField('pincode', event.target.value.replace(/\D/g, '').slice(0, 6))}
+              inputMode="numeric"
+              placeholder="560001"
+            />
+          </label>
+          <label>
+            <span>Occasion</span>
+            <input
+              value={mission.occasion}
+              onChange={(event) => setMissionField('occasion', event.target.value)}
+              placeholder="Everyday, work, trip…"
+            />
+          </label>
+          <label>
+            <span>Arrive by</span>
+            <input
+              value={mission.arrive_by_date}
+              onChange={(event) => setMissionField('arrive_by_date', event.target.value)}
+              type="date"
+              min={new Date().toISOString().slice(0, 10)}
+            />
+          </label>
+        </fieldset>
+
         <div className="composer__footer">
-          <div className="composer__inputs">
+          <div className="composer__inputs" role="group" aria-label="Brief attachments and voice tools">
             <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange} />
             <button type="button" className="secondary-control" onClick={() => fileInputRef.current?.click()}>
               <Icon name="image" size={16} />
@@ -690,32 +929,48 @@ function Composer({
               onInterim={setQuery}
               onError={onToast}
             />
+            <LocationButton location={location} onLocation={onLocation} onError={onToast} />
             <button type="button" className="secondary-control talk-control" onClick={onOpenTalk}>
               <Icon name="waveform" size={16} />
               <span>Talk to Artha</span>
             </button>
-            <button
-              type="button"
-              className={`secondary-control ${useProfile ? 'is-selected' : ''}`}
-              onClick={onToggleProfile}
-              title="Toggle automatic taste profile & delivery defaults from Shopping OS"
-            >
-              <Icon name="network" size={16} />
-              <span>{useProfile ? 'Taste OS Active' : 'Taste OS'}</span>
-            </button>
-            <button
-              type="button"
-              className="secondary-control"
-              onClick={onOpenTasteGraph}
-              title="Open full interactive Shopping OS Taste & Knowledge Graph"
-            >
-              <Icon name="spark" size={16} />
-              <span>Taste Graph</span>
-            </button>
-            <LocationButton location={location} onLocation={onLocation} onError={onToast} />
+            {onToggleProfile ? (
+              <button
+                type="button"
+                className={`secondary-control ${useProfile ? 'is-selected' : ''}`}
+                onClick={onToggleProfile}
+                title="Toggle automatic taste profile & delivery defaults from Shopping OS"
+              >
+                <Icon name="network" size={16} />
+                <span>{useProfile ? 'Taste OS Active' : 'Taste OS'}</span>
+              </button>
+            ) : null}
+            {onOpenTasteGraph ? (
+              <button
+                type="button"
+                className="secondary-control"
+                onClick={onOpenTasteGraph}
+                title="Open full interactive Shopping OS Taste & Knowledge Graph"
+              >
+                <Icon name="spark" size={16} />
+                <span>Taste Graph</span>
+              </button>
+            ) : null}
+            {onToggleVoiceStudio ? (
+              <button
+                type="button"
+                className={`secondary-control ${showVoiceStudio ? 'is-selected' : ''}`}
+                onClick={onToggleVoiceStudio}
+                aria-expanded={Boolean(showVoiceStudio)}
+              >
+                <Icon name="mic" size={16} />
+                <span>Voice studio</span>
+              </button>
+            ) : null}
             <ReferenceChip reference={reference} onRemove={onRemoveReference} />
           </div>
-          <button type="submit" className="primary-button composer__submit" disabled={isSearching || !canSearch}>
+
+          <button type="submit" className="primary-button composer__submit stamp-submit-btn" disabled={isSearching || !canSearch}>
             {isSearching ? (
               <>
                 <span className="spinner" />
@@ -723,12 +978,16 @@ function Composer({
               </>
             ) : (
               <>
-                <span>{hasResults ? 'Refine shortlist' : 'Find sources'}</span>
+                <span className="stamp-submit-btn__badge" aria-hidden="true">
+                  <Icon name="spark" size={14} />
+                </span>
+                <span>{hasResults ? 'Refine shortlist' : 'Find my options'}</span>
                 <Icon name="arrow" size={17} />
               </>
             )}
           </button>
         </div>
+
         {showPostUrl ? (
           <div className="url-field-wrap">
             <label className="url-field">
@@ -737,7 +996,7 @@ function Composer({
               <input
                 value={postUrl}
                 onChange={(event) => setPostUrl(event.target.value)}
-                placeholder="Paste an Instagram, Pinterest, or product page link to scrape"
+                placeholder="Paste an Instagram, Pinterest, or product page link to inspect"
                 inputMode="url"
               />
             </label>
@@ -764,15 +1023,15 @@ function Composer({
         </div>
       ) : null}
 
-      <div className="composer-suggestions">
-        <span className="composer-suggestions__label">Try:</span>
+      <div className="composer-suggestions" aria-label="Suggested shopping briefs">
+        <span className="composer-suggestions__label">Suggested briefs:</span>
         <div className="composer-suggestions__list">
           {SUGGESTED_SEARCHES.map((prompt) => (
             <button
               type="button"
               key={prompt}
               className="suggestion-chip"
-              onClick={() => onPickPrompt(prompt)}
+              onClick={() => handlePromptClick(prompt)}
             >
               <Icon name="spark" size={12} />
               <span>{prompt}</span>
@@ -1021,34 +1280,276 @@ function ClarificationNote({ intent, onAnswer, onEdit, isSearching }) {
 }
 
 function HeroVisual() {
+  const [cutoutFailed, setCutoutFailed] = useState(false);
+  const [photoFailed, setPhotoFailed] = useState(false);
+
   return (
-    <Card3D maxTilt={7} scale={1.02} glare={true} className="hero-visual__card-wrapper">
-      <div className="hero-visual hero-visual--folder">
-        <div className="hero-visual__tab" aria-hidden="true">
-          <span className="hero-visual__tab-inner">Curated Look</span>
+    <Card3D maxTilt={6} scale={1.015} glare={false} className="hero-visual__card-wrapper">
+      <div className="hero-collage" aria-label="Artha shopping research moodboard collage">
+        {/* Layer 1: Tactile Paper Folder */}
+        <div className="hero-collage__folder">
+          <div className="hero-collage__folder-tab">
+            <span>FOLDER 01 // SHORTLIST BRIEF</span>
+            <span className="hero-collage__folder-code">BLR-560001</span>
+          </div>
+          <div className="hero-collage__folder-body">
+            <div className="hero-collage__folder-header">
+              <span className="hero-collage__stamp-pill">Evidence checked</span>
+              <span className="hero-collage__folder-meta">3 retailer pages compared</span>
+            </div>
+            <div className="hero-collage__notes-lines" aria-hidden="true">
+              <span>✓ 100% breathable linen weave verified</span>
+              <span>✓ Size M in stock · Myntra &amp; Uniqlo</span>
+              <span>! Confirm express pincode cutoff at store</span>
+            </div>
+            <div className="hero-collage__retailers" aria-hidden="true">
+              <span className="hero-collage__retailer-chip" style={{ backgroundColor: '#034102', color: '#B6FE00' }}>Myntra</span>
+              <span className="hero-collage__retailer-chip" style={{ backgroundColor: '#2E3EAC', color: '#F4F3EF' }}>Uniqlo</span>
+              <span className="hero-collage__retailer-chip" style={{ backgroundColor: '#FA8005', color: '#034102' }}>FabIndia</span>
+            </div>
+          </div>
         </div>
-        <div className="hero-visual__stickers" aria-hidden="true">
-          <span className="hero-visual__sticker hero-visual__sticker--1">✨</span>
-          <span className="hero-visual__sticker hero-visual__sticker--2">👔</span>
-          <span className="hero-visual__sticker hero-visual__sticker--3">👞</span>
+
+        {/* Layer 2: Pinned Reference Photograph */}
+        <div className="hero-collage__polaroid">
+          <span className="hero-collage__tape" aria-hidden="true" />
+          <div className="hero-collage__polaroid-frame">
+            {!photoFailed ? (
+              <img
+                className="hero-collage__polaroid-img"
+                src="/assets/editorial-outfit-triptych.png"
+                alt="Saved reference photograph of a linen shirt, relaxed trousers, and loafers"
+                onError={() => setPhotoFailed(true)}
+              />
+            ) : (
+              <div className="hero-collage__fallback-art" aria-hidden="true">
+                <Icon name="image" size={28} />
+                <span>Saved Reference Photo</span>
+              </div>
+            )}
+          </div>
+          <div className="hero-collage__polaroid-caption">
+            <strong>Saved inspiration</strong>
+            <span>Relaxed linen &amp; neutral tones</span>
+          </div>
         </div>
-        <div className="hero-visual__frame">
-          <img
-            className="hero-visual__image"
-            src="/assets/editorial-outfit-triptych.png"
-            alt="A linen shirt, relaxed trousers and leather loafers in a neutral palette"
-          />
-          <div className="hero-visual__wash" />
-          <span className="hero-visual__index">THE EVERYDAY EDIT</span>
-          <span className="hero-visual__caption">Three pieces. One considered look.</span>
+
+        {/* Layer 3: Dimensional Product Cutout */}
+        <div className="hero-collage__cutout">
+          <div className="hero-collage__cutout-card">
+            {!cutoutFailed ? (
+              <img
+                className="hero-collage__cutout-img"
+                src="/assets/premium-white-sneaker.png"
+                alt="Product cutout of a minimalist everyday leather sneaker"
+                onError={() => setCutoutFailed(true)}
+              />
+            ) : (
+              <svg className="hero-collage__cutout-svg" viewBox="0 0 160 100" aria-hidden="true">
+                <rect x="12" y="20" width="136" height="60" rx="18" fill="#F4F3EF" stroke="#034102" strokeWidth="3" />
+                <path d="M30 62 C55 36, 95 36, 132 62" stroke="#034102" strokeWidth="4" fill="none" />
+              </svg>
+            )}
+            <span className="hero-collage__cutout-badge">PRODUCT CUTOUT</span>
+          </div>
+          <div className="hero-collage__cutout-shadow" aria-hidden="true" />
         </div>
-        <div className="hero-visual__retailers" aria-hidden="true">
-          <span className="hero-visual__retailer-badge" style={{ backgroundColor: '#1C3027' }}>Zara</span>
-          <span className="hero-visual__retailer-badge" style={{ backgroundColor: '#A94F32' }}>FabIndia</span>
-          <span className="hero-visual__retailer-badge" style={{ backgroundColor: '#026AA7' }}>Uniqlo</span>
+
+        {/* Layer 4: Small Hanging INR Price Label */}
+        <div className="hero-collage__price-label" aria-label="Sample checked price label 2,390 rupees">
+          <span className="hero-collage__price-hole" aria-hidden="true" />
+          <div className="hero-collage__price-copy">
+            <span className="hero-collage__price-kicker">LOWEST CHECKED</span>
+            <strong className="hero-collage__price-amount">₹2,390</strong>
+            <small className="hero-collage__price-sub">View at retailer ↗</small>
+          </div>
         </div>
       </div>
     </Card3D>
+  );
+}
+
+function ShoppingThemeShowcase({ onSelectBrief }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const touchStartXRef = useRef(null);
+  const themes = SHOPPING_THEMES;
+  const activeTheme = themes[activeIndex] || themes[0];
+
+  const handlePrev = () => {
+    setActiveIndex((current) => (current - 1 + themes.length) % themes.length);
+  };
+
+  const handleNext = () => {
+    setActiveIndex((current) => (current + 1) % themes.length);
+  };
+
+  const handleTouchStart = (event) => {
+    touchStartXRef.current = event.touches?.[0]?.clientX ?? null;
+  };
+
+  const handleTouchEnd = (event) => {
+    if (touchStartXRef.current === null) return;
+    const endX = event.changedTouches?.[0]?.clientX ?? touchStartXRef.current;
+    const delta = endX - touchStartXRef.current;
+    touchStartXRef.current = null;
+    if (Math.abs(delta) > 44) {
+      if (delta < 0) handleNext();
+      else handlePrev();
+    }
+  };
+
+  return (
+    <section
+      className="theme-showcase paper-texture-surface"
+      aria-labelledby="theme-showcase-heading"
+      style={{
+        '--theme-bg': activeTheme.bg,
+        '--theme-text': activeTheme.text,
+        '--theme-accent': activeTheme.accent,
+        '--theme-badge-bg': activeTheme.badgeBg,
+        '--theme-badge-text': activeTheme.badgeText,
+      }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div className="theme-showcase__inner">
+        <div className="theme-showcase__top-bar">
+          <div className="theme-showcase__label-group">
+            <span className="theme-showcase__example-pill">
+              EDITORIAL EXAMPLE · SAMPLE SHOPPING MISSION (NOT LIVE SEARCH RESULTS)
+            </span>
+            <span className="theme-showcase__counter" aria-live="polite">
+              {String(activeIndex + 1).padStart(2, '0')} / {String(themes.length).padStart(2, '0')} — {activeTheme.label.toUpperCase()}
+            </span>
+          </div>
+
+          {/* Visible Previous / Next Controls for Mobile & Desktop */}
+          <div className="theme-showcase__arrows" role="group" aria-label="Theme carousel controls">
+            <button
+              type="button"
+              className="theme-showcase__arrow-btn"
+              onClick={handlePrev}
+              aria-label="Previous shopping theme"
+            >
+              <span aria-hidden="true">←</span>
+              <span>Prev</span>
+            </button>
+            <button
+              type="button"
+              className="theme-showcase__arrow-btn"
+              onClick={handleNext}
+              aria-label="Next shopping theme"
+            >
+              <span>Next</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Theme Selector Tabs with Obvious Selected State */}
+        <div className="theme-showcase__tabs" role="tablist" aria-label="Shopping mission themes">
+          {themes.map((theme, idx) => {
+            const isSelected = idx === activeIndex;
+            return (
+              <button
+                type="button"
+                key={theme.id}
+                role="tab"
+                aria-selected={isSelected}
+                className={`theme-showcase__tab ${isSelected ? 'is-selected' : ''}`}
+                onClick={() => setActiveIndex(idx)}
+              >
+                <span className="theme-showcase__tab-dot" aria-hidden="true" />
+                <span className="theme-showcase__tab-name">{theme.label}</span>
+                {isSelected ? <span className="theme-showcase__tab-status">Selected</span> : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Prominent Single Active Theme Stage */}
+        <div className="theme-showcase__stage" role="tabpanel" aria-label={`${activeTheme.label} shopping mission showcase`}>
+          <div className="theme-showcase__copy">
+            <span className="theme-showcase__kicker">{activeTheme.kicker}</span>
+            <h2 id="theme-showcase-heading" className="theme-showcase__title">
+              {activeTheme.title}
+            </h2>
+            <p className="theme-showcase__subtitle">{activeTheme.subtitle}</p>
+
+            <ul className="theme-showcase__highlights" aria-label="Sample research highlights">
+              {activeTheme.highlights.map((item) => (
+                <li key={item}>
+                  <Icon name="check" size={14} />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="theme-showcase__brief-box">
+              <div className="theme-showcase__brief-meta">
+                <span className="theme-showcase__brief-tag">SUGGESTED BRIEF</span>
+                <span className="theme-showcase__brief-constraints">
+                  {activeTheme.occasion} · Budget {activeTheme.budget} · {activeTheme.location}
+                </span>
+              </div>
+              <p className="theme-showcase__brief-quote">“{activeTheme.brief}”</p>
+              <div className="theme-showcase__cta-row">
+                <button
+                  type="button"
+                  className="stamp-action-button"
+                  onClick={() => onSelectBrief(activeTheme.brief)}
+                >
+                  <span className="stamp-action-button__ring" aria-hidden="true" />
+                  <span className="stamp-action-button__label">Try this brief</span>
+                  <Icon name="arrow" size={16} />
+                </button>
+                <span className="theme-showcase__annotation" aria-hidden="true">
+                  {activeTheme.annotation}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="theme-showcase__visual">
+            <div className="theme-showcase__collage">
+              <div className="theme-showcase__folder-card">
+                <div className="theme-showcase__folder-top">
+                  <span>SAMPLE CURATION // {activeTheme.label.toUpperCase()}</span>
+                  <span className="theme-showcase__verdict-pill">{activeTheme.verdictLabel}</span>
+                </div>
+                <div className="theme-showcase__main-photo">
+                  <img
+                    src={activeTheme.image}
+                    alt={activeTheme.imageAlt}
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                </div>
+                <div className="theme-showcase__cutout-float">
+                  <img
+                    src={activeTheme.cutoutImage}
+                    alt=""
+                    aria-hidden="true"
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                </div>
+                <div className="theme-showcase__price-sticker">
+                  <small>EDITORIAL SAMPLE</small>
+                  <strong>{activeTheme.priceTag}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1126,6 +1627,39 @@ function PriceDesk({ product, compact = false }) {
   );
 }
 
+function productRecommendationState(product) {
+  if (product.eligible === false) {
+    return { label: 'No safe fit', tone: 'nofit' };
+  }
+  const live = product.source_kind === 'live_web';
+  const verified = product.research_status === 'complete' && (!live || Boolean(product.lowest_current_offer));
+  if (verified) {
+    return { label: 'Evidence checked', tone: 'checked' };
+  }
+  return { label: 'Verify first', tone: 'verify' };
+}
+
+function productUncertaintyNotes(product) {
+  const notes = [];
+  const live = product.source_kind === 'live_web';
+  if (live && !product.lowest_current_offer) {
+    notes.push('Current checkout price not directly verified');
+  }
+  if (product.in_stock === null || product.in_stock === undefined) {
+    notes.push('Live stock count not reported by source');
+  }
+  if (!product.delivery_label || /confirm/i.test(product.delivery_label)) {
+    notes.push('Delivery date requires pincode check at retailer');
+  }
+  if (!product.rating) {
+    notes.push('Customer ratings not independently verified');
+  }
+  if (!notes.length) {
+    notes.push('Confirm final size chart & return window at retailer');
+  }
+  return notes.slice(0, 2).join(' · ');
+}
+
 function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProduct, onInspect, onSave, saved, motionIndex = 0 }) {
   const live = product.source_kind === 'live_web';
   const cleanTitle = sanitizeTitle(product.name);
@@ -1138,16 +1672,25 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
   const retrievedTimeText = product.retrieved_at
     ? new Date(product.retrieved_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
     : '';
+  const recState = productRecommendationState(product);
+  const uncertaintyText = productUncertaintyNotes(product);
+  const variantText = product.size_status || sizes.length || colors.length
+    ? [
+        product.size_status ? product.size_status : sizes.length ? `Sizes: ${sizes.slice(0, 4).join(', ')}` : '',
+        colors.length ? `Colours: ${colors.slice(0, 3).join(', ')}` : '',
+      ].filter(Boolean).join(' · ')
+    : 'Variant: Confirm size & colour on retailer page';
 
   return (
     <Card3D
       className={`product-card product-card--folder ${selected ? 'is-selected' : ''} ${focused ? 'is-focused' : ''}`}
       style={{ '--motion-index': motionIndex }}
       onMouseEnter={() => onFocus(product.id)}
-      maxTilt={6}
+      maxTilt={4}
     >
       <div className="product-card__tab" aria-hidden="true">
-        <span className="product-card__tab-inner">{product.seller || 'Verified Option'}</span>
+        <span className="product-card__tab-inner">{product.seller || 'Retailer Source'}</span>
+        <span className={`rec-state-pill rec-state-pill--${recState.tone}`}>{recState.label}</span>
       </div>
       <div className="product-card__media">
         <ProductThumb product={product} />
@@ -1162,13 +1705,20 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
           </span>
           <span className={`match-badge ${product.eligible === false ? 'is-invalid' : ''}`} title={product.eligible === false ? product.reason_tags?.join(' · ') : `Match Score: ${product.match_score || 90}%`}>
             <Icon name="spark" size={12} />
-            <span>{product.eligible === false ? 'Not a fit' : `${product.match_score || 92}% Match`}</span>
+            <span>{product.eligible === false ? 'No safe fit' : `${product.match_score || 92}% Match`}</span>
           </span>
         </div>
       </div>
 
       <div className="product-card__body">
         <div className="product-card__header">
+          <div className="product-card__rec-row">
+            <span className={`rec-state-badge rec-state-badge--${recState.tone}`}>
+              <Icon name={recState.tone === 'checked' ? 'checkCircle' : recState.tone === 'nofit' ? 'info' : 'shield'} size={13} />
+              <span>{recState.label}</span>
+            </span>
+            <span className="product-card__retailer-name">{product.seller || 'Retailer'}</span>
+          </div>
           <h3 className="product-card__title" title={product.name}>
             {cleanTitle}
           </h3>
@@ -1197,24 +1747,30 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
           </small>
           {live && !product.lowest_current_offer ? <small className="product-card__price-signal is-unverified">Price not directly verified · confirm at retailer</small> : null}
           {product.quantity > 1 ? <small className="product-card__quantity-note">{product.quantity} units · {formatPrice(product.unit_total || product.total_price)} each</small> : null}
-          <div className="product-card__delivery">
-            <Icon name="truck" size={14} />
-            <span>{product.delivery_label || 'Confirm at store'}</span>
-          </div>
-          {product.size_status || sizes.length || colors.length ? (
+
+          <div className="product-card__evidence-grid">
+            <div className="product-card__delivery">
+              <Icon name="truck" size={14} />
+              <span><strong>Delivery:</strong> {product.delivery_label || 'Confirm at store'}</span>
+            </div>
             <small className="product-card__variant" data-testid="product-size-status">
-              {product.size_status ? product.size_status : sizes.length ? `Sizes: ${sizes.slice(0, 4).join(', ')}` : ''}
-              {(product.size_status || sizes.length) && colors.length ? ' · ' : ''}
-              {colors.length ? `Colours: ${colors.slice(0, 3).join(', ')}` : ''}
+              <strong>Variant:</strong> {variantText}
             </small>
-          ) : null}
+            <small className="product-card__uncertainty">
+              <strong>To verify:</strong> {uncertaintyText}
+            </small>
+          </div>
+
           {product.lowest_current_offer ? <small className="product-card__price-signal">{product.current_offers?.length > 1 ? 'Lowest checked matching offer' : 'Directly checked price'} {formatPrice(product.lowest_current_offer.price)} · {product.current_offers?.length || 1} {product.current_offers?.length === 1 ? 'store' : 'stores'}</small> : null}
           {product.match_explanation ? (
             <p className="product-card__match-explanation" data-testid="product-match-explanation">
               {product.match_explanation}
             </p>
           ) : null}
-          <small className={`constraint-note ${product.eligible === false ? 'is-invalid' : ''}`}>{(product.reason_tags || []).join(' · ')}</small>
+          {(product.reason_tags || []).length ? (
+            <small className={`constraint-note ${product.eligible === false ? 'is-invalid' : ''}`}>{(product.reason_tags || []).join(' · ')}</small>
+          ) : null}
+
           {product.url ? (
             <a
               href={product.url}
@@ -1223,8 +1779,8 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
               className="product-card__direct-link"
               data-testid="product-direct-link"
             >
-              <span>{product.seller || 'Retailer'} direct product link</span>
-              <Icon name="external" size={12} />
+              <span>View at retailer ({product.seller || 'Store'})</span>
+              <Icon name="external" size={13} />
             </a>
           ) : null}
         </div>
@@ -1264,8 +1820,8 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
               className="icon-action-btn"
               onClick={() => onOpenProduct(product)}
               disabled={!product.url}
-              aria-label={`Open ${cleanTitle} at retailer`}
-              title="Open product retailer page"
+              aria-label={`View ${cleanTitle} at retailer`}
+              title="View at retailer"
             >
               <Icon name="external" size={16} />
             </button>
@@ -1276,13 +1832,17 @@ function ProductCard({ product, selected, focused, onToggle, onFocus, onOpenProd
   );
 }
 
-function RecommendationBanner({ product, onInspect, onOpenTalk }) {
+function RecommendationBanner({ product, onInspect, onOpenTalk, onOpenProduct }) {
   if (!product) return null;
   const reasons = (product.reason_tags || []).filter(Boolean).slice(0, 3);
+  const recState = productRecommendationState(product);
   return (
     <aside className="decision-banner" aria-label="Top recommendation">
       <div className="decision-banner__copy">
-        <span className="decision-banner__eyebrow"><Icon name="spark" size={13} /> Best fit for your brief</span>
+        <div className="decision-banner__eyebrow-row">
+          <span className="decision-banner__eyebrow"><Icon name="spark" size={13} /> Best fit for your brief</span>
+          <span className={`rec-state-badge rec-state-badge--${recState.tone}`}>{recState.label}</span>
+        </div>
         <strong>{sanitizeTitle(product.name)}</strong>
         <p>{sanitizeSnippet(product.description)} Artha ranked it first because the trade-offs line up best with your constraints.</p>
         <div className="decision-banner__reasons">
@@ -1300,7 +1860,12 @@ function RecommendationBanner({ product, onInspect, onOpenTalk }) {
       </div>
       <div className="decision-banner__actions">
         <strong>{formatPrice(productTotal(product))}</strong>
-        <button type="button" className="primary-button" onClick={() => onInspect(product)}>
+        {product.url && onOpenProduct ? (
+          <button type="button" className="primary-button" onClick={() => onOpenProduct(product)}>
+            <Icon name="external" size={14} /> View at retailer
+          </button>
+        ) : null}
+        <button type="button" className="secondary-button" onClick={() => onInspect(product)}>
           <Icon name="shield" size={14} /> Why this pick
         </button>
         <button type="button" className="text-button" onClick={onOpenTalk}>
@@ -1312,24 +1877,28 @@ function RecommendationBanner({ product, onInspect, onOpenTalk }) {
 }
 
 function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenTalk }) {
-  if (!decision) return <RecommendationBanner product={products[0]} onInspect={onInspect} onOpenTalk={onOpenTalk} />;
+  if (!decision) return <RecommendationBanner product={products[0]} onInspect={onInspect} onOpenTalk={onOpenTalk} onOpenProduct={onOpenProduct} />;
   const product = products.find((item) => item.id === decision.recommended_product_id);
   const fallback = products.find((item) => item.id === decision.fallback_product_id);
   const outfit = Array.isArray(decision.recommended_product_ids) ? products.filter((item) => decision.recommended_product_ids.includes(item.id)) : [];
   const isNoFit = decision.status === 'no_safe_fit';
   const isBuyNow = decision.status === 'buy_now';
-  const title = isNoFit ? 'No safe fit' : isBuyNow ? 'Buy now' : 'Verify before buying';
-  const action = isBuyNow ? 'Open recommended retailer' : 'Open retailer & verify';
+  const stateLabel = isNoFit ? 'No safe fit' : isBuyNow ? 'Evidence checked' : 'Verify first';
+  const stateTone = isNoFit ? 'nofit' : isBuyNow ? 'checked' : 'verify';
+  const action = 'View at retailer';
   const reasons = [...(decision.reasons || []), ...(decision.blocking_risks || [])].filter(Boolean);
   const lowerOffer = product?.lowest_current_offer;
   const cheaperElsewhere = lowerOffer && lowerOffer.price < Number(product.price)
     && retailerUrl(lowerOffer.source_url) !== retailerUrl(product.url);
 
   return (
-    <Card3D className={`decision-banner mission-decision mission-decision--${decision.status}`} maxTilt={4} aria-label="Artha decision">
+    <Card3D className={`decision-banner mission-decision mission-decision--${decision.status}`} maxTilt={3} aria-label="Artha decision">
       <div className="decision-banner__copy">
-        <span className="decision-banner__eyebrow"><Icon name={isNoFit ? 'info' : isBuyNow ? 'checkCircle' : 'shield'} size={13} /> Artha decision</span>
-        <strong>{title}{outfit.length > 1 ? ` · ${outfit.length}-piece outfit` : product ? ` · ${sanitizeTitle(product.name)}` : ''}</strong>
+        <div className="decision-banner__eyebrow-row">
+          <span className="decision-banner__eyebrow"><Icon name={isNoFit ? 'info' : isBuyNow ? 'checkCircle' : 'shield'} size={13} /> Artha decision</span>
+          <span className={`rec-state-badge rec-state-badge--${stateTone}`}>{stateLabel}</span>
+        </div>
+        <strong>{stateLabel}{outfit.length > 1 ? ` · ${outfit.length}-piece outfit` : product ? ` · ${sanitizeTitle(product.name)}` : ''}</strong>
         {outfit.length > 1 ? <p>{outfit.map((item) => <a key={item.id} href={retailerUrl(item.url)} target="_blank" rel="noopener noreferrer">{sanitizeTitle(item.name)} <Icon name="external" size={12} />{' '}</a>)}</p> : null}
         <p>{isNoFit ? decision.mission_change || 'Try changing one hard constraint and search again.' : isBuyNow ? 'Every hard constraint is supported by the checked retailer evidence.' : 'One or more purchase facts still need confirmation on the retailer page.'}</p>
         {decision.checked_at ? <small className="mission-decision__time">Decision updated {observedTime(decision.checked_at)}</small> : null}
@@ -1352,7 +1921,7 @@ function MissionDecision({ decision, products, onInspect, onOpenProduct, onOpenT
         {cheaperElsewhere ? (
           <p className="mission-decision__fallback">
             Lower checked item price: {formatPrice(lowerOffer.price)} at {lowerOffer.seller}. Confirm its size, stock, delivery, and checkout total before switching.{' '}
-            <a href={retailerUrl(lowerOffer.source_url)} target="_blank" rel="noopener noreferrer">Check lower offer <Icon name="external" size={12} /></a>
+            <a href={retailerUrl(lowerOffer.source_url)} target="_blank" rel="noopener noreferrer">View at retailer ({lowerOffer.seller}) <Icon name="external" size={12} /></a>
           </p>
         ) : null}
         {fallback ? (
@@ -1736,18 +2305,20 @@ function DiscoverView({
   plans,
   isPlansLoading,
   onAssistantSearchResult,
+  onNavigate,
 }) {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
   const [homeInspectBag, setHomeInspectBag] = useState(null);
+  const [showVoiceStudio, setShowVoiceStudio] = useState(false);
 
   const handleBagResearch = useCallback((bag) => {
     if (bag.briefQuery) {
       setQuery(bag.briefQuery);
-      onSearch(bag.briefQuery);
+      onPickPrompt(bag.briefQuery);
       const briefInput = document.getElementById('shopping-brief');
       if (briefInput) briefInput.focus();
     }
-  }, [onSearch, setQuery]);
+  }, [onPickPrompt, setQuery]);
 
   const resultsRef = useRef(null);
   const discoverRef = useRef(null);
@@ -1756,6 +2327,7 @@ function DiscoverView({
   const priceProduct = result.products.find((product) => product.id === result.intent?.decision?.recommended_product_id) || result.products[0];
   const zeroResult = result.status === 'complete' && !result.products.length;
   const allSelected = result.products.length > 0 && selectedIds.length === result.products.length;
+  const hasActiveSearchContext = Boolean(isSearching || result.search_id || searchError);
 
   useEffect(() => {
     const root = discoverRef.current;
@@ -1790,237 +2362,311 @@ function DiscoverView({
   }, [isSearching, result.products.length, result.search_id, result.status]);
 
   return (
-    <div ref={discoverRef} className="discover-layout">
-      <section className="main-column">
-        <HomeVoiceAssistant
-          user={user}
-          health={health}
-          location={location}
-          onSearchComplete={onAssistantSearchResult}
-        />
+    <div ref={discoverRef} className="discover-page">
+      {/* ── Opening Editorial Hero & Working Brief Composer ── */}
+      <section className="editorial-hero paper-texture-surface" aria-label="Artha shopping research hero">
+        <div className="editorial-hero__inner">
+          {/* Mobile 2 & 3: Headline + Short Explanation */}
+          <div className="editorial-hero__lead">
+            <div className="editorial-hero__kicker-row">
+              <span className="editorial-hero__wordmark-pill">ARTHA</span>
+              <span className="editorial-hero__creative-idea">
+                Your shopping moodboard, with the research done.
+              </span>
+            </div>
 
-        <div className="hero-copy">
-          <div className="hero-copy__intro">
-            <span className="hero-eyebrow">A little more thought in every buy</span>
-            <h1 aria-label="Find what fits. Know why.">
-              <span>Find what fits.</span>
-              <br />
-              <em>Know why.</em>
+            <h1 className="editorial-hero__headline" aria-label="Find what fits. Know why.">
+              <span className="editorial-hero__headline-line editorial-hero__headline-line--first">
+                Find what fits.
+              </span>
+              <span className="editorial-hero__headline-line editorial-hero__headline-line--second">
+                Know why.
+              </span>
             </h1>
-            <p>
+
+            <p className="editorial-hero__supporting">
               Tell Artha what you need. Compare real retailer options, prices, and trade-offs in one thoughtful shortlist.
             </p>
-            <div className="hero-copy__note">
-              <span className="hero-copy__note-dot" />
-              <span aria-label="Search mode">{health?.search_mode === 'fixture' ? 'Demo catalog · sample products' : health?.search_configured && health?.search_mode === 'live' ? 'Live retailer search · confirm at checkout' : health?.search_mode ? 'Search provider not ready' : 'Checking search connection…'}</span>
+
+            <div className="editorial-hero__annotation-bar">
+              <span className="editorial-hero__annotation">
+                “A little more thought in every buy.”
+              </span>
+              <a className="editorial-hero__how-link" href="#how-artha-works">
+                <span>How Artha works</span>
+                <Icon name="arrow" size={14} />
+              </a>
             </div>
-            <a className="hero-copy__how-link" href="#how-artha-works">How Artha works <Icon name="arrow" size={14} /></a>
           </div>
-          <HeroVisual />
+
+          {/* Mobile 4 / Desktop Left: Working Brief Composer & Primary Action */}
+          <div className="editorial-hero__composer-slot">
+            <Composer
+              voice={voice}
+              query={query}
+              setQuery={setQuery}
+              mission={mission}
+              onMissionChange={onMissionChange}
+              postUrl={postUrl}
+              setPostUrl={setPostUrl}
+              showPostUrl={showPostUrl}
+              setShowPostUrl={setShowPostUrl}
+              reference={reference}
+              location={location}
+              onLocation={onLocation}
+              onReferenceChange={onReferenceChange}
+              onRemoveReference={onRemoveReference}
+              onSearch={onSearch}
+              isSearching={isSearching}
+              hasResults={result.products.length > 0}
+              searchError={searchError}
+              onToast={onToast}
+              onPickPrompt={onPickPrompt}
+              onOpenTalk={onOpenTalk}
+              socialTheme={socialTheme}
+              onClearSocialTheme={onClearSocialTheme}
+              isExtractingTheme={isExtractingTheme}
+              onAnalyzeUrl={onAnalyzeUrl}
+              useProfile={useProfile}
+              onToggleProfile={onToggleProfile}
+              onOpenTasteGraph={onOpenTasteGraph}
+              health={health}
+              showVoiceStudio={showVoiceStudio}
+              onToggleVoiceStudio={() => setShowVoiceStudio((current) => !current)}
+            />
+
+            {showVoiceStudio ? (
+              <div className="voice-studio-drawer">
+                <HomeVoiceAssistant
+                  user={user}
+                  health={health}
+                  location={location}
+                  onSearchComplete={onAssistantSearchResult}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {/* Mobile 5 / Desktop Right: Dimensional Decorative Shopping Collage */}
+          <div className="editorial-hero__collage-slot">
+            <HeroVisual />
+          </div>
         </div>
 
-        <Composer
-          voice={voice}
-          query={query}
-          setQuery={setQuery}
-          mission={mission}
-          onMissionChange={onMissionChange}
-          postUrl={postUrl}
-          setPostUrl={setPostUrl}
-          showPostUrl={showPostUrl}
-          setShowPostUrl={setShowPostUrl}
-          reference={reference}
-          location={location}
-          onLocation={onLocation}
-          onReferenceChange={onReferenceChange}
-          onRemoveReference={onRemoveReference}
-          onSearch={onSearch}
-          isSearching={isSearching}
-          hasResults={result.products.length > 0}
-          searchError={searchError}
-          onToast={onToast}
-          onPickPrompt={onPickPrompt}
-          onOpenTalk={onOpenTalk}
-          socialTheme={socialTheme}
-          onClearSocialTheme={onClearSocialTheme}
-          isExtractingTheme={isExtractingTheme}
-          onAnalyzeUrl={onAnalyzeUrl}
-        />
-
-        <AgentStrip
-          workflow={result.workflow}
-          isSearching={isSearching}
-          searchStage={searchStage}
-          hasResults={result.products.length > 0}
-          resultCount={result.products.length}
-          resultSourceMode={result.source?.mode}
-          resultStatus={result.status}
-          searchError={searchError}
-          onOpenTalk={onOpenTalk}
-        />
-        <LocationContext intent={result.intent} />
-        <ConversationTrail conversation={result.conversation} />
-        <BudgetOpportunity
-          opportunity={result.summary?.opportunity}
-          product={result.products.find((item) => item.id === result.summary?.opportunity?.product_id)}
-          onInspect={onInspect}
-        />
-
-        <section ref={resultsRef} className={`results-section js-reveal${result.search_id ? ' is-visible' : ''}`} aria-labelledby="results-heading">
-          <ClarificationNote key={result.search_id} intent={result.status === 'needs_clarification' ? result.intent : null} isSearching={isSearching} onAnswer={onQuickAnswer} onEdit={() => document.getElementById('shopping-brief')?.focus()} />
-          <div className="results-toolbar">
-            <div className="results-heading">
-              <h2 id="results-heading">{result.products.length ? 'Your mission decision' : result.status === 'needs_clarification' ? 'Complete the brief to search' : zeroResult ? 'No product match yet' : 'Build your live shortlist'}</h2>
-              <BriefSummary intent={result.intent} show={Boolean(query.trim() || result.products.length)} />
-            </div>
-          </div>
-
-          <MissionDecision
-            decision={result.intent?.decision}
-            products={result.products}
-            onInspect={onInspect}
-            onOpenProduct={onOpenProduct}
-            onOpenTalk={onOpenTalk}
-          />
-
-          {priceProduct ? <PriceDesk product={priceProduct} /> : null}
-
-          {!result.products.length ? (
-            result.status === 'needs_clarification' ? (
-              <div className="empty-state results-empty-state">
-                <span className="empty-state__icon">
-                  <Icon name="search" size={24} />
-                </span>
-                <h2>Answer the questions above to start.</h2>
-                <p>Once the constraints are clear, Artha will search and verify the relevant retailer sources.</p>
-              </div>
-            ) : zeroResult ? (
-              <div className="empty-state results-empty-state">
-                <span className="empty-state__icon">
-                  <Icon name="search" size={24} />
-                </span>
-                <h2>No purchasable product page found.</h2>
-                <p>Artha excluded articles and category pages. Try a more specific product name, another retailer, or a wider budget and search again.</p>
-                <button type="button" className="secondary-button" onClick={() => document.getElementById('shopping-brief')?.focus()}>
-                  Edit brief and retry <Icon name="arrow" size={15} />
-                </button>
-              </div>
-            ) : (
-              <section className="home-bags-showcase" aria-labelledby="home-bags-title">
-                <div className="home-bags-showcase__header">
-                  <div className="home-bags-showcase__title-wrap">
-                    <span className="section-kicker">
-                      <Icon name="spark" size={13} /> {plans.length ? 'Your saved bags' : 'Starter missions'}
-                    </span>
-                    <h2 id="home-bags-title">{plans.length ? 'Continue a saved bag' : 'Start a shopping mission'}</h2>
-                    <p>
-                      {plans.length
-                        ? 'Your saved items, retailer links, and totals, loaded from your account.'
-                        : 'Choose a brief to start. Artha will find retailer items and check prices when you launch a mission.'}
-                    </p>
-                  </div>
-                  <span className="home-bags-showcase__hint">
-                    {plans.length ? 'View a saved bag or research it again' : 'Choose a brief to run Artha'}
-                  </span>
-                </div>
-
-                {plans.length ? (
-                  <div className="bags-tracker__shelf bags-tracker__shelf--grid">
-                    {plans.slice(0, 3).map((plan, index) => {
-                      const bag = planToBag(plan, index);
-                      return (
-                        <BagFolderCard
-                          key={bag.id}
-                          bag={bag}
-                          onInspect={setHomeInspectBag}
-                          onResearch={handleBagResearch}
-                        />
-                      );
-                    })}
-                  </div>
-                ) : isSessionLoading || isPlansLoading ? (
-                  <p className="home-bags-showcase__empty" role="status">Loading your saved bags…</p>
-                ) : (
-                  <div className="home-bags-showcase__empty">
-                    <p>No saved bags yet. Start with one of these briefs:</p>
-                    <div className="home-bags-showcase__suggestions">
-                      {SUGGESTED_SEARCHES.map((prompt) => (
-                        <button
-                          type="button"
-                          key={prompt}
-                          className="suggestion-chip"
-                          onClick={() => handleBagResearch({ briefQuery: prompt })}
-                        >
-                          <Icon name="spark" size={12} />
-                          <span>{prompt}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-            )
-          ) : (
-            <section className="source-explorer" aria-label="Retailer product shortlist">
-              <div className="source-explorer__heading">
-                <div><span className="section-kicker">The shortlist</span><h3>{result.source?.mode === 'live' ? `${result.products.length} retailer ${result.products.length === 1 ? 'page' : 'pages'} found` : `${result.products.length} sample ${result.products.length === 1 ? 'product' : 'products'}`}</h3></div>
-                <span>{result.source?.mode === 'live' ? `${result.products.filter((product) => Boolean(product.lowest_current_offer)).length} current ${result.products.filter((product) => Boolean(product.lowest_current_offer)).length === 1 ? 'price' : 'prices'} checked · other prices are marked for retailer confirmation` : 'Source links and trade-offs on every card'}</span>
-              </div>
-              <div className="source-explorer__content">
-                <div className="results-controls">
-                  <button type="button" className="select-all-btn" onClick={allSelected ? onClearSelection : onSelectAll}>
-                    {allSelected ? 'Deselect all' : 'Select all'}
-                  </button>
-                  <div className="view-mode-toggle" role="group" aria-label="View layout">
-                    <button type="button" className={viewMode === 'cards' ? 'is-active' : ''} onClick={() => setViewMode('cards')} aria-label="Grid card view" title="Card view"><Icon name="grid" size={16} /></button>
-                    <button type="button" className={viewMode === 'table' ? 'is-active' : ''} onClick={() => setViewMode('table')} aria-label="Detailed comparison table" title="Table view"><Icon name="list" size={16} /></button>
-                  </div>
-                </div>
-                {viewMode === 'cards' ? (
-                  <div className="products-grid">
-                    {result.products.map((product, index) => (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        motionIndex={index}
-                        selected={selectedIds.includes(product.id)}
-                        focused={focusedId === product.id}
-                        onToggle={onToggle}
-                        onFocus={onFocus}
-                        onOpenProduct={onOpenProduct}
-                        onInspect={onInspect}
-                        onSave={onSave}
-                        saved={savedIds.includes(product.id)}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <ResultsTable products={result.products} selectedIds={selectedIds} focusedId={focusedId} onToggle={onToggle} onFocus={onFocus} onOpenProduct={onOpenProduct} onInspect={onInspect} onSave={onSave} savedIds={savedIds} />
-                )}
-              </div>
-            </section>
-          )}
-        </section>
-        <HowArthaWorks />
+        <div className="editorial-hero__curve" aria-hidden="true">
+          <svg viewBox="0 0 1440 64" preserveAspectRatio="none">
+            <path d="M0,0 C420,64 1020,64 1440,0 L1440,64 L0,64 Z" fill="#F4F3EF" />
+          </svg>
+        </div>
       </section>
 
-      <SummaryPanel
-        selectedProducts={selectedProducts}
-        availableOptionCount={result.products.length}
-        intent={result.intent}
-        sourceMode={result.source?.mode}
-        paymentProvider={paymentProvider}
-        voice={voice}
-        isSpeaking={isSpeaking}
-        onSpeak={onSpeak}
-        user={user}
-        isSessionLoading={isSessionLoading}
-        onSavePlan={onSavePlan}
-        isSavingPlan={isSavingPlan}
-        onStartCheckout={onStartCheckout}
-        onRemoveItem={onRemoveSelectedItem}
-        showCheckout={!result.intent?.mission}
-      />
+      {/* Show Theme Showcase right after Hero when idle, or after Results when searching */}
+      {!hasActiveSearchContext ? (
+        <ShoppingThemeShowcase onSelectBrief={onPickPrompt} />
+      ) : null}
+
+      {/* ── Calm, Practical Results & Trust Workspace ── */}
+      <div className="discover-layout">
+        <section className="main-column">
+          <AgentStrip
+            workflow={result.workflow}
+            isSearching={isSearching}
+            searchStage={searchStage}
+            hasResults={result.products.length > 0}
+            resultCount={result.products.length}
+            resultSourceMode={result.source?.mode}
+            resultStatus={result.status}
+            searchError={searchError}
+            onOpenTalk={onOpenTalk}
+          />
+          <LocationContext intent={result.intent} />
+          <ConversationTrail conversation={result.conversation} />
+          <BudgetOpportunity
+            opportunity={result.summary?.opportunity}
+            product={result.products.find((item) => item.id === result.summary?.opportunity?.product_id)}
+            onInspect={onInspect}
+          />
+
+          <section ref={resultsRef} className={`results-section js-reveal${result.search_id ? ' is-visible' : ''}`} aria-labelledby="results-heading">
+            <ClarificationNote key={result.search_id} intent={result.status === 'needs_clarification' ? result.intent : null} isSearching={isSearching} onAnswer={onQuickAnswer} onEdit={() => document.getElementById('shopping-brief')?.focus()} />
+            <div className="results-toolbar">
+              <div className="results-heading">
+                <span className="section-kicker">Calm, evidence-linked results</span>
+                <h2 id="results-heading">{result.products.length ? 'Your mission decision' : result.status === 'needs_clarification' ? 'Complete the brief to search' : zeroResult ? 'No product match yet' : 'Build your live shortlist'}</h2>
+                <BriefSummary intent={result.intent} show={Boolean(query.trim() || result.products.length)} />
+              </div>
+              <div className="results-trust-pills" aria-label="Recommendation state legend">
+                <span className="rec-state-badge rec-state-badge--checked">Evidence checked</span>
+                <span className="rec-state-badge rec-state-badge--verify">Verify first</span>
+                <span className="rec-state-badge rec-state-badge--nofit">No safe fit</span>
+              </div>
+            </div>
+
+            <MissionDecision
+              decision={result.intent?.decision}
+              products={result.products}
+              onInspect={onInspect}
+              onOpenProduct={onOpenProduct}
+              onOpenTalk={onOpenTalk}
+            />
+
+            {priceProduct ? <PriceDesk product={priceProduct} /> : null}
+
+            {!result.products.length ? (
+              result.status === 'needs_clarification' ? (
+                <div className="empty-state results-empty-state">
+                  <span className="empty-state__icon">
+                    <Icon name="search" size={24} />
+                  </span>
+                  <h2>Answer the questions above to start.</h2>
+                  <p>Once the constraints are clear, Artha will search and verify the relevant retailer sources.</p>
+                </div>
+              ) : zeroResult ? (
+                <div className="empty-state results-empty-state">
+                  <span className="empty-state__icon">
+                    <Icon name="search" size={24} />
+                  </span>
+                  <h2>No purchasable product page found.</h2>
+                  <p>Artha excluded articles and category pages. Try a more specific product name, another retailer, or a wider budget and search again.</p>
+                  <button type="button" className="secondary-button" onClick={() => document.getElementById('shopping-brief')?.focus()}>
+                    Edit brief and retry <Icon name="arrow" size={15} />
+                  </button>
+                </div>
+              ) : (
+                <section className="home-bags-showcase" aria-labelledby="home-bags-title">
+                  <div className="home-bags-showcase__header">
+                    <div className="home-bags-showcase__title-wrap">
+                      <span className="section-kicker">
+                        <Icon name="spark" size={13} /> {plans.length ? 'Your saved bags' : 'Starter missions'}
+                      </span>
+                      <h2 id="home-bags-title">{plans.length ? 'Continue a saved bag' : 'Start a shopping mission'}</h2>
+                      <p>
+                        {plans.length
+                          ? 'Your saved items, retailer links, and totals, loaded from your account.'
+                          : 'Choose a brief to start. Artha will find retailer items and check prices when you launch a mission.'}
+                      </p>
+                    </div>
+                    <span className="home-bags-showcase__hint">
+                      {plans.length ? 'View a saved bag or research it again' : 'Choose a brief to run Artha'}
+                    </span>
+                  </div>
+
+                  {plans.length ? (
+                    <div className="bags-tracker__shelf bags-tracker__shelf--grid">
+                      {plans.slice(0, 3).map((plan, index) => {
+                        const bag = planToBag(plan, index);
+                        return (
+                          <BagFolderCard
+                            key={bag.id}
+                            bag={bag}
+                            onInspect={setHomeInspectBag}
+                            onResearch={handleBagResearch}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : isSessionLoading || isPlansLoading ? (
+                    <p className="home-bags-showcase__empty" role="status">Loading your saved bags…</p>
+                  ) : (
+                    <div className="home-bags-showcase__empty">
+                      <p>No saved bags yet. Start with one of these briefs:</p>
+                      <div className="home-bags-showcase__suggestions">
+                        {SUGGESTED_SEARCHES.map((prompt) => (
+                          <button
+                            type="button"
+                            key={prompt}
+                            className="suggestion-chip"
+                            onClick={() => handleBagResearch({ briefQuery: prompt })}
+                          >
+                            <Icon name="spark" size={12} />
+                            <span>{prompt}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )
+            ) : (
+              <section className="source-explorer" aria-label="Retailer product shortlist">
+                <div className="source-explorer__heading">
+                  <div>
+                    <span className="section-kicker">The shortlist</span>
+                    <h3>
+                      {result.source?.mode === 'live'
+                        ? `${result.products.length} retailer ${result.products.length === 1 ? 'page' : 'pages'} found`
+                        : `${result.products.length} sample ${result.products.length === 1 ? 'product' : 'products'}`}
+                    </h3>
+                  </div>
+                  <span>
+                    {result.source?.mode === 'live'
+                      ? `${result.products.filter((product) => Boolean(product.lowest_current_offer)).length} current ${result.products.filter((product) => Boolean(product.lowest_current_offer)).length === 1 ? 'price' : 'prices'} checked · other prices are marked for retailer confirmation`
+                      : 'Source links and trade-offs on every card · Real purchases happen at the retailer'}
+                  </span>
+                </div>
+                <div className="source-explorer__content">
+                  <div className="results-controls">
+                    <button type="button" className="select-all-btn" onClick={allSelected ? onClearSelection : onSelectAll}>
+                      {allSelected ? 'Deselect all' : 'Select all'}
+                    </button>
+                    <div className="view-mode-toggle" role="group" aria-label="View layout">
+                      <button type="button" className={viewMode === 'cards' ? 'is-active' : ''} onClick={() => setViewMode('cards')} aria-label="Grid card view" title="Card view"><Icon name="grid" size={16} /></button>
+                      <button type="button" className={viewMode === 'table' ? 'is-active' : ''} onClick={() => setViewMode('table')} aria-label="Detailed comparison table" title="Table view"><Icon name="list" size={16} /></button>
+                    </div>
+                  </div>
+                  {viewMode === 'cards' ? (
+                    <div className="products-grid">
+                      {result.products.map((product, index) => (
+                        <ProductCard
+                          key={product.id}
+                          product={product}
+                          motionIndex={index}
+                          selected={selectedIds.includes(product.id)}
+                          focused={focusedId === product.id}
+                          onToggle={onToggle}
+                          onFocus={onFocus}
+                          onOpenProduct={onOpenProduct}
+                          onInspect={onInspect}
+                          onSave={onSave}
+                          saved={savedIds.includes(product.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <ResultsTable products={result.products} selectedIds={selectedIds} focusedId={focusedId} onToggle={onToggle} onFocus={onFocus} onOpenProduct={onOpenProduct} onInspect={onInspect} onSave={onSave} savedIds={savedIds} />
+                  )}
+                </div>
+              </section>
+            )}
+          </section>
+        </section>
+
+        <SummaryPanel
+          selectedProducts={selectedProducts}
+          availableOptionCount={result.products.length}
+          intent={result.intent}
+          sourceMode={result.source?.mode}
+          paymentProvider={paymentProvider}
+          voice={voice}
+          isSpeaking={isSpeaking}
+          onSpeak={onSpeak}
+          user={user}
+          isSessionLoading={isSessionLoading}
+          onSavePlan={onSavePlan}
+          isSavingPlan={isSavingPlan}
+          onStartCheckout={onStartCheckout}
+          onRemoveItem={onRemoveSelectedItem}
+          showCheckout={!result.intent?.mission}
+        />
+      </div>
+
+      {/* When an active search is shown, keep Theme Showcase accessible below Results */}
+      {hasActiveSearchContext ? (
+        <ShoppingThemeShowcase onSelectBrief={onPickPrompt} />
+      ) : null}
+
+      {/* ── Three Editorial Story Chapters, How Artha Works, and Oversized Footer ── */}
+      <HowArthaWorks onNavigate={onNavigate} />
 
       {/* Floating mobile action bar */}
       {selectedProducts.length > 0 ? (
@@ -2952,6 +3598,7 @@ export default function App() {
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [talkOpen, setTalkOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [socialTheme, setSocialTheme] = useState(null);
   const [isExtractingTheme, setIsExtractingTheme] = useState(false);
@@ -3712,6 +4359,7 @@ export default function App() {
         plans={plans}
         isPlansLoading={isPlansLoading}
         onAssistantSearchResult={handleAssistantSearchResult}
+        onNavigate={setActiveView}
       />
     ) : activeView === 'taste-graph' ? (
       <TasteGraphView
@@ -3784,8 +4432,26 @@ export default function App() {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <div className="app-shell">
-      <NavRail
+      <div className="app-shell app-shell--editorial">
+      <TopHeader
+        activeView={activeView}
+        onNavigate={setActiveView}
+        onReset={startNewSearch}
+        health={health}
+        planCount={plans.length}
+        savedCount={savedIds.length}
+        user={user}
+        isSessionLoading={isSessionLoading}
+        onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
+        onSignOut={handleSignOut}
+        onOpenTalk={() => setTalkOpen(true)}
+        onOpenTasteGraph={() => setActiveView(activeView === 'taste-graph' ? 'discover' : 'taste-graph')}
+        menuOpen={menuOpen}
+        onToggleMenu={() => setMenuOpen((current) => !current)}
+      />
+      <TearOffMenuPanel
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
         activeView={activeView}
         onNavigate={setActiveView}
         onReset={startNewSearch}
@@ -3793,20 +4459,15 @@ export default function App() {
         planCount={plans.length}
         savedCount={savedIds.length}
         location={location || result?.intent?.location}
+        user={user}
+        isSessionLoading={isSessionLoading}
+        onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
+        onSignOut={handleSignOut}
+        onOpenTalk={() => setTalkOpen(true)}
       />
       <main className="main-content" id="main-content">
-        <TopHeader
-          activeView={activeView}
-          user={user}
-          isSessionLoading={isSessionLoading}
-          onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
-          onSignOut={handleSignOut}
-          onOpenTalk={() => setTalkOpen(true)}
-          onOpenTasteGraph={() => setActiveView(activeView === 'taste-graph' ? 'discover' : 'taste-graph')}
-        />
         {view}
       </main>
-      <MobileNav activeView={activeView} onNavigate={setActiveView} planCount={plans.length} savedCount={savedIds.length} />
       {authOpen ? (
         <AuthSheet
           onClose={() => {
