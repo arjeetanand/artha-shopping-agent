@@ -67,3 +67,4 @@ def append_service_log(
             os.write(descriptor, line)
         finally:
             os.close(descriptor)
+        os.utime(path, (now.timestamp(), now.timestamp()))
