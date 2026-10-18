@@ -399,167 +399,177 @@ export function HomeVoiceAssistant({
   const exampleBrief = "I like my friend Paras’s dressing sense. Find me a relaxed outfit for a Goa weekend.";
   return (
     <section id="home-voice-assistant" className="home-voice-assistant home-voice-assistant--primary" aria-label="Voice Shopping Assistant">
-      <div className="home-voice-header">
-        <div>
-          <div className="eyebrow">Your personal shopping assistant</div>
-          <h1 className="home-voice-title">
-            Tell me the look.<br />
-            <span>I’ll find the pieces.</span>
-          </h1>
-          <p className="home-voice-subtitle">
-            Tell Artha what you love. Mention Paras’s style or share an Instagram post; it checks real retailer options.
-          </p>
-        </div>
-        <div className="home-voice-controls-bar">
-          <span className={`voice-state-pill state-${voiceState}`} data-testid="voice-state-indicator">
-            <span className="voice-state-dot" />
-            {STATE_LABELS[voiceState] || STATE_LABELS.ready}
-          </span>
-          <label className="voice-toggle-label">
-            <input
-              type="checkbox"
-              checked={autoSpeak}
-              onChange={(e) => {
-                setAutoSpeak(e.target.checked);
-                if (!e.target.checked) stopAudio();
-              }}
-            />
-            Speak replies
-          </label>
-          <button type="button" className="ghost-button" onClick={handleResetSession} disabled={voiceState === 'thinking'}>
-            New Conversation
-          </button>
-        </div>
-      </div>
-
-      {/* History & Active Shopping Brief Badges */}
-      <div className="home-voice-context-strip">
-        {historySummary?.usual_top_size && (
-          <span className="context-chip" title="Loaded from your past orders and searches">
-            Saved usual size: <strong>{historySummary.usual_top_size}</strong>
-            {historySummary.conflicting_top_sizes?.length > 0
-              ? ` (past orders also had ${historySummary.conflicting_top_sizes.join(', ')})`
-              : ''}
-          </span>
-        )}
-        {slots.product && (
-          <span className="context-chip active">
-            Item: <strong>{slots.product}</strong>
-          </span>
-        )}
-        {slots.destination && (
-          <span className="context-chip active">
-            Destination: <strong>{slots.destination}</strong>
-          </span>
-        )}
-        {slots.budget_max && (
-          <span className="context-chip active">
-            Budget: <strong>₹{Number(slots.budget_max).toLocaleString('en-IN')}</strong>
-          </span>
-        )}
-        {slots.size && (
-          <span className="context-chip active">
-            Size: <strong>{slots.size}</strong>
-            {slots.size_is_temporary ? ' (this trip only)' : slots.size_confirmed ? ' (confirmed)' : ''}
-          </span>
-        )}
-        {slots.fit && (
-          <span className="context-chip active">
-            Fit: <strong>{slots.fit}</strong>
-          </span>
-        )}
-      </div>
-
-      {/* Microphone + Editable Transcript + Text Fallback */}
-      <div className="home-voice-composer">
-        <div className="mic-button-column">
-          <button
-            type="button"
-            className={`primary-mic-button ${voiceState === 'listening' ? 'recording' : ''}`}
-            onClick={toggleMicrophone}
-            disabled={voiceState === 'thinking' || voiceState === 'speaking'}
-            aria-pressed={voiceState === 'listening' || voiceState === 'transcribing'}
-            data-testid="home-mic-button"
-          >
-            <Icon name={voiceState === 'listening' ? 'waveform' : 'mic'} size={28} />
-            {voiceState === 'listening'
-              ? 'Finish & send'
-              : voiceState === 'transcribing'
-              ? 'Cancel transcription'
-              : voiceState === 'thinking'
-              ? 'Artha is thinking'
-              : voiceState === 'speaking'
-              ? 'Artha is speaking'
-              : 'Start speaking'}
-          </button>
-          <span className="mic-caption">
-            {voiceState === 'listening'
-              ? 'Listening now · tap to finish and send'
-              : voiceState === 'thinking' || voiceState === 'speaking'
-              ? 'Artha will reply here and speak the answer aloud.'
-              : 'Speak naturally. Your message is sent when you finish.'}
-          </span>
-        </div>
-
-        <div className="transcript-editor-column">
-          <details className="voice-text-fallback" open={Boolean(transcript)}>
-            <summary>{transcript ? 'Edit transcript or type a message' : 'Type instead'}</summary>
-            <label htmlFor="editable-voice-transcript" className="sr-only">
-              Editable voice transcript or text message
+      <div className="home-voice-main">
+        <div className="home-voice-header">
+          <div>
+            <div className="eyebrow">Your style, your words</div>
+            <h1 className="home-voice-title">
+              Say what you love.<br />
+              <span>I’ll find your look.</span>
+            </h1>
+            <p className="home-voice-subtitle">
+              Talk about a style you admire, your budget, or where you’re headed. Artha checks real retailer options and keeps the details in view.
+            </p>
+          </div>
+          <div className="home-voice-controls-bar">
+            <span className={`voice-state-pill state-${voiceState}`} data-testid="voice-state-indicator">
+              <span className="voice-state-dot" />
+              {STATE_LABELS[voiceState] || STATE_LABELS.ready}
+            </span>
+            <label className="voice-toggle-label">
+              <input
+                type="checkbox"
+                checked={autoSpeak}
+                onChange={(e) => {
+                  setAutoSpeak(e.target.checked);
+                  if (!e.target.checked) stopAudio();
+                }}
+              />
+              Speak replies
             </label>
-            <textarea
-              id="editable-voice-transcript"
-              data-testid="editable-transcript-input"
-              rows={2}
-              value={transcript}
-              disabled={voiceState === 'thinking' || voiceState === 'speaking'}
-              onChange={(e) => {
-                setTranscript(e.target.value);
-                voiceTranscriptRef.current = e.target.value;
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  submitTurn();
-                }
-              }}
-              placeholder={`Try: "I like my friend Paras's dressing sense"`}
-            />
-            <div className="transcript-actions">
-              <div className="quick-example-chips">
-                <button
-                  type="button"
-                  className="chip-btn"
-                  onClick={() => setTranscript("I'm going to Goa and want to buy a T-shirt.")}
-                >
-                  “I’m going to Goa and want to buy a T-shirt.”
-                </button>
-                <button
-                  type="button"
-                  className="chip-btn"
-                  onClick={() => setTranscript('Around ₹1,500. Yes, use my usual size M.')}
-                >
-                  “Around ₹1,500. Use size M.”
-                </button>
-                <button
-                  type="button"
-                  className="chip-btn"
-                  onClick={() => setTranscript("I liked something in my friend Paras's recent Instagram post.")}
-                >
-                  “Paras’s recent Instagram post”
-                </button>
-              </div>
+            <button type="button" className="ghost-button" onClick={handleResetSession} disabled={voiceState === 'thinking'}>
+              New Conversation
+            </button>
+          </div>
+        </div>
+
+        {/* History & Active Shopping Brief Badges */}
+        <div className="home-voice-context-strip">
+          {historySummary?.usual_top_size && (
+            <span className="context-chip" title="Loaded from your past orders and searches">
+              Saved usual size: <strong>{historySummary.usual_top_size}</strong>
+              {historySummary.conflicting_top_sizes?.length > 0
+                ? ` (past orders also had ${historySummary.conflicting_top_sizes.join(', ')})`
+                : ''}
+            </span>
+          )}
+          {slots.product && (
+            <span className="context-chip active">
+              Item: <strong>{slots.product}</strong>
+            </span>
+          )}
+          {slots.destination && (
+            <span className="context-chip active">
+              Destination: <strong>{slots.destination}</strong>
+            </span>
+          )}
+          {slots.budget_max && (
+            <span className="context-chip active">
+              Budget: <strong>₹{Number(slots.budget_max).toLocaleString('en-IN')}</strong>
+            </span>
+          )}
+          {slots.size && (
+            <span className="context-chip active">
+              Size: <strong>{slots.size}</strong>
+              {slots.size_is_temporary ? ' (this trip only)' : slots.size_confirmed ? ' (confirmed)' : ''}
+            </span>
+          )}
+          {slots.fit && (
+            <span className="context-chip active">
+              Fit: <strong>{slots.fit}</strong>
+            </span>
+          )}
+        </div>
+
+        {/* Microphone + Editable Transcript + Text Fallback */}
+        <div className={`home-voice-composer home-voice-composer--${voiceState}`}>
+          <div className="home-voice-recorder">
+            <div className="mic-button-column">
               <button
                 type="button"
-                className="primary-send-button"
-                data-testid="send-turn-button"
-                disabled={!transcript.trim() || voiceState === 'thinking' || voiceState === 'speaking'}
-                onClick={() => submitTurn()}
+                className={`primary-mic-button ${voiceState === 'listening' ? 'recording' : ''}`}
+                onClick={toggleMicrophone}
+                disabled={voiceState === 'thinking' || voiceState === 'speaking'}
+                aria-pressed={voiceState === 'listening' || voiceState === 'transcribing'}
+                data-testid="home-mic-button"
               >
-                {voiceState === 'thinking' ? 'Processing…' : 'Send'}
+                <Icon name={voiceState === 'listening' ? 'waveform' : 'mic'} size={28} />
+                {voiceState === 'listening'
+                  ? 'Finish & send'
+                  : voiceState === 'transcribing'
+                  ? 'Cancel transcription'
+                  : voiceState === 'thinking'
+                  ? 'Artha is thinking'
+                  : voiceState === 'speaking'
+                  ? 'Artha is speaking'
+                  : 'Start speaking'}
               </button>
             </div>
-          </details>
+            <div className="home-voice-recorder__meta">
+              <span className="home-voice-recorder__eyebrow">A voice note, made into a brief</span>
+              <span className="mic-caption">
+                {voiceState === 'listening'
+                  ? 'Listening now · tap to finish and send'
+                  : voiceState === 'thinking' || voiceState === 'speaking'
+                  ? 'Artha will reply here and speak the answer aloud.'
+                  : 'Tap to speak naturally. Finish when you’re ready and Artha will shape your brief.'}
+              </span>
+              <div className="home-voice-waveform" aria-hidden="true">
+                <span /><span /><span /><span /><span /><span /><span /><span /><span />
+              </div>
+            </div>
+          </div>
+
+          <div className="transcript-editor-column">
+            <details className="voice-text-fallback" open={Boolean(transcript)}>
+              <summary>{transcript ? 'Edit transcript or type a message' : 'Type instead'}</summary>
+              <label htmlFor="editable-voice-transcript" className="sr-only">
+                Editable voice transcript or text message
+              </label>
+              <textarea
+                id="editable-voice-transcript"
+                data-testid="editable-transcript-input"
+                rows={2}
+                value={transcript}
+                disabled={voiceState === 'thinking' || voiceState === 'speaking'}
+                onChange={(e) => {
+                  setTranscript(e.target.value);
+                  voiceTranscriptRef.current = e.target.value;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    submitTurn();
+                  }
+                }}
+                placeholder={`Try: "I like my friend Paras's dressing sense"`}
+              />
+              <div className="transcript-actions">
+                <div className="quick-example-chips">
+                  <button
+                    type="button"
+                    className="chip-btn"
+                    onClick={() => setTranscript("I'm going to Goa and want to buy a T-shirt.")}
+                  >
+                    “I’m going to Goa and want to buy a T-shirt.”
+                  </button>
+                  <button
+                    type="button"
+                    className="chip-btn"
+                    onClick={() => setTranscript('Around ₹1,500. Yes, use my usual size M.')}
+                  >
+                    “Around ₹1,500. Use size M.”
+                  </button>
+                  <button
+                    type="button"
+                    className="chip-btn"
+                    onClick={() => setTranscript("I liked something in my friend Paras's recent Instagram post.")}
+                  >
+                    “Paras’s recent Instagram post”
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="primary-send-button"
+                  data-testid="send-turn-button"
+                  disabled={!transcript.trim() || voiceState === 'thinking' || voiceState === 'speaking'}
+                  onClick={() => submitTurn()}
+                >
+                  {voiceState === 'thinking' ? 'Processing…' : 'Send'}
+                </button>
+              </div>
+            </details>
+          </div>
         </div>
       </div>
 
