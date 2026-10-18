@@ -155,6 +155,8 @@ function viewFromPath(pathname = '/') {
   return ({ '/saved': 'saved', '/plans': 'plans', '/orders': 'orders', '/usage': 'usage', '/taste-graph': 'taste-graph' })[path] || 'discover';
 }
 
+const VIEW_PATHS = { discover: '/', saved: '/saved', plans: '/plans', orders: '/orders', usage: '/usage', 'taste-graph': '/taste-graph' };
+
 function useDialogFocusTrap(open, dialogRef, initialRef, onClose) {
   const previousFocusRef = useRef(null);
 
@@ -987,7 +989,7 @@ function Composer({
                 aria-expanded={Boolean(showVoiceStudio)}
               >
                 <Icon name="mic" size={16} />
-                <span>Voice studio</span>
+                <span>Voice &amp; Instagram</span>
               </button>
             ) : null}
             <ReferenceChip reference={reference} onRemove={onRemoveReference} />
@@ -2601,7 +2603,6 @@ function DiscoverView({
                 <HomeVoiceAssistant
                   user={user}
                   health={health}
-                  location={location}
                   onSearchComplete={onAssistantSearchResult}
                 />
               </div>
@@ -3800,6 +3801,23 @@ export default function App() {
   const [tasteMemories, setTasteMemories] = useState([]);
   const audioRef = useRef(null);
 
+  const navigateToView = useCallback((nextView) => {
+    const path = VIEW_PATHS[nextView] || '/';
+    if (window.location.pathname !== path) window.history.pushState({ view: nextView }, '', path);
+    setActiveView(nextView);
+    setMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveView(viewFromPath(window.location.pathname));
+      setMenuOpen(false);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   useEffect(() => {
     let active = true;
     if (!user?.id) {setTasteMemories([]);return undefined;}
@@ -3936,7 +3954,7 @@ export default function App() {
   );
 
   const startNewSearch = useCallback(() => {
-    setActiveView('discover');
+    navigateToView('discover');
     setQuery('');
     setMission(missionFromIntent({}));
     setPostUrl('');
@@ -3949,7 +3967,7 @@ export default function App() {
     setSearchError('');
     setSelectedIds([]);
     setFocusedId('');
-  }, []);
+  }, [navigateToView]);
 
   const handleAnalyzeUrl = useCallback(
     async (targetUrl) => {
@@ -4281,7 +4299,7 @@ export default function App() {
       clearPendingSearch();
       setAuthAction(null);
       setPostAuthAction(null);
-      setActiveView('plans');
+      navigateToView('plans');
       setToast('Purchase plan saved. Open retailer links when you are ready.');
     } catch (error) {
       setPostAuthAction(null);
@@ -4295,7 +4313,7 @@ export default function App() {
     } finally {
       setIsSavingPlan(false);
     }
-  }, [isSavingPlan, query, result.search_id, selectedProducts, user]);
+  }, [isSavingPlan, navigateToView, query, result.search_id, selectedProducts, user]);
 
   useEffect(() => {
     if (user?.id && postAuthAction === 'save_plan' && selectedProducts.length && !isSavingPlan) {
@@ -4375,14 +4393,14 @@ export default function App() {
       const body = await createOrder(purchasePayload);
       setOrders((current) => [body.order, ...current.filter((order) => order.id !== body.order.id)]);
       setCheckoutOpen(false);
-      setActiveView('orders');
+      navigateToView('orders');
       setToast(`Order ${body.order.id} confirmed in the local tracker.`);
     } catch (error) {
       setToast(error.message || 'The order could not be created.');
     } finally {
       setIsCreatingOrder(false);
     }
-  }, [isCreatingOrder, result.intent, result.search_id, selectedProducts, user]);
+  }, [isCreatingOrder, navigateToView, result.intent, result.search_id, selectedProducts, user]);
 
   const handleCancelOrder = useCallback(async (orderId) => {
     try {
@@ -4474,12 +4492,12 @@ export default function App() {
       setUser(null);
       setPlans([]);
       setOrders([]);
-      setActiveView('discover');
+      navigateToView('discover');
       setToast('Signed out. Your saved local picks remain in this browser.');
     } catch (error) {
       setToast(error.message || 'Could not sign out right now.');
     }
-  }, []);
+  }, [navigateToView]);
 
   const openProduct = useCallback((product) => {
     if (product?.url) window.open(product.url, '_blank', 'noopener,noreferrer');
@@ -4549,15 +4567,15 @@ export default function App() {
         onAnalyzeUrl={() => handleAnalyzeUrl()}
         useProfile={useProfile}
         onToggleProfile={() => setUseProfile((current) => !current)}
-        onOpenTasteGraph={() => setActiveView('taste-graph')}
+        onOpenTasteGraph={() => navigateToView('taste-graph')}
         plans={plans}
         isPlansLoading={isPlansLoading}
         onAssistantSearchResult={handleAssistantSearchResult}
-        onNavigate={setActiveView}
+        onNavigate={navigateToView}
       />
     ) : activeView === 'taste-graph' ? (
       <TasteGraphView
-        onClose={() => setActiveView('discover')}
+        onClose={() => navigateToView('discover')}
         onSignIn={() => startSignIn('/taste-graph')}
         searchId={result.search_id}
         onApplyToSearch={(tastePrefs) => {
@@ -4570,7 +4588,7 @@ export default function App() {
             const pin = addr.pincode || '';
             setQuery(`Look for ${vibe ? `${vibe} ` : ''}clothes${size ? ` in size ${size}` : ''}${city ? ` delivered to ${city}` : ''}${pin ? ` ${pin}` : ''}`);
           }
-          setActiveView('discover');
+          navigateToView('discover');
         }}
       />
     ) : activeView === 'saved' ? (
@@ -4604,7 +4622,7 @@ export default function App() {
         ordersLoading={ordersLoading}
         ordersError={ordersError}
         onRefresh={refreshOrders}
-        onConnectAccounts={() => setActiveView('taste-graph')}
+        onConnectAccounts={() => navigateToView('taste-graph')}
         onDiscover={startNewSearch}
         onCancel={handleCancelOrder}
         onAdvance={handleAdvanceOrder}
@@ -4629,7 +4647,7 @@ export default function App() {
       <div className="app-shell app-shell--editorial">
       <TopHeader
         activeView={activeView}
-        onNavigate={setActiveView}
+        onNavigate={navigateToView}
         onReset={startNewSearch}
         health={health}
         planCount={plans.length}
@@ -4639,7 +4657,7 @@ export default function App() {
         onSignIn={() => startSignIn(activeView === 'plans' ? '/plans' : activeView === 'orders' ? '/orders' : activeView === 'usage' ? '/usage' : '/')}
         onSignOut={handleSignOut}
         onOpenTalk={() => setTalkOpen(true)}
-        onOpenTasteGraph={() => setActiveView(activeView === 'taste-graph' ? 'discover' : 'taste-graph')}
+        onOpenTasteGraph={() => navigateToView(activeView === 'taste-graph' ? 'discover' : 'taste-graph')}
         menuOpen={menuOpen}
         onToggleMenu={() => setMenuOpen((current) => !current)}
       />
@@ -4647,7 +4665,7 @@ export default function App() {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         activeView={activeView}
-        onNavigate={setActiveView}
+        onNavigate={navigateToView}
         onReset={startNewSearch}
         health={health}
         planCount={plans.length}
@@ -4693,7 +4711,7 @@ export default function App() {
         onAsk={handleTalkAsk}
         onOpenOrders={() => {
           setTalkOpen(false);
-          setActiveView('orders');
+          navigateToView('orders');
         }}
         onToast={setToast}
         workflow={result.workflow}

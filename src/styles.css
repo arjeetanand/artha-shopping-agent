@@ -7988,6 +7988,243 @@ html {
   border: 2px solid var(--color-lime);
 }
 
+.home-voice-assistant {
+  display: grid;
+  gap: 18px;
+  padding: clamp(18px, 3vw, 30px);
+  color: var(--ink);
+  background: linear-gradient(145deg, var(--surface) 0%, #f0efe7 100%);
+  font-family: var(--font-body);
+}
+
+.home-voice-header,
+.home-voice-controls-bar,
+.transcript-actions,
+.instagram-panel-header,
+.fallback-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.home-voice-header {
+  align-items: flex-start;
+}
+
+.home-voice-assistant .eyebrow {
+  color: var(--emerald-text);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-voice-title {
+  margin: 7px 0;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(27px, 3vw, 40px);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+}
+
+.home-voice-subtitle {
+  max-width: 700px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.home-voice-controls-bar {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.voice-state-pill,
+.voice-toggle-label,
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-solid);
+  color: var(--ink-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.voice-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #72806f;
+}
+
+.state-listening .voice-state-dot,
+.state-speaking .voice-state-dot { background: var(--color-orange); }
+.state-thinking .voice-state-dot,
+.state-transcribing .voice-state-dot { background: var(--accent-blue); }
+
+.voice-toggle-label { cursor: pointer; }
+.voice-toggle-label input { accent-color: var(--color-forest); }
+.home-voice-controls-bar .ghost-button,
+.instagram-panel-header .ghost-button {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+.home-voice-controls-bar .ghost-button:hover,
+.instagram-panel-header .ghost-button:hover { border-color: var(--color-forest); background: #edf3e6; }
+
+.home-voice-context-strip,
+.attributes-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.home-voice-context-strip .context-chip.active { border-color: rgba(3, 65, 2, 0.28); background: #edf3e6; }
+
+.home-voice-thread {
+  display: grid;
+  gap: 10px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  overscroll-behavior: contain;
+}
+
+.voice-turn-bubble {
+  max-width: min(86%, 680px);
+  padding: 10px 13px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 13px 13px 13px 4px;
+  background: var(--surface-solid);
+}
+
+.voice-turn-bubble.user-turn {
+  justify-self: end;
+  border-color: rgba(3, 65, 2, 0.12);
+  border-radius: 13px 13px 4px 13px;
+  background: #edf3e6;
+}
+
+.turn-role-label { margin-bottom: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.turn-text { color: var(--ink-secondary); font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+
+.home-voice-composer {
+  display: grid;
+  grid-template-columns: minmax(145px, 0.28fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.mic-button-column,
+.transcript-editor-column { display: grid; align-content: start; gap: 8px; }
+.primary-mic-button,
+.primary-send-button,
+.upload-screenshot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 15px;
+  border: 1px solid var(--color-forest);
+  border-radius: 9px;
+  background: var(--color-forest);
+  color: white;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary-mic-button.recording { border-color: var(--color-orange); background: var(--color-orange); }
+.mic-caption { color: var(--muted); font-size: 10px; line-height: 1.4; }
+
+.transcript-editor-column textarea,
+.instagram-confirm-bar input,
+.fallback-inputs-row input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.transcript-editor-column textarea { resize: vertical; }
+.transcript-editor-column textarea:focus-visible,
+.instagram-confirm-bar input:focus-visible,
+.fallback-inputs-row input:focus-visible { outline: 3px solid rgba(3, 65, 2, 0.22); outline-offset: 1px; }
+.transcript-actions { align-items: flex-start; }
+.quick-example-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick-example-chips .chip-btn { min-height: 32px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--ink-secondary); font-size: 10px; cursor: pointer; }
+.quick-example-chips .chip-btn:hover { border-color: var(--color-forest); }
+
+.voice-warning-banner,
+.instagram-reference-panel,
+.analyzed-attributes-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-solid);
+}
+
+.voice-warning-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-color: rgba(180, 35, 24, 0.25); color: var(--danger); font-size: 12px; }
+.instagram-reference-panel { display: grid; gap: 13px; }
+.instagram-panel-header h3 { margin: 4px 0 0; font-size: 16px; line-height: 1.25; }
+.instagram-posts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 175px), 1fr)); gap: 10px; }
+.instagram-post-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: white; cursor: pointer; }
+.instagram-post-card.selected { border: 2px solid var(--color-forest); box-shadow: 0 0 0 3px rgba(182, 254, 0, 0.36); }
+.instagram-post-select { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.instagram-post-select:focus-visible { position: relative; z-index: 1; outline: 3px solid var(--accent-blue); outline-offset: -3px; }
+.instagram-post-image-wrap { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--surface-subtle); }
+.instagram-post-image-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.instagram-post-badge { position: absolute; top: 8px; left: 8px; padding: 4px 7px; border-radius: 999px; background: var(--color-forest); color: white; font-size: 10px; }
+.instagram-no-screenshot { display: grid; height: 100%; place-items: center; padding: 12px; color: var(--muted); font-size: 11px; text-align: center; }
+.instagram-post-meta { padding: 10px; }
+.instagram-post-caption { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; color: var(--ink-secondary); font-size: 11px; line-height: 1.45; }
+.instagram-post-links { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 0 10px 10px; color: var(--muted); font-size: 10px; }
+.instagram-post-links a { color: var(--accent-blue); font-weight: 700; }
+.instagram-confirm-bar { display: flex; gap: 8px; }
+.instagram-confirm-bar input { flex: 1; }
+.fallback-help-text { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.fallback-inputs-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.fallback-inputs-row input { font-size: 11px; }
+.upload-screenshot-btn { min-height: 38px; border-color: var(--line-strong); background: white; color: var(--ink); cursor: pointer; }
+.fallback-actions-row { justify-content: flex-start; flex-wrap: wrap; }
+.capture-time { color: var(--muted); }
+
+@media (max-width: 720px) {
+  .home-voice-header,
+  .instagram-panel-header { flex-direction: column; align-items: stretch; }
+  .home-voice-controls-bar { justify-content: flex-start; }
+  .home-voice-composer { grid-template-columns: 1fr; }
+  .transcript-actions,
+  .instagram-confirm-bar { flex-direction: column; }
+  .quick-example-chips { display: grid; grid-template-columns: 1fr; }
+  .fallback-inputs-row { grid-template-columns: 1fr; }
+  .primary-send-button { width: 100%; }
+}
+
 /* ── Dimensional Hero Shopping Collage (Folder + Polaroid + Cutout + Price Tag + Multi-Plane Parallax) ── */
 .hero-parallax-container {
   position: relative;
