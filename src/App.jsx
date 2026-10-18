@@ -492,7 +492,7 @@ function TopHeader({
         </span>
       </div>
 
-      {/* Hanging Tear-Off Paper-Tab Menu Control & Desktop Quick Nav */}
+      {/* Hanging Tear-Off Paper-Tab Menu Control - Centered & Focused */}
       <div className="top-header__center">
         <button
           type="button"
@@ -512,30 +512,18 @@ function TopHeader({
           ) : null}
           <Icon name={menuOpen ? 'close' : 'chevron'} size={14} className="hanging-menu-tab__icon" />
         </button>
-
-        <nav className="top-header__nav-pills" aria-label="Sections">
-          {[
-            { id: 'discover', label: 'Discover' },
-            { id: 'taste-graph', label: 'Taste OS' },
-            { id: 'saved', label: 'Saved', count: savedCount },
-            { id: 'plans', label: 'Plans', count: planCount },
-            { id: 'orders', label: 'Orders' },
-            { id: 'usage', label: 'Usage' },
-          ].map((tab) => (
-            <button
-              type="button"
-              key={tab.id}
-              className={`top-header__nav-pill ${activeView === tab.id ? 'is-active' : ''}`}
-              onClick={() => onNavigate(tab.id)}
-            >
-              <span>{tab.label}</span>
-              {tab.count > 0 ? <span className="top-header__nav-pill-badge">{tab.count}</span> : null}
-            </button>
-          ))}
-        </nav>
       </div>
 
       <div className="top-header__actions">
+        <button
+          type="button"
+          className={`talk-button taste-pill-button ${activeView === 'taste-graph' ? 'is-active' : ''}`}
+          onClick={onOpenTasteGraph}
+          aria-label="Open Shopping OS Taste & Context Graph"
+        >
+          <Icon name="network" size={16} />
+          <span>Taste OS</span>
+        </button>
         <button type="button" className="talk-button" onClick={onOpenTalk} aria-label="Talk to Artha">
           <Icon name="waveform" size={16} />
           <span>Talk to Artha</span>
@@ -828,6 +816,8 @@ function Composer({
   const canSearch = Boolean(query.trim() || postUrl.trim() || reference?.dataUrl || socialTheme);
   const setMissionField = (field, value) => onMissionChange({ ...mission, [field]: value });
   const status = searchStatusInfo(health);
+  const hasConstraints = Boolean(mission.budget || mission.pincode || mission.occasion || mission.arrive_by_date);
+  const [showConstraints, setShowConstraints] = useState(hasConstraints);
 
   const handlePromptClick = (prompt) => {
     if (prompt === 'Find something like this photo' && !reference?.dataUrl) {
@@ -849,20 +839,17 @@ function Composer({
       <form className="composer composer--research-sheet" onSubmit={onSearch}>
         <div className="composer__sheet-header">
           <div className="composer__sheet-id">
-            <span className="composer__sheet-stamp">BRIEF SHEET // 01</span>
-            <span className="composer__sheet-note">Research happens here · Real purchases happen at the retailer</span>
+            <span className="composer__sheet-stamp">RESEARCH BRIEF // 01</span>
+            <span className="composer__sheet-note">Evidence-checked shortlist · Real checkout at retailer</span>
           </div>
           <div className={`composer__service-badge composer__service-badge--${status.tone}`} aria-label="Search mode">
             <span className={`search-mode-dot search-mode-dot--${status.tone}`} />
-            <span>{status.detail}</span>
+            <span>{status.shortLabel}</span>
           </div>
         </div>
 
         <label className="composer__textarea-label" htmlFor="shopping-brief">
           <span className="sr-only">{hasResults ? 'Follow-up preference' : 'Shopping brief'}</span>
-          <span className="composer__prompt-kicker" aria-hidden="true">
-            {hasResults ? 'FOLLOW-UP BRIEF' : 'WHAT DO YOU NEED TO FIND?'}
-          </span>
         </label>
         <textarea
           id="shopping-brief"
@@ -876,44 +863,68 @@ function Composer({
           rows={2}
         />
 
-        <fieldset className="mission-brief">
-          <legend>{hasResults ? 'Adjust your mission, then refine' : 'Mission constraints (optional)'}</legend>
-          <label>
-            <span>Budget</span>
-            <input
-              value={mission.budget}
-              onChange={(event) => setMissionField('budget', event.target.value)}
-              maxLength={40}
-              placeholder="₹2,500 or 2.5k"
-            />
-          </label>
-          <label>
-            <span>Pincode / City</span>
-            <input
-              value={mission.pincode}
-              onChange={(event) => setMissionField('pincode', event.target.value.replace(/\D/g, '').slice(0, 6))}
-              inputMode="numeric"
-              placeholder="560001"
-            />
-          </label>
-          <label>
-            <span>Occasion</span>
-            <input
-              value={mission.occasion}
-              onChange={(event) => setMissionField('occasion', event.target.value)}
-              placeholder="Everyday, work, trip…"
-            />
-          </label>
-          <label>
-            <span>Arrive by</span>
-            <input
-              value={mission.arrive_by_date}
-              onChange={(event) => setMissionField('arrive_by_date', event.target.value)}
-              type="date"
-              min={new Date().toISOString().slice(0, 10)}
-            />
-          </label>
-        </fieldset>
+        {showConstraints || hasConstraints ? (
+          <fieldset className="mission-brief">
+            <legend>
+              <span>{hasResults ? 'Adjust mission constraints' : 'Mission constraints (optional)'}</span>
+              {!hasConstraints && (
+                <button
+                  type="button"
+                  className="mission-brief__close-btn"
+                  onClick={() => setShowConstraints(false)}
+                >
+                  Hide
+                </button>
+              )}
+            </legend>
+            <label>
+              <span>Budget</span>
+              <input
+                value={mission.budget}
+                onChange={(event) => setMissionField('budget', event.target.value)}
+                maxLength={40}
+                placeholder="₹2,500 or 2.5k"
+              />
+            </label>
+            <label>
+              <span>Pincode / City</span>
+              <input
+                value={mission.pincode}
+                onChange={(event) => setMissionField('pincode', event.target.value.replace(/\D/g, '').slice(0, 6))}
+                inputMode="numeric"
+                placeholder="560001"
+              />
+            </label>
+            <label>
+              <span>Occasion</span>
+              <input
+                value={mission.occasion}
+                onChange={(event) => setMissionField('occasion', event.target.value)}
+                placeholder="Everyday, work, trip…"
+              />
+            </label>
+            <label>
+              <span>Arrive by</span>
+              <input
+                value={mission.arrive_by_date}
+                onChange={(event) => setMissionField('arrive_by_date', event.target.value)}
+                type="date"
+                min={new Date().toISOString().slice(0, 10)}
+              />
+            </label>
+          </fieldset>
+        ) : (
+          <div className="composer__constraints-toggle-row">
+            <button
+              type="button"
+              className="composer__constraints-toggle"
+              onClick={() => setShowConstraints(true)}
+            >
+              <Icon name="sliders" size={13} />
+              <span>+ Add budget or delivery filters</span>
+            </button>
+          </div>
+        )}
 
         <div className="composer__footer">
           <div className="composer__inputs" role="group" aria-label="Brief attachments and voice tools">
@@ -1297,6 +1308,9 @@ function HeroVisual() {
   const [coords, setCoords] = useState({ x: 0, y: 0 });
   const [scrollY, setScrollY] = useState(0);
   const containerRef = useRef(null);
+  const targetRef = useRef({ x: 0, y: 0 });
+  const currentRef = useRef({ x: 0, y: 0 });
+  const rafRef = useRef(null);
 
   useEffect(() => {
     const onScroll = () => {
@@ -1306,6 +1320,32 @@ function HeroVisual() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // MotionSites-inspired 60fps damped spring lerp animation loop
+  useEffect(() => {
+    let running = true;
+    const lerp = (start, end, factor) => start + (end - start) * factor;
+
+    const animate = () => {
+      if (!running) return;
+      const target = targetRef.current;
+      const current = currentRef.current;
+      current.x = lerp(current.x, target.x, 0.08);
+      current.y = lerp(current.y, target.y, 0.08);
+
+      if (Math.abs(target.x - current.x) > 0.0004 || Math.abs(target.y - current.y) > 0.0004) {
+        setCoords({ x: current.x, y: current.y });
+      }
+
+      rafRef.current = requestAnimationFrame(animate);
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => {
+      running = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
   const handlePointerMove = (e) => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const el = containerRef.current;
@@ -1313,11 +1353,11 @@ function HeroVisual() {
     const rect = el.getBoundingClientRect();
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1; // -1 to 1
     const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1; // -1 to 1
-    setCoords({ x: Math.max(-1, Math.min(1, nx)), y: Math.max(-1, Math.min(1, ny)) });
+    targetRef.current = { x: Math.max(-1, Math.min(1, nx)), y: Math.max(-1, Math.min(1, ny)) };
   };
 
   const handlePointerLeave = () => {
-    setCoords({ x: 0, y: 0 });
+    targetRef.current = { x: 0, y: 0 };
   };
 
   const isReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1332,13 +1372,22 @@ function HeroVisual() {
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
     >
+      {/* MotionSites-style Ambient Glowing Light Sphere */}
+      <div
+        className="hero-collage__ambient-glow"
+        aria-hidden="true"
+        style={{
+          transform: `translate3d(${mx * 45}px, ${my * 35}px, -40px)`,
+        }}
+      />
+
       <div className="hero-collage" aria-label="Artha shopping research moodboard collage">
-        {/* Layer 0: Rotating Starburst Stamp */}
+        {/* Layer 0: Rotating Starburst Seal */}
         <div
           className="hero-collage__rotating-stamp"
           aria-hidden="true"
           style={{
-            transform: `translate3d(${mx * 36}px, ${my * -24 + scrollOffset * 0.4}px, 90px) rotate(${mx * 30}deg)`,
+            transform: `translate3d(${mx * 30}px, ${my * -20 + scrollOffset * 0.4}px, 85px) rotate(${mx * 25}deg)`,
           }}
         >
           <svg className="hero-collage__rotating-stamp-svg" viewBox="0 0 100 100">
@@ -1357,12 +1406,12 @@ function HeroVisual() {
           </svg>
         </div>
 
-        {/* Layer 0.5: Pinned Research Handwritten Note */}
+        {/* Layer 0.5: Pinned Research Note */}
         <div
           className="hero-collage__pinned-note"
           aria-hidden="true"
           style={{
-            transform: `translate3d(${mx * -28}px, ${my * 26 + scrollOffset * 0.6}px, 50px) rotate(${-3 + my * 8}deg)`,
+            transform: `translate3d(${mx * -26}px, ${my * 24 + scrollOffset * 0.6}px, 50px) rotate(${-3 + my * 7}deg)`,
           }}
         >
           <span className="hero-collage__washi-tape" />
@@ -1371,11 +1420,11 @@ function HeroVisual() {
           </span>
         </div>
 
-        {/* Layer 1: Tactile Manila Paper Folder */}
+        {/* Layer 1: Tactile Manila Paper Folder Base */}
         <div
           className="hero-collage__folder"
           style={{
-            transform: `perspective(1000px) rotateX(${my * -7}deg) rotateY(${mx * 9}deg) translate3d(${mx * 12}px, ${my * 10 + scrollOffset * 0.3}px, 0px)`,
+            transform: `perspective(1200px) rotateX(${my * -8}deg) rotateY(${mx * 10}deg) translate3d(${mx * 12}px, ${my * 10 + scrollOffset * 0.3}px, 0px)`,
           }}
         >
           <div className="hero-collage__folder-tab">
@@ -1400,11 +1449,11 @@ function HeroVisual() {
           </div>
         </div>
 
-        {/* Layer 2: Pinned Reference Photograph */}
+        {/* Layer 2: Pinned Inspiration Polaroid */}
         <div
           className="hero-collage__polaroid"
           style={{
-            transform: `translate3d(${mx * -22}px, ${my * -18 + scrollOffset * 0.75}px, 36px) rotate(${-4 + mx * 6}deg)`,
+            transform: `translate3d(${mx * -20}px, ${my * -16 + scrollOffset * 0.75}px, 35px) rotate(${-3 + mx * 5}deg)`,
           }}
         >
           <span className="hero-collage__tape" aria-hidden="true" />
@@ -1433,7 +1482,7 @@ function HeroVisual() {
         <div
           className="hero-collage__cutout"
           style={{
-            transform: `translate3d(${mx * 30}px, ${my * 26 + scrollOffset * 1.15}px, 75px) scale(1.03)`,
+            transform: `translate3d(${mx * 28}px, ${my * 24 + scrollOffset * 1.15}px, 70px) scale(1.025)`,
           }}
         >
           <div className="hero-collage__cutout-card">
@@ -1456,7 +1505,7 @@ function HeroVisual() {
             className="hero-collage__cutout-shadow"
             aria-hidden="true"
             style={{
-              transform: `translate3d(${mx * -12}px, ${my * -8}px, -15px)`,
+              transform: `translate3d(${mx * -14}px, ${my * -10}px, -15px)`,
             }}
           />
         </div>
@@ -1466,7 +1515,7 @@ function HeroVisual() {
           className="hero-collage__price-label"
           aria-label="Sample checked price label 2,390 rupees"
           style={{
-            transform: `translate3d(${mx * -16}px, ${my * 20 + scrollOffset * 1.4}px, 105px) rotate(${6 + mx * 18}deg)`,
+            transform: `translate3d(${mx * -14}px, ${my * 18 + scrollOffset * 1.35}px, 95px) rotate(${5 + mx * 14}deg)`,
           }}
         >
           <span className="hero-collage__price-hole" aria-hidden="true" />

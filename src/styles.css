@@ -7766,6 +7766,34 @@ html {
   box-shadow: 0 0 0 3px rgba(46, 62, 172, 0.18) !important;
 }
 
+.composer__constraints-toggle-row {
+  display: flex !important;
+  align-items: center !important;
+  margin: 8px 0 2px !important;
+}
+
+.composer__constraints-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 14px !important;
+  border-radius: 999px !important;
+  background: rgba(3, 65, 2, 0.06) !important;
+  border: 1px dashed rgba(3, 65, 2, 0.28) !important;
+  color: var(--color-forest) !important;
+  font-family: var(--font-body) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 140ms ease !important;
+}
+
+.composer__constraints-toggle:hover {
+  background: var(--color-lime) !important;
+  border-color: var(--color-forest) !important;
+  border-style: solid !important;
+}
+
 .composer--research-sheet .mission-brief {
   margin: 8px 0 0 !important;
   padding: 8px 10px !important;
@@ -7778,12 +7806,32 @@ html {
 }
 
 .composer--research-sheet .mission-brief legend {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
   font-size: 11px !important;
   font-weight: 800 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.06em !important;
   color: var(--ink-secondary) !important;
   padding: 0 4px !important;
+}
+
+.mission-brief__close-btn {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  background: rgba(3, 65, 2, 0.1) !important;
+  color: var(--color-forest) !important;
+  border: none !important;
+  cursor: pointer !important;
+  transition: background-color 140ms ease !important;
+}
+
+.mission-brief__close-btn:hover {
+  background: var(--color-lime) !important;
 }
 
 .composer--research-sheet .mission-brief label {
@@ -7949,6 +7997,21 @@ html {
   margin: 0 auto;
   perspective: 1200px;
   transform-style: preserve-3d;
+}
+
+/* MotionSites-style Ambient Glow Sphere */
+.hero-collage__ambient-glow {
+  position: absolute;
+  top: 15%;
+  left: 15%;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(182, 254, 0, 0.28) 0%, rgba(80, 203, 255, 0.18) 45%, transparent 70%);
+  filter: blur(48px);
+  pointer-events: none;
+  z-index: 0;
+  transition: transform 180ms ease-out;
 }
 
 .hero-collage {
