@@ -12,17 +12,16 @@ import { createSpeechRecognition } from '../lib/speechRecognition.js';
 
 const STATE_LABELS = {
   ready: 'Ready for voice or text',
-  listening: 'Listening locally (16kHz PCM)…',
-  transcribing: 'Transcribing locally via Whisper…',
-  thinking: 'Thinking locally…',
-  speaking: 'Speaking locally…',
+  listening: 'Listening…',
+  transcribing: 'Transcribing…',
+  thinking: 'Working on it…',
+  speaking: 'Speaking…',
 };
 
 export function HomeVoiceAssistant({
   user,
   health,
   onSearchComplete,
-  location,
 }) {
   const firstName = (user?.name || 'Arjeet').trim().split(/\s+/)[0] || 'Arjeet';
   const [sessionId, setSessionId] = useState('');
@@ -33,11 +32,9 @@ export function HomeVoiceAssistant({
     },
   ]);
   const [sessionState, setSessionState] = useState({
-    stage: 'greeting',
-    slots: {},
-    history_summary: null,
+    history: {},
     instagram_posts: [],
-    confirmed_reference: null,
+    selected_reference: null,
   });
   const [voiceState, setVoiceState] = useState('ready'); // ready | listening | transcribing | thinking | speaking
   const [transcript, setTranscript] = useState('');
@@ -72,28 +69,58 @@ export function HomeVoiceAssistant({
     }
     stopAudio();
     setVoiceState('speaking');
+    let browserAttempted = false;
+    const speakInBrowser = () => {
+      if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
+        throw new Error('Voice playback is unavailable in this browser. The reply is still shown in the chat.');
+      }
+      return new Promise((resolve, reject) => {
+        const utterance = new window.SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-IN';
+        utterance.onend = resolve;
+        utterance.onerror = () => reject(new Error('Browser speech could not play. The reply is still shown in the chat.'));
+        window.speechSynthesis.speak(utterance);
+      });
+    };
     try {
       const response = await speakText(text);
       if (response.provider === 'server' && response.blob) {
         const url = URL.createObjectURL(response.blob);
         const audio = new Audio(url);
         audioRef.current = audio;
-        await new Promise((resolve) => {
-          audio.onended = () => {
+        await new Promise((resolve, reject) => {
+          const cleanup = () => {
             URL.revokeObjectURL(url);
             if (audioRef.current === audio) audioRef.current = null;
+          };
+          audio.onended = () => {
+            cleanup();
             resolve();
           };
           audio.onerror = () => {
-            URL.revokeObjectURL(url);
-            if (audioRef.current === audio) audioRef.current = null;
-            resolve();
+            cleanup();
+            reject(new Error('Server voice could not play.'));
           };
-          audio.play().catch(() => resolve());
+          audio.play().catch((error) => {
+            cleanup();
+            reject(error);
+          });
         });
+      } else {
+        browserAttempted = true;
+        await speakInBrowser();
       }
     } catch (error) {
-      setVoiceNotice(error.message || 'Local speech synthesis could not play audio.');
+      if (!browserAttempted) {
+        try {
+          browserAttempted = true;
+          await speakInBrowser();
+          return;
+        } catch {
+          // The visible transcript remains available when speech is unavailable.
+        }
+      }
+      setVoiceNotice(error.message || 'Voice playback could not start. The reply is still shown in the chat.');
     } finally {
       setVoiceState('ready');
     }
@@ -104,14 +131,15 @@ export function HomeVoiceAssistant({
     getAssistantSession()
       .then((data) => {
         if (!active || !data) return;
-        setSessionId(data.session_id || '');
+        setSessionId(data.session_id || data.id || '');
         if (Array.isArray(data.messages) && data.messages.length > 0) {
           setMessages(data.messages);
         }
         if (data.state) {
-          setSessionState(data.state);
+          setSessionState({ ...data.state, history: data.history || {} });
           const firstPost = data.state.instagram_posts?.[0];
           if (firstPost?.id) setSelectedRefId(firstPost.id);
+          if (data.state.awaiting_instagram_handle) setShowUploadFallback(true);
         }
       })
       .catch(() => {});
@@ -125,7 +153,7 @@ export function HomeVoiceAssistant({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [messages.length, sessionState.stage]);
+  }, [messages.length, sessionState.awaiting_instagram_handle, sessionState.awaiting_post_confirmation]);
 
   const handleResetSession = async () => {
     stopAudio();
@@ -133,13 +161,14 @@ export function HomeVoiceAssistant({
     setTranscript('');
     setSelectedRefId('');
     setClothingNote('');
+    setShowUploadFallback(false);
     try {
       const data = await getAssistantSession({ reset: true });
-      setSessionId(data.session_id || '');
+      setSessionId(data.session_id || data.id || '');
       setMessages(data.messages || [{ role: 'assistant', text: `What are you looking for today, ${firstName}?` }]);
-      setSessionState(data.state || {});
-      if (autoSpeak && data.assistant_message) {
-        await speakAssistantReply(data.assistant_message);
+      setSessionState({ ...(data.state || {}), history: data.history || {} });
+      if (autoSpeak && data.greeting) {
+        await speakAssistantReply(data.greeting);
       }
     } catch (error) {
       setVoiceNotice(error.message || 'Could not start a new session.');
@@ -206,21 +235,21 @@ export function HomeVoiceAssistant({
       const response = await sendAssistantTurn({
         session_id: sessionId,
         message: textToSend,
-        search_overrides: location ? { location } : undefined,
       });
       setSessionId(response.session_id || sessionId);
       if (Array.isArray(response.messages)) {
         setMessages(response.messages);
       }
       if (response.state) {
-        setSessionState(response.state);
+        setSessionState({ ...response.state, history: response.history || sessionState.history || {} });
         const posts = response.state.instagram_posts || [];
-        if (posts.length > 0 && !selectedRefId) {
+        if (posts.length > 0 && !posts.some((post) => post.id === selectedRefId)) {
           setSelectedRefId(posts[0].id);
         }
+        if (posts.length > 0) setShowUploadFallback(false);
         if (
-          response.state.stage === 'awaiting_instagram_handle' ||
-          response.state.instagram_resolution?.needs_fallback
+          response.state.awaiting_instagram_handle ||
+          ['requires_login', 'private_account', 'capture_failed', 'needs_handle'].includes(response.instagram_resolution?.status)
         ) {
           setShowUploadFallback(true);
         }
@@ -228,8 +257,8 @@ export function HomeVoiceAssistant({
       if (response.search_result && typeof onSearchComplete === 'function') {
         onSearchComplete(response.search_result);
       }
-      if (response.assistant_message) {
-        await speakAssistantReply(response.assistant_message);
+      if (response.reply || response.assistant_message) {
+        await speakAssistantReply(response.reply || response.assistant_message);
       } else {
         setVoiceState('ready');
       }
@@ -249,16 +278,15 @@ export function HomeVoiceAssistant({
       const response = await confirmInstagramReference({
         session_id: sessionId,
         reference_id: targetId,
-        clothing_note: clothingNote,
-        search_overrides: location ? { location } : undefined,
+        item_hint: clothingNote || sessionState.product || 'T-shirt',
       });
       if (Array.isArray(response.messages)) setMessages(response.messages);
-      if (response.state) setSessionState(response.state);
+      if (response.state) setSessionState({ ...response.state, history: response.history || sessionState.history || {} });
       if (response.search_result && typeof onSearchComplete === 'function') {
         onSearchComplete(response.search_result);
       }
-      if (response.assistant_message) {
-        await speakAssistantReply(response.assistant_message);
+      if (response.reply || response.assistant_message) {
+        await speakAssistantReply(response.reply || response.assistant_message);
       } else {
         setVoiceState('ready');
       }
@@ -281,14 +309,17 @@ export function HomeVoiceAssistant({
       });
       const res = await uploadInstagramReference({
         session_id: sessionId,
-        image_data: dataUrl,
-        post_url: fallbackPostUrl,
+        image_base64: dataUrl,
+        mime_type: file.type,
+        source_url: fallbackPostUrl,
         caption: fallbackCaption || clothingNote,
         handle: fallbackHandle,
+        friend_name: sessionState.friend_name || 'Paras',
       });
       if (res.session) {
         setMessages(res.session.messages || messages);
-        setSessionState(res.session.state || sessionState);
+        setSessionState({ ...(res.session.state || sessionState), history: sessionState.history || {} });
+        setShowUploadFallback(false);
       }
       if (res.reference?.id) {
         setSelectedRefId(res.reference.id);
@@ -299,44 +330,40 @@ export function HomeVoiceAssistant({
   };
 
   const handleSaveFallbackLink = async () => {
-    if (!fallbackPostUrl.trim() && !fallbackCaption.trim()) return;
-    setVoiceNotice('');
-    try {
-      const res = await uploadInstagramReference({
-        session_id: sessionId,
-        post_url: fallbackPostUrl.trim(),
-        caption: fallbackCaption.trim() || clothingNote.trim(),
-        handle: fallbackHandle.trim(),
-      });
-      if (res.session) {
-        setMessages(res.session.messages || messages);
-        setSessionState(res.session.state || sessionState);
-      }
-      if (res.reference?.id) {
-        setSelectedRefId(res.reference.id);
-      }
-    } catch (error) {
-      setVoiceNotice(error.message || 'Failed to save pasted Instagram post reference.');
+    const reference = fallbackPostUrl.trim() || (fallbackHandle.trim() ? `Instagram @${fallbackHandle.trim().replace(/^@/, '')}` : '');
+    if (!reference) {
+      setVoiceNotice('Paste an Instagram post or profile link, enter a handle, or upload a screenshot to use this reference.');
+      return;
     }
+    const details = fallbackCaption.trim() || clothingNote.trim();
+    await submitTurn(`${reference}${details ? ` — ${details}` : ''}`);
   };
 
-  const slots = sessionState?.slots || {};
-  const historySummary = sessionState?.history_summary || {};
+  const slots = {
+    product: sessionState.product,
+    destination: sessionState.destination,
+    budget_max: sessionState.budget,
+    size: sessionState.size,
+    size_is_temporary: sessionState.preference_scope?.size === 'temporary_current_purchase',
+    size_confirmed: sessionState.size_confirmed,
+    fit: sessionState.fit,
+  };
+  const historySummary = {
+    usual_top_size: sessionState.history?.usual_sizes?.top,
+    conflicting_top_sizes: sessionState.history?.conflicts?.top_size?.conflicting_values || [],
+  };
   const instagramPosts = sessionState?.instagram_posts || [];
-  const confirmedRef = sessionState?.confirmed_reference || null;
-  const sttProvider = health?.voice?.stt_provider || 'whisper_local';
-  const ttsProvider = health?.voice?.tts_provider || 'kokoro_local';
-
+  const confirmedRef = sessionState?.selected_reference || null;
   return (
-    <section className="home-voice-assistant" aria-label="Local Voice Shopping Assistant">
+    <section className="home-voice-assistant" aria-label="Voice Shopping Assistant">
       <div className="home-voice-header">
         <div>
-          <div className="eyebrow">Local Voice Shopping Assistant · 100% On-Device Speech & LLM</div>
+          <div className="eyebrow">Voice Shopping · Instagram Style Match</div>
           <h1 className="home-voice-title">
             What are you looking for today, {firstName}?
           </h1>
           <p className="home-voice-subtitle">
-            Speak naturally or edit your transcript below. Voice recognition ({sttProvider}), speech synthesis ({ttsProvider}), and conversation run locally on your Mac without paid API keys.
+            Tell Artha what you want, or ask it to match an accessible Instagram post from Paras. If Instagram blocks access, paste the post link or upload a screenshot. Voice uses your existing setup with browser playback fallback; this flow adds no paid service.
           </p>
         </div>
         <div className="home-voice-controls-bar">
@@ -453,7 +480,7 @@ export function HomeVoiceAssistant({
                 submitTurn();
               }
             }}
-            placeholder={`Speak with the mic or type here — e.g. "I'm going to Goa and want to buy a T-shirt"`}
+            placeholder={`Try: "I like my friend Paras's dressing sense"`}
           />
           <div className="transcript-actions">
             <div className="quick-example-chips">
@@ -502,8 +529,8 @@ export function HomeVoiceAssistant({
       )}
 
       {/* Instagram Reference Section: Ambiguity / Handle / Upload Fallback / Captured Screenshots */}
-      {(sessionState.stage === 'awaiting_instagram_handle' ||
-        sessionState.stage === 'awaiting_instagram_post_selection' ||
+      {(sessionState.awaiting_instagram_handle ||
+        sessionState.awaiting_post_confirmation ||
         instagramPosts.length > 0 ||
         confirmedRef ||
         showUploadFallback) && (
@@ -536,39 +563,45 @@ export function HomeVoiceAssistant({
                   <div
                     key={post.id || index}
                     className={`instagram-post-card ${isSelected ? 'selected' : ''}`}
-                    onClick={() => setSelectedRefId(post.id)}
-                    data-testid={`instagram-post-card-${index}`}
                   >
-                    <div className="instagram-post-image-wrap">
-                      {post.screenshot_url ? (
-                        <img
-                          src={post.screenshot_url}
-                          alt={post.caption || `Instagram post ${index + 1}`}
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="instagram-no-screenshot">
-                          No screenshot file captured (metadata/caption fallback)
+                    <button
+                      type="button"
+                      className="instagram-post-select"
+                      onClick={() => setSelectedRefId(post.id)}
+                      aria-pressed={isSelected}
+                      data-testid={`instagram-post-card-${index}`}
+                    >
+                      <div className="instagram-post-image-wrap">
+                        {post.screenshot_url ? (
+                          <img
+                            src={post.screenshot_url}
+                            alt={post.caption || `Instagram post ${index + 1}`}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="instagram-no-screenshot">
+                            No screenshot file captured (metadata/caption fallback)
+                          </div>
+                        )}
+                        <span className="instagram-post-badge">Post #{index + 1}</span>
+                      </div>
+                      <div className="instagram-post-meta">
+                        <div className="instagram-post-caption">
+                          {post.caption || 'Instagram reference post'}
                         </div>
+                      </div>
+                    </button>
+                    <div className="instagram-post-links">
+                      {post.post_url && (
+                        <a href={post.post_url} target="_blank" rel="noreferrer">
+                          Source Post ↗
+                        </a>
                       )}
-                      <span className="instagram-post-badge">Post #{index + 1}</span>
-                    </div>
-                    <div className="instagram-post-meta">
-                      <div className="instagram-post-caption">
-                        {post.caption || 'Instagram reference post'}
-                      </div>
-                      <div className="instagram-post-links">
-                        {post.post_url && (
-                          <a href={post.post_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                            Source Post ↗
-                          </a>
-                        )}
-                        {post.captured_at && (
-                          <span className="capture-time" title="Local screenshot capture timestamp">
-                            Captured: {new Date(post.captured_at).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
+                      {post.captured_at && (
+                        <span className="capture-time" title="Local screenshot capture timestamp">
+                          Captured: {new Date(post.captured_at).toLocaleString()}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -653,7 +686,7 @@ export function HomeVoiceAssistant({
               <div className="fallback-actions-row">
                 <label className="upload-screenshot-btn">
                   Upload Post Screenshot
-                  <input type="file" accept="image/*" onChange={handleFileUpload} hidden />
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileUpload} hidden />
                 </label>
                 <button
                   type="button"

@@ -100,12 +100,13 @@ def _authorized_instagram_profile_dir(user_id: str) -> Path | None:
     return None
 
 
-def _save_screenshot_file(user_id: str, ref_id: str, screenshot_b64: str) -> Path:
+def _save_screenshot_file(user_id: str, ref_id: str, screenshot_b64: str, mime_type: str = "image/jpeg") -> Path:
     raw = base64.b64decode(screenshot_b64, validate=True)
+    extension = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(mime_type, ".jpg")
     user_hash = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
     user_dir = _SCREENSHOT_STORAGE_DIR / user_hash
     user_dir.mkdir(parents=True, exist_ok=True)
-    file_path = user_dir / f"{ref_id}.jpg"
+    file_path = user_dir / f"{ref_id}{extension}"
     file_path.write_bytes(raw)
     return file_path
 
@@ -328,19 +329,29 @@ def save_uploaded_instagram_reference(
     caption: str = "",
 ) -> dict[str, Any]:
     """Save a user-uploaded or pasted-link reference screenshot locally with source URL and capture time."""
-    if not image_base64:
+    encoded = str(image_base64 or "").strip()
+    data_url = re.fullmatch(r"data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)", encoded, flags=re.IGNORECASE)
+    if data_url:
+        mime_type, encoded = data_url.group(1).lower(), data_url.group(2)
+    mime_type = str(mime_type or "").lower()
+    if mime_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise ValueError("Reference screenshot must be a JPEG, PNG, or WebP image")
+    if not encoded:
         raise ValueError("Reference screenshot data is required")
     try:
-        raw = base64.b64decode(image_base64, validate=True)
+        raw = base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error) as error:
         raise ValueError("Invalid screenshot image data") from error
     if not raw or len(raw) > 4 * 1024 * 1024:
         raise ValueError("Reference screenshot must be 4 MB or smaller")
 
     captured_at = now_iso()
-    clean_url = source_url.strip() or f"https://www.instagram.com/{handle.lstrip('@') or friend_name.lower() or 'reference'}/uploaded-{hashlib.sha256(raw).hexdigest()[:8]}"
+    if source_url.strip():
+        _, clean_url = _public_reference_url(source_url.strip())
+    else:
+        clean_url = f"https://www.instagram.com/{handle.lstrip('@') or friend_name.lower() or 'reference'}/uploaded-{hashlib.sha256(raw).hexdigest()[:8]}"
     ref_id = "igref-" + hashlib.sha256(f"{user_id}:{clean_url}".encode("utf-8")).hexdigest()[:20]
-    file_path = _save_screenshot_file(user_id, ref_id, image_base64)
+    file_path = _save_screenshot_file(user_id, ref_id, encoded, mime_type)
     record = db.save_instagram_reference({
         "id": ref_id,
         "user_id": user_id,
@@ -356,7 +367,7 @@ def save_uploaded_instagram_reference(
     })
     return {
         **record,
-        "screenshot_preview": f"data:{mime_type};base64,{image_base64}",
+        "screenshot_preview": f"data:{mime_type};base64,{encoded}",
         "screenshot_url": f"/api/social/screenshots/{ref_id}",
     }
 
@@ -438,7 +449,7 @@ def analyze_clothing_reference(
             raw_bytes = path.read_bytes()
             img_payload = {
                 "name": f"Instagram reference ({record.get('handle') or record.get('friend_name') or record['id']})",
-                "mime_type": "image/jpeg",
+                "mime_type": {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg"),
                 "data_base64": base64.b64encode(raw_bytes).decode("ascii"),
             }
         caption = caption or str(record.get("caption") or "")

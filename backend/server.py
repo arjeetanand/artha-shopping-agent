@@ -18,7 +18,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from backend.auth import AuthError, app_redirect_url, begin_google_auth, begin_gmail_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, complete_gmail_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from backend.clients import AnakinClient, BriefModel, search_status
-    from backend.db import db
+    from backend.db import db, now_iso
     from backend.settings import is_production, setting
     from backend.usage import get_usage_summary, runtime_name
     from backend.voice import VoiceError, VoiceService
@@ -33,11 +33,11 @@ if __package__ in {None, ""}:
     from backend.gmail_sync import GmailSyncError, cancel_gmail_sync, disconnect_gmail, gmail_status, save_gmail_connection, start_gmail_sync
     from backend.retailer_extension_sync import cancel as cancel_retailer_extension, disconnect as disconnect_retailer_extension, submit_batch as submit_retailer_extension_batch
     from backend.conversation import confirm_instagram_post_and_search, get_or_start_session, process_conversation_turn
-    from backend.social import capture_instagram_posts, resolve_instagram_reference, save_uploaded_instagram_reference, screenshot_file_for_reference
+    from backend.social import resolve_instagram_reference, save_uploaded_instagram_reference, screenshot_file_for_reference
 else:
     from .auth import AuthError, app_redirect_url, begin_google_auth, begin_gmail_auth, clear_oauth_state_cookie, clear_session_cookie, complete_google_auth, complete_gmail_auth, current_user, google_configured, logout, oauth_state_cookie, session_cookie
     from .clients import AnakinClient, BriefModel, search_status
-    from .db import db
+    from .db import db, now_iso
     from .settings import is_production, setting
     from .usage import get_usage_summary, runtime_name
     from .voice import VoiceError, VoiceService
@@ -52,7 +52,7 @@ else:
     from .gmail_sync import GmailSyncError, cancel_gmail_sync, disconnect_gmail, gmail_status, save_gmail_connection, start_gmail_sync
     from .retailer_extension_sync import cancel as cancel_retailer_extension, disconnect as disconnect_retailer_extension, submit_batch as submit_retailer_extension_batch
     from .conversation import confirm_instagram_post_and_search, get_or_start_session, process_conversation_turn
-    from .social import capture_instagram_posts, resolve_instagram_reference, save_uploaded_instagram_reference, screenshot_file_for_reference
+    from .social import resolve_instagram_reference, save_uploaded_instagram_reference, screenshot_file_for_reference
 
 
 HOST = os.environ.get("SHOPPINGHELP_HOST", "127.0.0.1")
@@ -561,19 +561,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, VoiceService().status())
                 return
             if path == "/api/assistant/session":
-                user_id, user_name = self._assistant_user()
+                user_id, _ = self._assistant_user()
                 session_id = (query.get("session_id") or [""])[0].strip() or None
                 reset = (query.get("reset") or [""])[0].strip().lower() in {"1", "true", "yes"}
                 if reset:
                     session_id = None
-                self._send(200, get_or_start_session(user_id, session_id=session_id, user_name=user_name))
+                self._send(200, get_or_start_session(user_id, session_id=session_id, reset=reset))
                 return
             if path.startswith("/api/social/screenshots/"):
                 ref_id = path.removeprefix("/api/social/screenshots/").strip("/")
                 if not ref_id or "/" in ref_id:
                     raise ApiError("Screenshot not found", 404)
                 user_id, _ = self._assistant_user()
-                file_path = screenshot_file_for_reference(ref_id, user_id) or screenshot_file_for_reference(ref_id)
+                file_path = screenshot_file_for_reference(ref_id, user_id)
                 if not file_path:
                     raise ApiError("Screenshot not found", 404)
                 ext = file_path.suffix.lower()
@@ -647,20 +647,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, run_refinement(payload))
                 return
             if path == "/api/assistant/converse":
-                user_id, user_name = self._assistant_user()
-                message = str(payload.get("message") or "").strip()
+                user_id, _ = self._assistant_user()
+                message = str(payload.get("message") or payload.get("text") or "").strip()
                 if not message:
                     raise ApiError("Message is required", 400)
                 session_id = str(payload.get("session_id") or "").strip() or None
-                overrides = payload.get("search_overrides") if isinstance(payload.get("search_overrides"), dict) else None
                 self._send(
                     200,
                     process_conversation_turn(
                         user_id=user_id,
-                        message=message,
+                        text=message,
                         session_id=session_id,
-                        user_name=user_name,
-                        search_payload_overrides=overrides,
+                        reference_image=payload.get("reference_image") if isinstance(payload.get("reference_image"), dict) else None,
+                        reference_url=str(payload.get("reference_url") or ""),
                     ),
                 )
                 return
@@ -668,7 +667,7 @@ class Handler(BaseHTTPRequestHandler):
                 user_id, _ = self._assistant_user()
                 session_id = str(payload.get("session_id") or "").strip()
                 reference_id = str(payload.get("reference_id") or "").strip()
-                clothing_note = str(payload.get("clothing_note") or "").strip()
+                clothing_note = str(payload.get("item_hint") or payload.get("clothing_note") or "").strip()
                 if not session_id or not reference_id:
                     raise ApiError("session_id and reference_id are required", 400)
                 self._send(
@@ -677,8 +676,7 @@ class Handler(BaseHTTPRequestHandler):
                         user_id=user_id,
                         session_id=session_id,
                         reference_id=reference_id,
-                        clothing_note=clothing_note,
-                        search_payload_overrides=payload.get("search_overrides") if isinstance(payload.get("search_overrides"), dict) else None,
+                        item_hint=clothing_note or "T-shirt",
                     ),
                 )
                 return
@@ -687,24 +685,58 @@ class Handler(BaseHTTPRequestHandler):
                 ref_input = str(payload.get("reference") or payload.get("handle") or payload.get("url") or "").strip()
                 if not ref_input:
                     raise ApiError("Instagram handle, URL, or friend name is required", 400)
-                resolution = resolve_instagram_reference(ref_input, user_id)
-                if not resolution.get("resolved"):
-                    self._send(200, resolution)
-                    return
-                captured = capture_instagram_posts(
-                    user_id=user_id,
-                    handle=resolution.get("handle") or "",
-                    profile_url=resolution.get("profile_url") or "",
-                    limit=int(payload.get("limit") or 5),
+                if len(ref_input) > 2048:
+                    raise ApiError("Instagram reference is too long", 400)
+                try:
+                    max_posts = min(max(int(payload.get("limit") or 5), 1), 5)
+                except (TypeError, ValueError) as error:
+                    raise ApiError("limit must be a number from 1 to 5", 400) from error
+                session = get_or_start_session(
+                    user_id,
+                    session_id=str(payload.get("session_id") or "").strip() or None,
                 )
-                self._send(200, {**resolution, **captured})
+                resolution = resolve_instagram_reference(
+                    user_id,
+                    ref_input,
+                    friend_name=str(payload.get("friend_name") or session.get("state", {}).get("friend_name") or "")[:60],
+                    max_posts=max_posts,
+                )
+                state = dict(session.get("state") or {})
+                state["friend_name"] = resolution.get("friend_name") or state.get("friend_name")
+                state["instagram_handle"] = resolution.get("handle") or state.get("instagram_handle")
+                posts = resolution.get("posts") if isinstance(resolution.get("posts"), list) else []
+                if resolution.get("success") and posts:
+                    state["instagram_posts"] = posts
+                    state["awaiting_instagram_handle"] = False
+                    state["awaiting_post_confirmation"] = True
+                else:
+                    state["awaiting_instagram_handle"] = True
+                    state["awaiting_post_confirmation"] = False
+                messages = list(session.get("messages") or [])
+                if resolution.get("message"):
+                    messages.append({
+                        "id": f"instagram-resolution-{session['id']}-{len(messages)}",
+                        "role": "assistant",
+                        "text": str(resolution["message"]),
+                        "created_at": now_iso(),
+                    })
+                saved = db.save_conversation_session(session["id"], user_id, state, messages)
+                self._send(200, {
+                    **resolution,
+                    "session_id": session["id"],
+                    "state": saved["state"],
+                    "messages": saved["messages"],
+                    "history": session.get("history") or {},
+                })
                 return
             if path == "/api/social/instagram/upload":
                 user_id, _ = self._assistant_user()
                 saved_ref = save_uploaded_instagram_reference(
                     user_id=user_id,
-                    image_data=payload.get("image_data"),
-                    post_url=str(payload.get("post_url") or ""),
+                    image_base64=str(payload.get("image_base64") or payload.get("image_data") or ""),
+                    mime_type=str(payload.get("mime_type") or "image/jpeg"),
+                    source_url=str(payload.get("source_url") or payload.get("post_url") or ""),
+                    friend_name=str(payload.get("friend_name") or "Paras"),
                     caption=str(payload.get("caption") or ""),
                     handle=str(payload.get("handle") or ""),
                 )
@@ -718,12 +750,14 @@ class Handler(BaseHTTPRequestHandler):
                         posts = [p for p in posts if p.get("id") != saved_ref.get("id")]
                         posts.insert(0, saved_ref)
                         state["instagram_posts"] = posts[:5]
-                        state["stage"] = "awaiting_instagram_post_selection"
+                        state["awaiting_instagram_handle"] = False
+                        state["awaiting_post_confirmation"] = True
                         messages = list(session.get("messages") or [])
                         messages.append({
+                            "id": f"instagram-upload-{saved_ref['id']}",
                             "role": "assistant",
                             "text": "I saved your uploaded Instagram reference locally. Select it below and confirm the clothing item so I can analyze it and search retailers.",
-                            "timestamp": saved_ref.get("captured_at"),
+                            "created_at": saved_ref.get("captured_at"),
                         })
                         session_data = db.save_conversation_session(session_id, user_id, state, messages)
                 self._send(201, {"reference": saved_ref, "session": session_data})

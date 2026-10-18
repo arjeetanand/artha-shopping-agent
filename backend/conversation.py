@@ -96,6 +96,15 @@ def _detect_fit(text: str) -> str | None:
     return None
 
 
+def _friend_style_reference(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:my\s+)?friend\s+([A-Za-z][A-Za-z-]{1,30})(?:['’]s)?[^.!?]{0,60}\b(?:dressing\s+sense|style|fashion|outfit|look)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).title() if match else None
+
+
 def _is_temporary_choice_phrasing(text: str) -> bool:
     lowered = text.lower()
     return bool(
@@ -165,11 +174,12 @@ def get_or_start_session(
         if existing:
             return {
                 **existing,
+                "session_id": existing.get("id"),
                 "greeting": greeting,
                 "history": history,
             }
 
-    new_id = session_id or f"conv-{uuid.uuid4().hex[:16]}"
+    new_id = f"conv-{uuid.uuid4().hex[:16]}"
     state = _default_state(user_id, history)
     messages = [
         {
@@ -182,6 +192,7 @@ def get_or_start_session(
     saved = db.save_conversation_session(new_id, user_id, state, messages)
     return {
         **saved,
+        "session_id": saved.get("id"),
         "greeting": greeting,
         "history": history,
     }
@@ -333,6 +344,10 @@ def process_conversation_turn(
             "created_at": now_iso(),
         })
 
+    friend_name = _friend_style_reference(clean_text)
+    if friend_name:
+        state["friend_name"] = friend_name
+
     # 1. Extract structured fields from the user's message
     dest, occ = _detect_destination_and_occasion(clean_text)
     if dest:
@@ -466,6 +481,7 @@ def process_conversation_turn(
         re.search(r"\b(instagram|insta|reel|post)\b", clean_text, flags=re.IGNORECASE)
         or re.search(r"https?://(?:www\.)?instagram\.com/", clean_text, flags=re.IGNORECASE)
         or (state.get("awaiting_instagram_handle") and (re.search(r"@[A-Za-z0-9._]+", clean_text) or re.fullmatch(r"[A-Za-z0-9._]{3,30}", clean_text)))
+        or friend_name
     )
     if insta_triggered or reference_url:
         target_input = reference_url or clean_text
@@ -523,7 +539,7 @@ def process_conversation_turn(
             "messages": saved["messages"],
             "history": history,
             "instagram_status": resolved.get("status"),
-            "instagram_Resolution": resolved,
+            "instagram_resolution": resolved,
         }
 
     # 4. Ask ONE useful question at a time
