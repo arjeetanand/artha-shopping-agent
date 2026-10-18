@@ -359,12 +359,13 @@ export function HomeVoiceAssistant({
     <section id="home-voice-assistant" className="home-voice-assistant home-voice-assistant--primary" aria-label="Voice Shopping Assistant">
       <div className="home-voice-header">
         <div>
-          <div className="eyebrow">Voice Shopping · Instagram Style Match</div>
+          <div className="eyebrow">Voice First · Personal Style Search</div>
           <h1 className="home-voice-title">
-            What are you looking for today, {firstName}?
+            Talk us through<br />
+            <span>your next look.</span>
           </h1>
           <p className="home-voice-subtitle">
-            Start by speaking. Artha will ask follow-up questions, then build a retailer shortlist. You can also ask to match a post from Paras; if Instagram access is unavailable, paste a link or upload a screenshot.
+            Start with one sentence. Artha asks the right follow-up questions, then checks real retailer options. Mention a friend’s style or share an Instagram post to guide the search.
           </p>
         </div>
         <div className="home-voice-controls-bar">
@@ -425,45 +426,6 @@ export function HomeVoiceAssistant({
             Fit: <strong>{slots.fit}</strong>
           </span>
         )}
-      </div>
-
-      {/* Conversation Timeline */}
-      <div className="home-voice-thread" data-testid="conversation-thread" aria-live="polite">
-        {messages.map((msg, idx) => (
-          <div
-            key={`${msg.role}-${idx}`}
-            className={`voice-turn-bubble ${msg.role === 'user' ? 'user-turn' : 'assistant-turn'}`}
-          >
-            <div className="turn-role-label">
-              {msg.role === 'user' ? firstName : 'Artha Assistant'}
-            </div>
-            <div className="turn-text">{msg.text}</div>
-          </div>
-        ))}
-        {messages.length === 1 && voiceState === 'ready' && !transcript && !instagramPosts.length && !confirmedRef ? (
-          <aside className="voice-style-story" aria-label="Example of a voice brief becoming a shopping shortlist">
-            <div className="voice-style-story__heading">
-              <span>OUTFIT EXAMPLE · LINEN LAYERS</span>
-              <span>NOT A LIVE RESULT</span>
-            </div>
-            <div className="voice-style-story__gallery">
-              <figure className="voice-style-card voice-style-card--shirt">
-                <div className="voice-style-card__image" role="img" aria-label="Linen shirt" />
-                <figcaption>LINEN SHIRT</figcaption>
-              </figure>
-              <figure className="voice-style-card voice-style-card--trousers">
-                <div className="voice-style-card__image" role="img" aria-label="Neutral trousers" />
-                <figcaption>RELAXED FIT</figcaption>
-              </figure>
-              <figure className="voice-style-card voice-style-card--loafers">
-                <div className="voice-style-card__image" role="img" aria-label="Leather loafers" />
-                <figcaption>EARTH TONES</figcaption>
-              </figure>
-            </div>
-            <p className="voice-style-story__caption">Say what you like. Artha finds real options to compare.</p>
-          </aside>
-        ) : null}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Microphone + Editable Transcript + Text Fallback */}
@@ -548,6 +510,51 @@ export function HomeVoiceAssistant({
             </div>
           </details>
         </div>
+      </div>
+
+      {/* Keep the spoken entry point before the transcript in visual and reading order. */}
+      <div className="home-voice-thread" data-testid="conversation-thread" aria-live="polite">
+        {messages.map((msg, idx) => (
+          <div
+            key={`${msg.role}-${idx}`}
+            className={`voice-turn-bubble ${msg.role === 'user' ? 'user-turn' : 'assistant-turn'}`}
+          >
+            <div className="turn-role-label">
+              {msg.role === 'user' ? firstName : 'Artha Assistant'}
+            </div>
+            <div className="turn-text">{msg.text}</div>
+          </div>
+        ))}
+        {messages.length === 1 && voiceState === 'ready' && !transcript && !instagramPosts.length && !confirmedRef ? (
+          <aside className="voice-style-story" aria-label="Example of a voice brief becoming a shopping shortlist">
+            <div className="voice-style-story__heading">
+              <span>OUTFIT EXAMPLE · LINEN LAYERS</span>
+              <span>NOT A LIVE RESULT</span>
+            </div>
+            <div className="voice-style-story__gallery" role="group" aria-label="A sample outfit shown as separate style cues">
+              <div className="voice-style-story__track">
+                {[0, 1].map((set) => (
+                  <div className="voice-style-story__set" key={set} aria-hidden={set === 1}>
+                    <figure className="voice-style-card voice-style-card--shirt">
+                      <div className="voice-style-card__image" aria-hidden="true" />
+                      <figcaption>LINEN SHIRT</figcaption>
+                    </figure>
+                    <figure className="voice-style-card voice-style-card--trousers">
+                      <div className="voice-style-card__image" aria-hidden="true" />
+                      <figcaption>RELAXED FIT</figcaption>
+                    </figure>
+                    <figure className="voice-style-card voice-style-card--loafers">
+                      <div className="voice-style-card__image" aria-hidden="true" />
+                      <figcaption>EARTH TONES</figcaption>
+                    </figure>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <p className="voice-style-story__caption">Say what you like. Artha finds real options to compare.</p>
+          </aside>
+        ) : null}
+        <div ref={messagesEndRef} />
       </div>
 
       {voiceNotice && (
