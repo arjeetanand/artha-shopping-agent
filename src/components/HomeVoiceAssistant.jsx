@@ -396,6 +396,7 @@ export function HomeVoiceAssistant({
   };
   const instagramPosts = sessionState?.instagram_posts || [];
   const confirmedRef = sessionState?.selected_reference || null;
+  const exampleBrief = "I like my friend Paras’s dressing sense. Find me a relaxed outfit for a Goa weekend.";
   return (
     <section id="home-voice-assistant" className="home-voice-assistant home-voice-assistant--primary" aria-label="Voice Shopping Assistant">
       <div className="home-voice-header">
@@ -406,7 +407,7 @@ export function HomeVoiceAssistant({
             <span>I’ll find the pieces.</span>
           </h1>
           <p className="home-voice-subtitle">
-            Speak naturally. Artha asks what matters, then compares real retailer options. Mention a friend’s style—like Paras’s—or share an Instagram post.
+            Tell Artha what you love. Mention Paras’s style or share an Instagram post; it checks real retailer options.
           </p>
         </div>
         <div className="home-voice-controls-bar">
@@ -498,9 +499,6 @@ export function HomeVoiceAssistant({
               ? 'Artha will reply here and speak the answer aloud.'
               : 'Speak naturally. Your message is sent when you finish.'}
           </span>
-          {voiceState === 'ready' && !transcript ? (
-            <span className="voice-example">Try: “I like my friend Paras’s dressing sense.”</span>
-          ) : null}
         </div>
 
         <div className="transcript-editor-column">
@@ -567,6 +565,7 @@ export function HomeVoiceAssistant({
 
       {/* Keep the spoken entry point before the transcript in visual and reading order. */}
       <div className="home-voice-thread" data-testid="conversation-thread" aria-live="polite">
+        <div className="voice-thread-heading">Conversation <span>YOUR BRIEF TAKES SHAPE HERE</span></div>
         {messages.map((msg, idx) => (
           <div
             key={`${msg.role}-${idx}`}
@@ -582,10 +581,21 @@ export function HomeVoiceAssistant({
           <aside className="voice-style-story" aria-label="Example of a voice brief becoming a shopping shortlist">
             <div className="voice-style-story__heading">
               <span>TRY A VOICE BRIEF</span>
-              <span>EXAMPLE</span>
+              <span>PARAS · GOA</span>
             </div>
-            <p className="voice-style-story__phrase">“I like my friend Paras’s dressing sense. Find me a relaxed outfit for a Goa weekend.”</p>
+            <p className="voice-style-story__phrase">“{exampleBrief}”</p>
             <p className="voice-style-story__caption">Add a budget, size, or public Instagram link as you talk.</p>
+            <button
+              type="button"
+              className="voice-style-story__action"
+              onClick={() => {
+                setTranscript(exampleBrief);
+                voiceTranscriptRef.current = exampleBrief;
+                requestAnimationFrame(() => document.getElementById('editable-voice-transcript')?.focus({ preventScroll: true }));
+              }}
+            >
+              Try this brief <Icon name="arrow" size={16} />
+            </button>
           </aside>
         ) : null}
         <div ref={messagesEndRef} />
