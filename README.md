@@ -1,5 +1,9 @@
 # Artha — source-linked purchase research
 
+The local checkout is `~/projects/artha-AIshopping`. Start it with
+`cd ~/projects/artha-AIshopping && npm start`. Keep private configuration in
+`.env`; databases, logs, and migration archives stay outside Git.
+
 Artha turns a natural-language shopping brief, reference image, or product/post URL into a source-linked purchase plan. It extracts the constraints, searches live retailer sources through Tavily or Anakin, normalizes the evidence, applies budget and delivery constraints, and lets a signed-in user save private retailer handoffs.
 
 This is a research and retailer handoff flow with a clearly labeled local order sandbox. Artha does not submit retailer orders or collect live payments. Even if Razorpay credentials are present, new in-app charges stay disabled until retailer fulfillment is connected; shoppers complete real purchases at the retailer.

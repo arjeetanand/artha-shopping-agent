@@ -27,3 +27,15 @@ Thumbs.db
 # Never commit local authenticated browser sessions or private invoice copies.
 .private/
 playwright/.auth/
+
+# Local migration archives, logs, and private database sidecars.
+.migration-backups/
+.migration-preserved/
+.venv-local/
+*.log
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-*
+.env.*
+!.env.example
